@@ -4,11 +4,13 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages } from '@/lib/types';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
+import { getUsername, setUsername, clearUsername } from '@/lib/storage';
 import SearchBar from '@/components/SearchBar';
 import TabNav from '@/components/TabNav';
 import FilterBar from '@/components/FilterBar';
 import PlayerCard from '@/components/PlayerCard';
 import EmptyState from '@/components/EmptyState';
+import LoginScreen from '@/components/LoginScreen';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -33,7 +35,9 @@ function statusTier(status: string): number {
 const GRADE_ORDER = ['milestone', 'standout', 'good', 'routine', 'off_day', 'scheduled', 'no_game'];
 
 export default function Home() {
-  const { players, loaded, follow, unfollow } = useFollowedPlayers();
+  const { players, loaded, follow, unfollow, reload } = useFollowedPlayers();
+  const [username, setUsernameState] = useState<string | null>(null);
+  const [userChecked, setUserChecked] = useState(false);
   const [activeTab, setActiveTab] = useState<ViewTab>('today');
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [positionFilter, setPositionFilter] = useState<'all' | 'hitter' | 'pitcher'>('all');
@@ -49,6 +53,24 @@ export default function Home() {
   const loadedTabs = useRef<Set<string>>(new Set());
   const playersRef = useRef(players);
   playersRef.current = players;
+
+  // Check if user is logged in
+  useEffect(() => {
+    const stored = getUsername();
+    setUsernameState(stored);
+    setUserChecked(true);
+  }, []);
+
+  const handleLogin = useCallback((name: string) => {
+    setUsername(name);
+    setUsernameState(name);
+    reload();
+  }, [reload]);
+
+  const handleLogout = useCallback(() => {
+    clearUsername();
+    setUsernameState(null);
+  }, []);
 
   // Fetch league averages once
   useEffect(() => {
@@ -169,12 +191,35 @@ export default function Home() {
     return aS.isPitcher ? 1 : -1;
   });
 
+  if (!userChecked) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!username) {
+    return <LoginScreen onLogin={handleLogin} />;
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Header */}
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-zinc-100 mb-1">Hot Sheet</h1>
-        <p className="text-sm text-zinc-500">Track live MLB & MiLB player stats</p>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-2xl font-bold text-zinc-100 mb-1">Hot Sheet</h1>
+          <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-zinc-500">{username}</span>
+          <button
+            onClick={handleLogout}
+            className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+          >
+            Log out
+          </button>
+        </div>
       </div>
 
       {/* Search */}

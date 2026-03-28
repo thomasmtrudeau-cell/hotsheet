@@ -1,6 +1,24 @@
 import { FollowedPlayer } from './types';
 
 const STORAGE_KEY = 'hotsheet_followed_players';
+const USER_KEY = 'hotsheet_username';
+
+// --- Username ---
+
+export function getUsername(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem(USER_KEY);
+}
+
+export function setUsername(name: string): void {
+  localStorage.setItem(USER_KEY, name.toLowerCase());
+}
+
+export function clearUsername(): void {
+  localStorage.removeItem(USER_KEY);
+}
+
+// --- Local storage (offline fallback) ---
 
 export function getFollowedPlayers(): FollowedPlayer[] {
   if (typeof window === 'undefined') return [];
@@ -12,21 +30,38 @@ export function getFollowedPlayers(): FollowedPlayer[] {
   }
 }
 
-export function followPlayer(player: FollowedPlayer): FollowedPlayer[] {
-  const players = getFollowedPlayers();
-  if (players.some((p) => p.id === player.id)) return players;
-  const updated = [...players, { ...player, followedAt: new Date().toISOString() }];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  return updated;
+export function setFollowedPlayersLocal(players: FollowedPlayer[]): void {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(players));
 }
 
-export function unfollowPlayer(playerId: number): FollowedPlayer[] {
-  const players = getFollowedPlayers();
-  const updated = players.filter((p) => p.id !== playerId);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-  return updated;
+// --- Cloud sync ---
+
+export async function loadFromCloud(username: string): Promise<FollowedPlayer[]> {
+  try {
+    const res = await fetch(`/api/users?name=${encodeURIComponent(username)}`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    const players = data.players || [];
+    // Update local cache
+    setFollowedPlayersLocal(players);
+    return players;
+  } catch {
+    // Offline — return local
+    return getFollowedPlayers();
+  }
 }
 
-export function isFollowing(playerId: number): boolean {
-  return getFollowedPlayers().some((p) => p.id === playerId);
+export async function saveToCloud(username: string, players: FollowedPlayer[]): Promise<void> {
+  // Always update local first
+  setFollowedPlayersLocal(players);
+
+  try {
+    await fetch('/api/users', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, players }),
+    });
+  } catch {
+    // Offline — local is already saved
+  }
 }
