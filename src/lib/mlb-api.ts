@@ -136,11 +136,14 @@ export async function searchPlayers(query: string): Promise<SearchResult[]> {
   return searchData.people
     .filter((p) => {
       if (!p.currentTeam) return false;
-      const fullName = ((p.fullFMLName as string) || (p.fullName as string) || '').toLowerCase();
+      const fullFML = ((p.fullFMLName as string) || '').toLowerCase();
+      const fullName = ((p.fullName as string) || '').toLowerCase(); // common name e.g. "Joey Ortiz"
       const lastName = ((p.lastName as string) || '').toLowerCase();
       const firstName = ((p.firstName as string) || '').toLowerCase();
-      const combinedName = `${firstName} ${lastName} ${fullName}`;
-      return searchTerms.every((term) => combinedName.includes(term));
+      const useName = ((p.useName as string) || '').toLowerCase(); // e.g. "joey"
+      const nickName = ((p.nickName as string) || '').toLowerCase();
+      const searchable = `${firstName} ${useName} ${nickName} ${lastName} ${fullName} ${fullFML}`;
+      return searchTerms.every((term) => searchable.includes(term));
     })
     .map((p) => {
       const team = p.currentTeam as Record<string, unknown>;
