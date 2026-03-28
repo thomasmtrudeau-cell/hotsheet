@@ -12,9 +12,10 @@ interface FilterBarProps {
 }
 
 const levelOptions: { value: LevelFilter; label: string }[] = [
-  { value: 'all', label: 'All Levels' },
+  { value: 'all', label: 'All' },
   { value: 'MLB', label: 'MLB' },
   { value: 'MiLB', label: 'MiLB' },
+  { value: 'NPB', label: 'NPB' },
 ];
 
 const positionOptions: { value: 'all' | 'hitter' | 'pitcher'; label: string }[] = [

@@ -1,10 +1,12 @@
-// Sport IDs from MLB Stats API
+// Sport IDs — MLB Stats API uses 1-14, we use 100+ for international
 export const SPORT_IDS = {
   MLB: 1,
   AAA: 11,
   AA: 12,
   HIGH_A: 13,
   A: 14,
+  NPB: 100,
+  KBO: 101,
 } as const;
 
 export type SportId = (typeof SPORT_IDS)[keyof typeof SPORT_IDS];
@@ -15,7 +17,17 @@ export const LEVEL_LABELS: Record<number, string> = {
   12: 'AA',
   13: 'High-A',
   14: 'A',
+  100: 'NPB',
+  101: 'KBO',
 };
+
+export function isMLBSystem(sportId: number): boolean {
+  return sportId >= 1 && sportId <= 14;
+}
+
+export function isMiLB(sportId: number): boolean {
+  return sportId >= 11 && sportId <= 14;
+}
 
 export interface FollowedPlayer {
   id: number;
@@ -153,4 +165,4 @@ export interface LeagueAverages {
 
 export type ViewTab = 'today' | 'yesterday' | 'season';
 
-export type LevelFilter = 'all' | 'MLB' | 'MiLB';
+export type LevelFilter = 'all' | 'MLB' | 'MiLB' | 'NPB' | 'KBO';

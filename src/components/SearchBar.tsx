@@ -102,7 +102,10 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
                     {r.primaryPosition} &middot; {r.currentTeam.name}
                     {r.parentOrg && <span className="text-zinc-500"> ({r.parentOrg})</span>}
                     <span className={`ml-2 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                      r.sportId === 1 ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'
+                      r.sportId === 1 ? 'bg-blue-500/20 text-blue-400'
+                        : r.sportId === 100 ? 'bg-red-500/20 text-red-400'
+                        : r.sportId === 101 ? 'bg-purple-500/20 text-purple-400'
+                        : 'bg-amber-500/20 text-amber-400'
                     }`}>
                       {LEVEL_LABELS[r.sportId] || 'Unknown'}
                     </span>

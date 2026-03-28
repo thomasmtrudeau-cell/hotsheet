@@ -20,11 +20,13 @@ interface SeasonCardProps {
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
 
 function LevelBadge({ sportId }: { sportId: number }) {
-  const isMlb = sportId === 1;
+  let colorClass = 'bg-amber-500/20 text-amber-400'; // MiLB default
+  if (sportId === 1) colorClass = 'bg-blue-500/20 text-blue-400'; // MLB
+  else if (sportId === 100) colorClass = 'bg-red-500/20 text-red-400'; // NPB
+  else if (sportId === 101) colorClass = 'bg-purple-500/20 text-purple-400'; // KBO
+
   return (
-    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${
-      isMlb ? 'bg-blue-500/20 text-blue-400' : 'bg-amber-500/20 text-amber-400'
-    }`}>
+    <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-bold ${colorClass}`}>
       {LEVEL_LABELS[sportId] || '?'}
     </span>
   );

@@ -140,7 +140,9 @@ export default function Home() {
   // Apply filters
   const filteredStats = currentStats.filter((s) => {
     if (levelFilter === 'MLB' && s.sportId !== 1) return false;
-    if (levelFilter === 'MiLB' && s.sportId === 1) return false;
+    if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
+    if (levelFilter === 'NPB' && s.sportId !== 100) return false;
+    if (levelFilter === 'KBO' && s.sportId !== 101) return false;
     if (positionFilter === 'pitcher' && s.position !== 'P') return false;
     if (positionFilter === 'hitter' && s.position === 'P') return false;
     if (nameFilter && !s.playerName.toLowerCase().includes(nameFilter.toLowerCase())) return false;
