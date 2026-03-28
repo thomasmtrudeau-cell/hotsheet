@@ -51,6 +51,21 @@ async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
   return map;
 }
 
+// --- Hydrate followed players with correct team data ---
+
+export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise<FollowedPlayer[]> {
+  const teamMap = await getTeamLookup();
+  return players.map((p) => {
+    const teamInfo = teamMap.get(p.currentTeam.id);
+    if (!teamInfo) return p;
+    return {
+      ...p,
+      sportId: teamInfo.sportId,
+      parentOrg: teamInfo.parentOrgName,
+    };
+  });
+}
+
 // --- Name formatting (middle initial) ---
 
 function formatDisplayName(p: Record<string, unknown>): string {
