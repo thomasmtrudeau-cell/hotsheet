@@ -131,18 +131,19 @@ export async function searchPlayers(query: string): Promise<SearchResult[]> {
 
   // The MLB API does loose/fuzzy matching, so we filter locally
   // to ensure ALL search terms appear somewhere in the player's name
-  const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
+  const normalize = (s: string) => s.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+  const searchTerms = normalize(query).split(/\s+/).filter(Boolean);
 
   return searchData.people
     .filter((p) => {
       if (!p.currentTeam) return false;
-      const fullFML = ((p.fullFMLName as string) || '').toLowerCase();
-      const fullName = ((p.fullName as string) || '').toLowerCase(); // common name e.g. "Joey Ortiz"
-      const lastName = ((p.lastName as string) || '').toLowerCase();
-      const firstName = ((p.firstName as string) || '').toLowerCase();
-      const useName = ((p.useName as string) || '').toLowerCase(); // e.g. "joey"
-      const nickName = ((p.nickName as string) || '').toLowerCase();
-      const searchable = `${firstName} ${useName} ${nickName} ${lastName} ${fullName} ${fullFML}`;
+      const fullFML = (p.fullFMLName as string) || '';
+      const fullName = (p.fullName as string) || '';
+      const lastName = (p.lastName as string) || '';
+      const firstName = (p.firstName as string) || '';
+      const useName = (p.useName as string) || '';
+      const nickName = (p.nickName as string) || '';
+      const searchable = normalize(`${firstName} ${useName} ${nickName} ${lastName} ${fullName} ${fullFML}`);
       return searchTerms.every((term) => searchable.includes(term));
     })
     .map((p) => {
