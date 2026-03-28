@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages } from '@/lib/types';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import SearchBar from '@/components/SearchBar';
@@ -42,12 +42,27 @@ export default function Home() {
   const [dailyStats, setDailyStats] = useState<DailyPlayerStats[]>([]);
   const [yesterdayStats, setYesterdayStats] = useState<DailyPlayerStats[]>([]);
   const [seasonStats, setSeasonStats] = useState<SeasonPlayerStats[]>([]);
+  const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
 
   const loadedTabs = useRef<Set<string>>(new Set());
   const playersRef = useRef(players);
   playersRef.current = players;
+
+  // Fetch league averages once
+  useEffect(() => {
+    fetch('/api/league-averages')
+      .then(res => res.json())
+      .then((data: LeagueAverages[]) => {
+        if (Array.isArray(data)) {
+          const map = new Map<number, LeagueAverages>();
+          for (const avg of data) map.set(avg.sportId, avg);
+          setLeagueAvgs(map);
+        }
+      })
+      .catch(() => {});
+  }, []);
 
   const fetchDailyStats = useCallback(async (date: string, setter: (stats: DailyPlayerStats[]) => void) => {
     if (playersRef.current.length === 0) { setter([]); return; }
@@ -143,7 +158,11 @@ export default function Home() {
     }
     const aS = a as SeasonPlayerStats;
     const bS = b as SeasonPlayerStats;
-    if (!aS.isPitcher && !bS.isPitcher) return (bS.wrcPlus || 0) - (aS.wrcPlus || 0);
+    if (!aS.isPitcher && !bS.isPitcher) {
+      const aPlus = aS.wrcPlus ?? aS.opsPlus ?? 0;
+      const bPlus = bS.wrcPlus ?? bS.opsPlus ?? 0;
+      return bPlus - aPlus;
+    }
     if (aS.isPitcher && bS.isPitcher) return parseFloat(aS.era || '99') - parseFloat(bS.era || '99');
     return aS.isPitcher ? 1 : -1;
   });
@@ -221,6 +240,7 @@ export default function Home() {
               type={activeTab === 'season' ? 'season' : 'daily'}
               stats={stat as DailyPlayerStats & SeasonPlayerStats}
               onUnfollow={unfollow}
+              leagueAvg={leagueAvgs.get(stat.sportId)}
             />
           ))}
         </div>

@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
@@ -462,9 +462,22 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
         const saber = saberStats?.[0]?.splits?.[0]?.stat;
         if (saber && !isPitcher) {
           base.wrcPlus = saber.wRcPlus as number | undefined;
-          // Some API versions use different field names
           if (base.wrcPlus === undefined) {
             base.wrcPlus = saber.wrcPlus as number | undefined;
+          }
+        }
+
+        // Calculate OPS+ as fallback when wRC+ is unavailable
+        if (!isPitcher && base.wrcPlus === undefined && base.obp && base.slg) {
+          const lgAvg = await getLeagueAverages(player.sportId, currentSeason);
+          if (lgAvg) {
+            const playerOBP = parseFloat(base.obp);
+            const playerSLG = parseFloat(base.slg);
+            const lgOBP = parseFloat(lgAvg.lgOBP);
+            const lgSLG = parseFloat(lgAvg.lgSLG);
+            if (lgOBP > 0 && lgSLG > 0) {
+              base.opsPlus = Math.round(100 * (playerOBP / lgOBP + playerSLG / lgSLG - 1));
+            }
           }
         }
 
@@ -476,4 +489,108 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
   );
 
   return results;
+}
+
+// --- League Averages ---
+
+// Approximate average ages per level (stable year-to-year)
+const LEVEL_AVG_AGES: Record<number, number> = {
+  1: 28.5,  // MLB
+  11: 26.5, // AAA
+  12: 24.0, // AA
+  13: 23.0, // High-A
+  14: 22.0, // A
+};
+
+let leagueAvgCache: Map<string, LeagueAverages> | null = null;
+let leagueAvgExpires = 0;
+
+async function getLeagueAverages(sportId: number, season?: number): Promise<LeagueAverages | null> {
+  const currentSeason = season || new Date().getFullYear();
+  const key = `${sportId}-${currentSeason}`;
+
+  // Check cache
+  const now = Date.now();
+  if (leagueAvgCache && leagueAvgExpires > now) {
+    return leagueAvgCache.get(key) || null;
+  }
+
+  // Fetch all levels at once and cache
+  leagueAvgCache = new Map();
+
+  await Promise.all(
+    ALL_SPORT_IDS.map(async (sid) => {
+      try {
+        const [hittingData, pitchingData] = await Promise.all([
+          cachedFetch<Record<string, unknown>>(
+            `${MLB_API}/teams/stats?stats=season&group=hitting&season=${currentSeason}&sportIds=${sid}`,
+            3600_000
+          ).catch(() => null),
+          cachedFetch<Record<string, unknown>>(
+            `${MLB_API}/teams/stats?stats=season&group=pitching&season=${currentSeason}&sportIds=${sid}`,
+            3600_000
+          ).catch(() => null),
+        ]);
+
+        let lgOPS = '.000', lgOBP = '.000', lgSLG = '.000', lgERA = '0.00';
+
+        // Compute weighted averages from team splits
+        const hittingSplits = (hittingData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }>)?.[0]?.splits;
+        if (hittingSplits && hittingSplits.length > 0) {
+          let totalPA = 0, weightedOPS = 0, weightedOBP = 0, weightedSLG = 0;
+          for (const sp of hittingSplits) {
+            const s = sp.stat;
+            const pa = (s.plateAppearances as number) || 0;
+            totalPA += pa;
+            weightedOPS += pa * parseFloat((s.ops as string) || '0');
+            weightedOBP += pa * parseFloat((s.obp as string) || '0');
+            weightedSLG += pa * parseFloat((s.slg as string) || '0');
+          }
+          if (totalPA > 0) {
+            lgOPS = (weightedOPS / totalPA).toFixed(3);
+            lgOBP = (weightedOBP / totalPA).toFixed(3);
+            lgSLG = (weightedSLG / totalPA).toFixed(3);
+          }
+        }
+
+        const pitchingSplits = (pitchingData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }>)?.[0]?.splits;
+        if (pitchingSplits && pitchingSplits.length > 0) {
+          let totalIP = 0, weightedERA = 0;
+          for (const sp of pitchingSplits) {
+            const s = sp.stat;
+            const ipStr = (s.inningsPitched as string) || '0';
+            const ip = parseIP(ipStr);
+            totalIP += ip;
+            weightedERA += ip * parseFloat((s.era as string) || '0');
+          }
+          if (totalIP > 0) {
+            lgERA = (weightedERA / totalIP).toFixed(2);
+          }
+        }
+
+        const cacheKey = `${sid}-${currentSeason}`;
+        leagueAvgCache!.set(cacheKey, {
+          sportId: sid,
+          level: LEVEL_LABELS[sid] || 'Unknown',
+          avgAge: LEVEL_AVG_AGES[sid] || 25,
+          lgOPS,
+          lgOBP,
+          lgSLG,
+          lgERA,
+        });
+      } catch {
+        // Skip this level
+      }
+    })
+  );
+
+  leagueAvgExpires = now + 3600_000; // 1 hour
+  return leagueAvgCache.get(key) || null;
+}
+
+export async function getAllLeagueAverages(): Promise<LeagueAverages[]> {
+  const season = new Date().getFullYear();
+  // Ensure cache is populated
+  await getLeagueAverages(1, season);
+  return Array.from(leagueAvgCache?.values() || []);
 }

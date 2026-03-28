@@ -96,6 +96,7 @@ export interface SeasonPlayerStats {
   slg?: string;
   ops?: string;
   wrcPlus?: number;
+  opsPlus?: number;
   homeRuns?: number;
   stolenBases?: number;
   walks?: number;
@@ -135,6 +136,16 @@ export const GRADE_MAP: Record<Grade, GradeConfig> = {
   scheduled: { label: 'Scheduled', emoji: '🕒', color: '#3b82f6', bgColor: 'rgba(59,130,246,0.15)' },
   no_game: { label: 'No Game', emoji: '—', color: '#4b5563', bgColor: 'rgba(75,85,99,0.15)' },
 };
+
+export interface LeagueAverages {
+  sportId: number;
+  level: string;
+  avgAge: number;
+  lgOPS: string;
+  lgERA: string;
+  lgOBP: string;
+  lgSLG: string;
+}
 
 export type ViewTab = 'today' | 'yesterday' | 'season';
 

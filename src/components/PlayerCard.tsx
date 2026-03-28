@@ -1,18 +1,20 @@
 'use client';
 
-import { DailyPlayerStats, SeasonPlayerStats, LEVEL_LABELS } from '@/lib/types';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS } from '@/lib/types';
 import GradeBadge from './GradeBadge';
 
 interface DailyCardProps {
   type: 'daily';
   stats: DailyPlayerStats;
   onUnfollow: (playerId: number) => void;
+  leagueAvg?: LeagueAverages;
 }
 
 interface SeasonCardProps {
   type: 'season';
   stats: SeasonPlayerStats;
   onUnfollow: (playerId: number) => void;
+  leagueAvg?: LeagueAverages;
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
@@ -42,6 +44,22 @@ function GameStatusDot({ status }: { status: DailyPlayerStats['gameStatus'] }) {
 function TeamLine({ team, sportId, parentOrg }: { team: string; sportId: number; parentOrg?: string }) {
   if (sportId === 1 || !parentOrg) return <>{team}</>;
   return <>{team} <span className="text-zinc-600">({parentOrg})</span></>;
+}
+
+function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; isPitcher: boolean }) {
+  return (
+    <div className="mt-2 pt-2 border-t border-zinc-700/30 flex items-center gap-3 text-[10px] text-zinc-600">
+      <span className="font-semibold text-zinc-500">{leagueAvg.level} avg</span>
+      <span>Age {leagueAvg.avgAge}</span>
+      {isPitcher ? (
+        <span>ERA {leagueAvg.lgERA}</span>
+      ) : (
+        <>
+          <span>OPS {leagueAvg.lgOPS}</span>
+        </>
+      )}
+    </div>
+  );
 }
 
 function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void }) {
@@ -93,7 +111,11 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
   );
 }
 
-function SeasonCard({ stats, onUnfollow }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void }) {
+function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages }) {
+  // Use wRC+ if available, fall back to OPS+
+  const adjustedPlus = stats.wrcPlus !== undefined ? stats.wrcPlus : stats.opsPlus;
+  const adjustedPlusLabel = stats.wrcPlus !== undefined ? 'wRC+' : 'OPS+';
+
   return (
     <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-xl p-4 hover:border-zinc-600/50 transition-colors">
       {/* Header */}
@@ -138,12 +160,15 @@ function SeasonCard({ stats, onUnfollow }: { stats: SeasonPlayerStats; onUnfollo
             <StatCell label="OBP" value={stats.obp || '—'} />
             <StatCell label="SLG" value={stats.slg || '—'} />
             <StatCell label="OPS" value={stats.ops || '—'} highlight={parseFloat(stats.ops || '0') >= 0.9} />
-            <StatCell label="wRC+" value={stats.wrcPlus !== undefined ? Math.round(stats.wrcPlus).toString() : '—'} highlight={(stats.wrcPlus || 0) >= 130} />
+            <StatCell label={adjustedPlusLabel} value={adjustedPlus !== undefined ? Math.round(adjustedPlus).toString() : '—'} highlight={(adjustedPlus || 0) >= 130} />
             <StatCell label="HR" value={stats.homeRuns?.toString() || '—'} />
             <StatCell label="SB" value={stats.stolenBases?.toString() || '—'} />
             <StatCell label="BB" value={stats.walks?.toString() || '—'} />
             <StatCell label="K" value={stats.strikeouts?.toString() || '—'} />
           </div>
+        )}
+        {leagueAvg && (
+          <LeagueContext leagueAvg={leagueAvg} isPitcher={stats.isPitcher} />
         )}
       </div>
     </div>
@@ -165,5 +190,5 @@ export default function PlayerCard(props: PlayerCardProps) {
   if (props.type === 'daily') {
     return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} />;
   }
-  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} />;
+  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} />;
 }
