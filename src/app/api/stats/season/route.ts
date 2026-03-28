@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSeasonStats, hydrateFollowedPlayers } from '@/lib/mlb-api';
 import { getNPBBatters, getNPBPitchers } from '@/lib/npb-scraper';
+import { getKBOBatters, getKBOPitchers } from '@/lib/kbo-scraper';
 import { FollowedPlayer, SeasonPlayerStats, SPORT_IDS, isMLBSystem } from '@/lib/types';
 
 async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlayerStats[]> {
@@ -94,6 +95,81 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
   });
 }
 
+async function getKBOSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlayerStats[]> {
+  const kboPlayers = players.filter((p) => p.sportId === SPORT_IDS.KBO);
+  if (kboPlayers.length === 0) return [];
+
+  const [batters, pitchers] = await Promise.all([
+    getKBOBatters().catch(() => []),
+    getKBOPitchers().catch(() => []),
+  ]);
+
+  return kboPlayers.map((player): SeasonPlayerStats => {
+    const isPitcher = player.primaryPosition === 'P';
+    const nameKr = player.fullName;
+
+    if (isPitcher) {
+      const match = pitchers.find((p) => p.nameKr === nameKr);
+      if (match) {
+        return {
+          playerId: player.id,
+          playerName: player.fullName,
+          team: match.team,
+          level: 'KBO',
+          sportId: SPORT_IDS.KBO,
+          position: 'P',
+          gamesPlayed: match.g,
+          isPitcher: true,
+          era: match.era,
+          whip: match.whip,
+          inningsPitched: match.ip,
+          pitchingStrikeouts: match.so,
+          walksAllowed: match.bb,
+          wins: match.w,
+          losses: match.l,
+          saves: match.sv,
+        };
+      }
+    } else {
+      const match = batters.find((b) => b.nameKr === nameKr);
+      if (match) {
+        return {
+          playerId: player.id,
+          playerName: player.fullName,
+          team: match.team,
+          level: 'KBO',
+          sportId: SPORT_IDS.KBO,
+          position: player.primaryPosition,
+          gamesPlayed: match.g,
+          isPitcher: false,
+          avg: match.avg,
+          obp: match.obp,
+          slg: match.slg,
+          ops: match.ops,
+          homeRuns: match.hr,
+          stolenBases: match.sb,
+          walks: match.bb,
+          strikeouts: match.so,
+          doubles: match.doubles,
+          triples: match.triples,
+          plateAppearances: match.pa,
+        };
+      }
+    }
+
+    return {
+      playerId: player.id,
+      playerName: player.fullName,
+      team: player.currentTeam.name,
+      level: 'KBO',
+      sportId: SPORT_IDS.KBO,
+      position: player.primaryPosition,
+      gamesPlayed: 0,
+      isPitcher,
+    };
+  });
+}
+
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
@@ -103,18 +179,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Missing players' }, { status: 400 });
     }
 
-    // Split MLB-system and international players
     const mlbPlayers = players.filter((p) => isMLBSystem(p.sportId));
     const npbPlayers = players.filter((p) => p.sportId === SPORT_IDS.NPB);
+    const kboPlayers = players.filter((p) => p.sportId === SPORT_IDS.KBO);
 
-    const [mlbStats, npbStats] = await Promise.all([
+    const [mlbStats, npbStats, kboStats] = await Promise.all([
       mlbPlayers.length > 0
         ? hydrateFollowedPlayers(mlbPlayers).then((h) => getSeasonStats(h))
         : Promise.resolve([]),
       getNPBSeasonStats(npbPlayers),
+      getKBOSeasonStats(kboPlayers),
     ]);
 
-    return NextResponse.json([...mlbStats, ...npbStats]);
+    return NextResponse.json([...mlbStats, ...npbStats, ...kboStats]);
   } catch (error) {
     console.error('Season stats error:', error);
     return NextResponse.json({ error: 'Failed to fetch season stats' }, { status: 500 });

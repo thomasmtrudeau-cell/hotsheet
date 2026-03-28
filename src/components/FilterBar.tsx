@@ -16,6 +16,7 @@ const levelOptions: { value: LevelFilter; label: string }[] = [
   { value: 'MLB', label: 'MLB' },
   { value: 'MiLB', label: 'MiLB' },
   { value: 'NPB', label: 'NPB' },
+  { value: 'KBO', label: 'KBO' },
 ];
 
 const positionOptions: { value: 'all' | 'hitter' | 'pitcher'; label: string }[] = [
