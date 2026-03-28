@@ -41,9 +41,26 @@ function GameStatusDot({ status }: { status: DailyPlayerStats['gameStatus'] }) {
   return <span className={`inline-block w-2 h-2 rounded-full ${colors[status] || 'bg-zinc-700'}`} />;
 }
 
-function TeamLine({ team, sportId, parentOrg }: { team: string; sportId: number; parentOrg?: string }) {
-  if (sportId === 1 || !parentOrg) return <>{team}</>;
-  return <>{team} <span className="text-zinc-600">({parentOrg})</span></>;
+function TeamLine({ team, sportId, parentOrgAbbrev }: { team: string; sportId: number; parentOrgAbbrev?: string }) {
+  if (sportId === 1 || !parentOrgAbbrev) return <>{team}</>;
+  return <>{team} <span className="text-zinc-600">({parentOrgAbbrev})</span></>;
+}
+
+function XSearchLink({ playerName }: { playerName: string }) {
+  const url = `https://x.com/search?q=%22${encodeURIComponent(playerName)}%22&f=live`;
+  return (
+    <a
+      href={url}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="text-zinc-600 hover:text-zinc-400 transition-colors p-1"
+      title="Search on X"
+    >
+      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
+        <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
+      </svg>
+    </a>
+  );
 }
 
 function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; isPitcher: boolean }) {
@@ -73,18 +90,21 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
             <LevelBadge sportId={stats.sportId} />
           </div>
           <div className="text-xs text-zinc-500">
-            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrg={stats.parentOrg} />
+            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
           </div>
         </div>
-        <button
-          onClick={() => onUnfollow(stats.playerId)}
-          className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
-          title="Unfollow"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-0.5">
+          <XSearchLink playerName={stats.playerName} />
+          <button
+            onClick={() => onUnfollow(stats.playerId)}
+            className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
+            title="Unfollow"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Game context */}
@@ -126,18 +146,21 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
             <LevelBadge sportId={stats.sportId} />
           </div>
           <div className="text-xs text-zinc-500">
-            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrg={stats.parentOrg} /> &middot; {stats.gamesPlayed} G
+            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
           </div>
         </div>
-        <button
-          onClick={() => onUnfollow(stats.playerId)}
-          className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
+        <div className="flex items-center gap-0.5">
+          <XSearchLink playerName={stats.playerName} />
+          <button
+            onClick={() => onUnfollow(stats.playerId)}
+            className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
           title="Unfollow"
         >
           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
           </svg>
         </button>
+        </div>
       </div>
 
       {/* Season stats */}

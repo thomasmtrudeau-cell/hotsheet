@@ -26,6 +26,7 @@ interface TeamInfo {
   sportId: number;
   sportName: string;
   parentOrgName?: string;
+  parentOrgAbbrev?: string;
 }
 
 let teamLookupCache: Map<number, TeamInfo> | null = null;
@@ -38,12 +39,24 @@ async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
   const url = `${MLB_API}/teams?sportIds=${ALL_SPORT_IDS.join(',')}&activeStatus=ACTIVE`;
   const data = await cachedFetch<{ teams: Array<Record<string, unknown>> }>(url, 3600_000); // cache 1 hour
   const map = new Map<number, TeamInfo>();
+
+  // First pass: build MLB team ID -> abbreviation map
+  const orgAbbrevs = new Map<number, string>();
   for (const t of data.teams) {
     const sport = t.sport as Record<string, unknown> | undefined;
+    if ((sport?.id as number) === 1) {
+      orgAbbrevs.set(t.id as number, (t.abbreviation as string) || '');
+    }
+  }
+
+  for (const t of data.teams) {
+    const sport = t.sport as Record<string, unknown> | undefined;
+    const parentOrgId = t.parentOrgId as number | undefined;
     map.set(t.id as number, {
       sportId: (sport?.id as number) || 1,
       sportName: (sport?.name as string) || 'MLB',
       parentOrgName: t.parentOrgName as string | undefined,
+      parentOrgAbbrev: parentOrgId ? orgAbbrevs.get(parentOrgId) : undefined,
     });
   }
   teamLookupCache = map;
@@ -81,6 +94,7 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
       fullName: details ? formatDisplayName(details) : p.fullName,
       sportId: teamInfo?.sportId ?? p.sportId,
       parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
+      parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
     };
   });
 }
@@ -142,6 +156,7 @@ export async function searchPlayers(query: string): Promise<SearchResult[]> {
         sportId,
         level: LEVEL_LABELS[sportId] || 'Unknown',
         parentOrg: teamInfo?.parentOrgName,
+        parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
       };
     })
     .slice(0, 20);
@@ -243,6 +258,7 @@ function buildDailyStats(
     sportId: player.sportId,
     position: player.primaryPosition,
     parentOrg: player.parentOrg,
+    parentOrgAbbrev: player.parentOrgAbbrev,
     gameStatus: 'No Game',
     gameContext: '',
     statLine: '',
@@ -427,6 +443,7 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
         sportId: player.sportId,
         position: player.primaryPosition,
         parentOrg: player.parentOrg,
+    parentOrgAbbrev: player.parentOrgAbbrev,
         gamesPlayed: 0,
         isPitcher,
       };

@@ -58,6 +58,7 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
       currentTeam: result.currentTeam,
       sportId: result.sportId,
       parentOrg: result.parentOrg,
+      parentOrgAbbrev: result.parentOrgAbbrev,
       followedAt: new Date().toISOString(),
     });
   };

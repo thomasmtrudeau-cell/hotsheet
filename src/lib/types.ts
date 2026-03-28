@@ -26,7 +26,8 @@ export interface FollowedPlayer {
     name: string;
   };
   sportId: number;
-  parentOrg?: string; // e.g. "Chicago White Sox" for Charlotte Knights
+  parentOrg?: string;
+  parentOrgAbbrev?: string; // e.g. "CWS" for Charlotte Knights
   followedAt: string;
 }
 
@@ -41,6 +42,7 @@ export interface SearchResult {
   sportId: number;
   level: string;
   parentOrg?: string;
+  parentOrgAbbrev?: string;
 }
 
 export interface DailyPlayerStats {
@@ -51,6 +53,7 @@ export interface DailyPlayerStats {
   sportId: number;
   position: string;
   parentOrg?: string;
+  parentOrgAbbrev?: string;
   gameStatus: 'Scheduled' | 'Live' | 'Final' | 'No Game' | 'Postponed';
   gameContext: string;
   gameTime?: string;
@@ -89,6 +92,7 @@ export interface SeasonPlayerStats {
   sportId: number;
   position: string;
   parentOrg?: string;
+  parentOrgAbbrev?: string;
   gamesPlayed: number;
   // Batting
   avg?: string;
