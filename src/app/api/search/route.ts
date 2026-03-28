@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { searchPlayers } from '@/lib/mlb-api';
 import { getNPBBatters, getNPBPitchers } from '@/lib/npb-scraper';
 import { getKBOBatters, getKBOPitchers } from '@/lib/kbo-scraper';
+import { getEnglishName } from '@/lib/korean-romanize';
 import { SearchResult, SPORT_IDS } from '@/lib/types';
 
 // Cache international player lists for search
@@ -11,12 +12,30 @@ async function getIntlSearchPool(): Promise<SearchResult[]> {
   const now = Date.now();
   if (intlCache && intlCache.expires > now) return intlCache.players;
 
-  const [npbBatters, npbPitchers, kboBatters, kboPitchers] = await Promise.all([
-    getNPBBatters().catch(() => []),
-    getNPBPitchers().catch(() => []),
+  const currentYear = new Date().getFullYear();
+  const prevYear = currentYear - 1;
+
+  // Fetch current + previous year NPB (season may have just started)
+  const [npbBatCur, npbPitCur, npbBatPrev, npbPitPrev, kboBatters, kboPitchers] = await Promise.all([
+    getNPBBatters(currentYear).catch(() => []),
+    getNPBPitchers(currentYear).catch(() => []),
+    getNPBBatters(prevYear).catch(() => []),
+    getNPBPitchers(prevYear).catch(() => []),
     getKBOBatters().catch(() => []),
     getKBOPitchers().catch(() => []),
   ]);
+
+  // Merge NPB: use current year if available, fill gaps from previous year
+  const npbBatterNames = new Set(npbBatCur.map((b) => b.name));
+  const npbPitcherNames = new Set(npbPitCur.map((p) => p.name));
+  const npbBatters = [
+    ...npbBatCur,
+    ...npbBatPrev.filter((b) => !npbBatterNames.has(b.name)),
+  ];
+  const npbPitchers = [
+    ...npbPitCur,
+    ...npbPitPrev.filter((p) => !npbPitcherNames.has(p.name)),
+  ];
 
   const players: SearchResult[] = [
     // NPB
@@ -38,23 +57,31 @@ async function getIntlSearchPool(): Promise<SearchResult[]> {
       level: 'NPB',
       parentOrg: p.league === 'CL' ? 'Central League' : 'Pacific League',
     })),
-    // KBO
-    ...kboBatters.map((b) => ({
-      id: hashName(b.nameKr + b.teamKr + 'kbo'),
-      fullName: b.nameKr,
-      primaryPosition: 'Hitter',
-      currentTeam: { id: 0, name: b.team },
-      sportId: SPORT_IDS.KBO,
-      level: 'KBO',
-    })),
-    ...kboPitchers.map((p) => ({
-      id: hashName(p.nameKr + p.teamKr + 'kbo'),
-      fullName: p.nameKr,
-      primaryPosition: 'P',
-      currentTeam: { id: 0, name: p.team },
-      sportId: SPORT_IDS.KBO,
-      level: 'KBO',
-    })),
+    // KBO — include both Korean and romanized names for search
+    ...kboBatters.map((b) => {
+      const englishName = getEnglishName(b.nameKr);
+      return {
+        id: hashName(b.nameKr + b.teamKr + 'kbo'),
+        fullName: `${englishName} (${b.nameKr})`,
+        primaryPosition: 'Hitter',
+        currentTeam: { id: 0, name: b.team },
+        sportId: SPORT_IDS.KBO,
+        level: 'KBO',
+        _searchText: `${englishName} ${b.nameKr} ${b.team} ${b.teamKr}`.toLowerCase(),
+      } as SearchResult & { _searchText: string };
+    }),
+    ...kboPitchers.map((p) => {
+      const englishName = getEnglishName(p.nameKr);
+      return {
+        id: hashName(p.nameKr + p.teamKr + 'kbo'),
+        fullName: `${englishName} (${p.nameKr})`,
+        primaryPosition: 'P',
+        currentTeam: { id: 0, name: p.team },
+        sportId: SPORT_IDS.KBO,
+        level: 'KBO',
+        _searchText: `${englishName} ${p.nameKr} ${p.team} ${p.teamKr}`.toLowerCase(),
+      } as SearchResult & { _searchText: string };
+    }),
   ];
 
   intlCache = { players, expires: now + 3600_000 };
@@ -93,14 +120,20 @@ export async function GET(request: NextRequest) {
 
     // Filter international players by search terms
     const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);
-    const intlResults = intlPool.filter((p) =>
-      searchTerms.every((term) =>
-        p.fullName.toLowerCase().includes(term) ||
-        p.currentTeam.name.toLowerCase().includes(term)
-      )
-    );
+    const intlResults = intlPool.filter((p) => {
+      const searchable = (p as SearchResult & { _searchText?: string })._searchText
+        || `${p.fullName} ${p.currentTeam.name}`.toLowerCase();
+      return searchTerms.every((term) => searchable.includes(term));
+    });
 
-    const combined = [...mlbResults, ...intlResults].slice(0, 25);
+    // Strip internal search fields before returning
+    const cleanIntl = intlResults.map((p) => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { _searchText, ...clean } = p as SearchResult & { _searchText?: string };
+      return clean;
+    });
+
+    const combined = [...mlbResults, ...cleanIntl].slice(0, 25);
     return NextResponse.json(combined);
   } catch (error) {
     console.error('Search error:', error);

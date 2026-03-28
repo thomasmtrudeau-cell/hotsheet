@@ -8,10 +8,19 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
   const npbPlayers = players.filter((p) => p.sportId === SPORT_IDS.NPB);
   if (npbPlayers.length === 0) return [];
 
-  const [batters, pitchers] = await Promise.all([
-    getNPBBatters().catch(() => []),
-    getNPBPitchers().catch(() => []),
+  const currentYear = new Date().getFullYear();
+  const prevYear = currentYear - 1;
+
+  // Fetch both years — use current if available, fall back to previous
+  const [batCur, pitCur, batPrev, pitPrev] = await Promise.all([
+    getNPBBatters(currentYear).catch(() => []),
+    getNPBPitchers(currentYear).catch(() => []),
+    getNPBBatters(prevYear).catch(() => []),
+    getNPBPitchers(prevYear).catch(() => []),
   ]);
+
+  const batters = [...batCur, ...batPrev];
+  const pitchers = [...pitCur, ...pitPrev];
 
   return npbPlayers.map((player): SeasonPlayerStats => {
     const isPitcher = player.primaryPosition === 'P';
@@ -106,7 +115,9 @@ async function getKBOSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
 
   return kboPlayers.map((player): SeasonPlayerStats => {
     const isPitcher = player.primaryPosition === 'P';
-    const nameKr = player.fullName;
+    // Extract Korean name from "English (Korean)" format
+    const krMatch = player.fullName.match(/\(([^)]+)\)/);
+    const nameKr = krMatch ? krMatch[1] : player.fullName;
 
     if (isPitcher) {
       const match = pitchers.find((p) => p.nameKr === nameKr);
