@@ -102,11 +102,14 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
 // --- Name formatting (middle initial) ---
 
 function formatDisplayName(p: Record<string, unknown>): string {
-  const first = (p.firstName as string) || '';
+  // Prefer useName (e.g. "Freddie") over legal firstName (e.g. "Frederick")
+  const first = (p.useName as string) || (p.firstName as string) || '';
   const middle = (p.middleName as string) || '';
   const last = (p.lastName as string) || '';
   const suffix = (p.nameSuffix as string) || '';
-  const middleInitial = middle ? ` ${middle[0]}.` : '';
+  // Only show middle initial if using the legal first name (useName already is the short form)
+  const usedUseName = !!(p.useName as string);
+  const middleInitial = middle && !usedUseName ? ` ${middle[0]}.` : '';
   const suffixStr = suffix ? ` ${suffix}` : '';
   return `${first}${middleInitial} ${last}${suffixStr}`.trim();
 }
