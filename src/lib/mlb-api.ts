@@ -51,17 +51,36 @@ async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
   return map;
 }
 
-// --- Hydrate followed players with correct team data ---
+// --- Hydrate followed players with correct team data + names ---
 
 export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise<FollowedPlayer[]> {
   const teamMap = await getTeamLookup();
+
+  // Batch lookup player details to fix names
+  const ids = players.map((p) => p.id).join(',');
+  let playerDetails: Map<number, Record<string, unknown>> = new Map();
+  try {
+    const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
+      `${MLB_API}/people?personIds=${ids}`,
+      3600_000
+    );
+    if (data.people) {
+      for (const p of data.people) {
+        playerDetails.set(p.id as number, p);
+      }
+    }
+  } catch {
+    // Fall back to existing names
+  }
+
   return players.map((p) => {
     const teamInfo = teamMap.get(p.currentTeam.id);
-    if (!teamInfo) return p;
+    const details = playerDetails.get(p.id);
     return {
       ...p,
-      sportId: teamInfo.sportId,
-      parentOrg: teamInfo.parentOrgName,
+      fullName: details ? formatDisplayName(details) : p.fullName,
+      sportId: teamInfo?.sportId ?? p.sportId,
+      parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
     };
   });
 }
