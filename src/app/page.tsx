@@ -16,7 +16,11 @@ function getDateString(offset: number = 0): string {
   const d = new Date();
   const et = new Date(d.toLocaleString('en-US', { timeZone: 'America/New_York' }));
   et.setDate(et.getDate() + offset);
-  return et.toISOString().split('T')[0];
+  // Format from local components — NOT toISOString() which converts to UTC
+  const year = et.getFullYear();
+  const month = String(et.getMonth() + 1).padStart(2, '0');
+  const day = String(et.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 type SortableStat = DailyPlayerStats | SeasonPlayerStats;
