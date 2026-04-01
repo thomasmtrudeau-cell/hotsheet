@@ -43,6 +43,22 @@ function GameStatusDot({ status }: { status: DailyPlayerStats['gameStatus'] }) {
   return <span className={`inline-block w-2 h-2 rounded-full ${colors[status] || 'bg-zinc-700'}`} />;
 }
 
+function LineupBadge({ status }: { status: 'starting' | 'not_starting' | 'probable_pitcher' }) {
+  if (status === 'starting' || status === 'probable_pitcher') {
+    const label = status === 'probable_pitcher' ? 'SP' : 'STARTING';
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400">
+        {label}
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-600/30 text-zinc-500">
+      NOT STARTING
+    </span>
+  );
+}
+
 function TeamLine({ team, sportId, parentOrgAbbrev }: { team: string; sportId: number; parentOrgAbbrev?: string }) {
   if (sportId === 1 || !parentOrgAbbrev) return <>{team}</>;
   return <>{team} <span className="text-zinc-600">({parentOrgAbbrev})</span></>;
@@ -127,8 +143,13 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
         </div>
       )}
 
-      {/* Grade */}
-      <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
+      {/* Lineup status + Grade */}
+      <div className="flex items-center gap-2">
+        <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
+        {stats.gameStatus === 'Scheduled' && stats.lineupStatus && (
+          <LineupBadge status={stats.lineupStatus} />
+        )}
+      </div>
     </div>
   );
 }

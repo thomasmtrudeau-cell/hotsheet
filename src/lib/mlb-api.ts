@@ -176,8 +176,12 @@ interface ScheduleGame {
   gameDate: string;
   status: { abstractGameState: string; detailedState: string };
   teams: {
-    away: { team: { id: number; name: string } };
-    home: { team: { id: number; name: string } };
+    away: { team: { id: number; name: string }; probablePitcher?: { id: number; fullName: string } };
+    home: { team: { id: number; name: string }; probablePitcher?: { id: number; fullName: string } };
+  };
+  lineups?: {
+    homePlayers?: Array<{ id: number }>;
+    awayPlayers?: Array<{ id: number }>;
   };
 }
 
@@ -187,7 +191,7 @@ async function getGamesForDate(date: string): Promise<ScheduleGame[]> {
   const results = await Promise.all(
     ALL_SPORT_IDS.map((sportId) =>
       cachedFetch<{ dates?: Array<{ games: ScheduleGame[] }> }>(
-        `${MLB_API}/schedule?date=${date}&sportId=${sportId}&hydrate=team`
+        `${MLB_API}/schedule?date=${date}&sportId=${sportId}&hydrate=team,probablePitcher,lineups`
       ).catch(() => ({ dates: [] }))
     )
   );
@@ -218,6 +222,23 @@ function getGameContext(game: ScheduleGame): string {
 function getGameTime(game: ScheduleGame): string {
   const d = new Date(game.gameDate);
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' ET';
+}
+
+function getLineupStatus(player: FollowedPlayer, game: ScheduleGame): DailyPlayerStats['lineupStatus'] {
+  // Check probable pitcher
+  const awayPP = game.teams.away.probablePitcher;
+  const homePP = game.teams.home.probablePitcher;
+  if (awayPP?.id === player.id || homePP?.id === player.id) return 'probable_pitcher';
+
+  // Check lineups (position players)
+  const lineups = game.lineups;
+  if (!lineups) return undefined; // lineups not yet posted
+  const allLineupIds = [
+    ...(lineups.homePlayers || []).map(p => p.id),
+    ...(lineups.awayPlayers || []).map(p => p.id),
+  ];
+  if (allLineupIds.length === 0) return undefined; // lineups not yet posted
+  return allLineupIds.includes(player.id) ? 'starting' : 'not_starting';
 }
 
 interface BoxscorePlayer {
@@ -279,6 +300,7 @@ function buildDailyStats(
   base.gameStatus = getGameStatus(game);
   base.gameContext = getGameContext(game);
   base.gameTime = getGameTime(game);
+  base.gameStartTime = new Date(game.gameDate).getTime();
   base.gamePk = game.gamePk;
 
   if (base.gameStatus === 'Scheduled') {
@@ -421,7 +443,11 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     const status = getGameStatus(game);
 
     if (status === 'Scheduled' || status === 'Postponed') {
-      return buildDailyStats(player, game, null);
+      const stats = buildDailyStats(player, game, null);
+      if (status === 'Scheduled') {
+        stats.lineupStatus = getLineupStatus(player, game);
+      }
+      return stats;
     }
 
     const boxscore = boxscores.get(game.gamePk);

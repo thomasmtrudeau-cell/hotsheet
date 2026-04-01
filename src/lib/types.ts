@@ -69,7 +69,9 @@ export interface DailyPlayerStats {
   gameStatus: 'Scheduled' | 'Live' | 'Final' | 'No Game' | 'Postponed';
   gameContext: string;
   gameTime?: string;
+  gameStartTime?: number; // epoch ms for sorting
   gamePk?: number;
+  lineupStatus?: 'starting' | 'not_starting' | 'probable_pitcher';
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

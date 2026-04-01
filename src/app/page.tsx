@@ -180,6 +180,10 @@ export default function Home() {
     if (activeTab !== 'season') {
       const ad = a as DailyPlayerStats;
       const bd = b as DailyPlayerStats;
+      // Sort by game start time (earliest first), then by status tier, then grade
+      const aTime = ad.gameStartTime ?? Infinity;
+      const bTime = bd.gameStartTime ?? Infinity;
+      if (aTime !== bTime) return aTime - bTime;
       const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
       if (statusDiff !== 0) return statusDiff;
       return GRADE_ORDER.indexOf(ad.performanceGrade) - GRADE_ORDER.indexOf(bd.performanceGrade);
