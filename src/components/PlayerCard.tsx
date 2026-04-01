@@ -190,6 +190,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
             <StatCell label="SB" value={stats.stolenBases?.toString() || '—'} />
             <StatCell label="BB" value={stats.walks?.toString() || '—'} />
             <StatCell label="K" value={stats.strikeouts?.toString() || '—'} />
+            <StatCell label="PA" value={stats.plateAppearances?.toString() || '—'} />
           </div>
         )}
         {leagueAvg && (

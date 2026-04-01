@@ -460,10 +460,10 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
         // Fetch both regular and sabermetrics stats
         const [regularData, saberData] = await Promise.all([
           cachedFetch<Record<string, unknown>>(
-            `${MLB_API}/people/${player.id}/stats?stats=season&group=${group}&season=${currentSeason}`
+            `${MLB_API}/people/${player.id}/stats?stats=season&group=${group}&season=${currentSeason}&sportId=${player.sportId}`
           ).catch(() => null),
           cachedFetch<Record<string, unknown>>(
-            `${MLB_API}/people/${player.id}/stats?stats=sabermetrics&group=${group}&season=${currentSeason}`
+            `${MLB_API}/people/${player.id}/stats?stats=sabermetrics&group=${group}&season=${currentSeason}&sportId=${player.sportId}`
           ).catch(() => null),
         ]);
 
