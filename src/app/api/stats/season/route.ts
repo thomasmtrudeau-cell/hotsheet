@@ -11,25 +11,13 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
   const currentYear = new Date().getFullYear();
   const prevYear = currentYear - 1;
 
-  // Fetch current year; only fall back to previous year if current season has no data yet
-  const [batCur, pitCur] = await Promise.all([
+  // Fetch current year + previous year for fallback per-player
+  const [batCur, pitCur, batPrev, pitPrev] = await Promise.all([
     getNPBBatters(currentYear).catch(() => []),
     getNPBPitchers(currentYear).catch(() => []),
+    getNPBBatters(prevYear).catch(() => []),
+    getNPBPitchers(prevYear).catch(() => []),
   ]);
-
-  const seasonStarted = batCur.length > 0 || pitCur.length > 0;
-
-  let batters = batCur;
-  let pitchers = pitCur;
-  if (!seasonStarted) {
-    // Pre-season: fall back to previous year
-    const [batPrev, pitPrev] = await Promise.all([
-      getNPBBatters(prevYear).catch(() => []),
-      getNPBPitchers(prevYear).catch(() => []),
-    ]);
-    batters = batPrev;
-    pitchers = pitPrev;
-  }
 
   return npbPlayers.map((player): SeasonPlayerStats => {
     const isPitcher = player.primaryPosition === 'P';
@@ -39,11 +27,14 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
     const parts = player.fullName.split(' ');
     const searchLast = parts[parts.length - 1]?.toLowerCase() || '';
 
+    const nameMatch = (dataName: string) => {
+      const dn = dataName.toLowerCase();
+      return dn.includes(searchLast) || nameLower.includes(dataName.split(',')[0]?.trim().toLowerCase() || '');
+    };
+
     if (isPitcher) {
-      const match = pitchers.find((p) => {
-        const pName = p.name.toLowerCase();
-        return pName.includes(searchLast) || nameLower.includes(p.name.split(',')[0]?.trim().toLowerCase() || '');
-      });
+      // Try current year first, fall back to previous year per-player
+      const match = pitCur.find((p) => nameMatch(p.name)) || pitPrev.find((p) => nameMatch(p.name));
 
       if (match) {
         return {
@@ -67,10 +58,7 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
         };
       }
     } else {
-      const match = batters.find((b) => {
-        const bName = b.name.toLowerCase();
-        return bName.includes(searchLast) || nameLower.includes(b.name.split(',')[0]?.trim().toLowerCase() || '');
-      });
+      const match = batCur.find((b) => nameMatch(b.name)) || batPrev.find((b) => nameMatch(b.name));
 
       if (match) {
         const ops = (parseFloat(match.obp) + parseFloat(match.slg)).toFixed(3);
