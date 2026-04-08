@@ -1,8 +1,15 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages, isMLBSystem } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
 const ALL_SPORT_IDS = [1, 11, 12, 13, 14];
+
+// Convert decimal IP (e.g. 6.333) back to standard notation (e.g. "6.1")
+function formatIP(ip: number): string {
+  const whole = Math.floor(ip);
+  const frac = Math.round((ip - whole) * 3);
+  return `${whole}.${frac}`;
+}
 
 // Simple in-memory cache for server-side API routes
 const cache = new Map<string, { data: unknown; expires: number }>();
@@ -69,12 +76,12 @@ async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
 export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise<FollowedPlayer[]> {
   const teamMap = await getTeamLookup();
 
-  // Batch lookup player details to fix names
+  // Batch lookup player details to fix names + current team
   const ids = players.map((p) => p.id).join(',');
   let playerDetails: Map<number, Record<string, unknown>> = new Map();
   try {
     const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
-      `${MLB_API}/people?personIds=${ids}`,
+      `${MLB_API}/people?personIds=${ids}&hydrate=currentTeam`,
       3600_000
     );
     if (data.people) {
@@ -83,15 +90,26 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
       }
     }
   } catch {
-    // Fall back to existing names
+    // Fall back to existing data
   }
 
   return players.map((p) => {
-    const teamInfo = teamMap.get(p.currentTeam.id);
     const details = playerDetails.get(p.id);
+
+    // Update team from API if player was promoted/demoted
+    let currentTeam = p.currentTeam;
+    if (details?.currentTeam) {
+      const apiTeam = details.currentTeam as Record<string, unknown>;
+      if (apiTeam.id && apiTeam.name) {
+        currentTeam = { id: apiTeam.id as number, name: apiTeam.name as string };
+      }
+    }
+
+    const teamInfo = teamMap.get(currentTeam.id);
     return {
       ...p,
       fullName: details ? formatDisplayName(details) : p.fullName,
+      currentTeam,
       sportId: teamInfo?.sportId ?? p.sportId,
       parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
@@ -317,10 +335,31 @@ function buildDailyStats(
     return base;
   }
 
+  const isPitcherPosition = player.primaryPosition === 'P';
+  const isProbablePitcher = game && (
+    game.teams.away.probablePitcher?.id === player.id ||
+    game.teams.home.probablePitcher?.id === player.id
+  );
+
   if (!boxscorePlayer) {
-    base.performanceGrade = 'routine';
-    base.gradeReason = 'Not in lineup';
-    base.statLine = 'DNP';
+    if (isPitcherPosition && base.gameStatus === 'Live') {
+      base.isPitcherLine = true;
+      if (isProbablePitcher) {
+        // Scheduled starter hasn't taken the mound yet
+        base.performanceGrade = 'scheduled';
+        base.gradeReason = 'Has not entered';
+        base.statLine = 'Awaiting entry';
+      } else {
+        // RP who could still enter — sort below active but above DNP
+        base.performanceGrade = 'scheduled';
+        base.gradeReason = 'Has not entered';
+        base.statLine = 'Awaiting entry';
+      }
+    } else {
+      base.performanceGrade = 'routine';
+      base.gradeReason = 'Not in lineup';
+      base.statLine = 'DNP';
+    }
     return base;
   }
 
@@ -329,7 +368,6 @@ function buildDailyStats(
 
   // Determine if this is a pitching or batting line
   const hasPitching = pitching && (pitching.inningsPitched as string) !== undefined && pitching.inningsPitched !== '0.0' && pitching.inningsPitched !== '';
-  const isPitcherPosition = player.primaryPosition === 'P';
 
   if (hasPitching && isPitcherPosition) {
     const ip = parseIP(pitching.inningsPitched as string | number);
@@ -356,6 +394,19 @@ function buildDailyStats(
     base.performanceGrade = grade;
     base.gradeReason = reason;
     base.statLine = formatPitchingLine(base);
+  } else if (isPitcherPosition) {
+    // Pitcher in boxscore but hasn't recorded an out yet (e.g. Gausman not starting)
+    base.isPitcherLine = true;
+    if (base.gameStatus === 'Live') {
+      base.performanceGrade = 'scheduled';
+      base.gradeReason = 'Has not entered';
+      base.statLine = 'Awaiting entry';
+    } else {
+      // Game Final — pitcher was rostered but never pitched
+      base.performanceGrade = 'routine';
+      base.gradeReason = 'Did not pitch';
+      base.statLine = 'DNP';
+    }
   } else if (batting && batting.atBats !== undefined) {
     base.isPitcherLine = false;
     base.hits = batting.hits || 0;
@@ -476,57 +527,105 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
         sportId: player.sportId,
         position: player.primaryPosition,
         parentOrg: player.parentOrg,
-    parentOrgAbbrev: player.parentOrgAbbrev,
+        parentOrgAbbrev: player.parentOrgAbbrev,
         gamesPlayed: 0,
         isPitcher,
       };
 
       try {
         const group = isPitcher ? 'pitching' : 'hitting';
-        // Fetch both regular and sabermetrics stats
-        const [regularData, saberData] = await Promise.all([
-          cachedFetch<Record<string, unknown>>(
-            `${MLB_API}/people/${player.id}/stats?stats=season&group=${group}&season=${currentSeason}&sportId=${player.sportId}`
-          ).catch(() => null),
+
+        // For MiLB/MLB players, fetch all sport IDs to catch promotions/demotions/rehab stints
+        const sportIdsToTry = isMLBSystem(player.sportId) ? ALL_SPORT_IDS : [player.sportId];
+        const [allRegularData, saberData] = await Promise.all([
+          Promise.all(
+            sportIdsToTry.map((sid) =>
+              cachedFetch<Record<string, unknown>>(
+                `${MLB_API}/people/${player.id}/stats?stats=season&group=${group}&season=${currentSeason}&sportId=${sid}`
+              ).catch(() => null)
+            )
+          ),
           cachedFetch<Record<string, unknown>>(
             `${MLB_API}/people/${player.id}/stats?stats=sabermetrics&group=${group}&season=${currentSeason}&sportId=${player.sportId}`
           ).catch(() => null),
         ]);
 
-        // Parse regular stats
-        const regularStats = regularData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined;
-        const stat = regularStats?.[0]?.splits?.[0]?.stat;
-
-        if (!stat) return base;
-
-        if (isPitcher) {
-          base.gamesPlayed = (stat.gamesPlayed as number) || 0;
-          base.era = stat.era as string;
-          base.whip = stat.whip as string;
-          base.inningsPitched = stat.inningsPitched as string;
-          base.pitchingStrikeouts = (stat.strikeOuts as number) || 0;
-          base.walksAllowed = (stat.baseOnBalls as number) || 0;
-          base.wins = (stat.wins as number) || 0;
-          base.losses = (stat.losses as number) || 0;
-          base.saves = (stat.saves as number) || 0;
-          base.kPer9 = stat.strikeoutsPer9Inn as string;
-          base.bbPer9 = stat.walksPer9Inn as string;
-        } else {
-          base.gamesPlayed = (stat.gamesPlayed as number) || 0;
-          base.avg = stat.avg as string;
-          base.obp = stat.obp as string;
-          base.slg = stat.slg as string;
-          base.ops = stat.ops as string;
-          base.homeRuns = (stat.homeRuns as number) || 0;
-          base.stolenBases = (stat.stolenBases as number) || 0;
-          base.walks = (stat.baseOnBalls as number) || 0;
-          base.strikeouts = (stat.strikeOuts as number) || 0;
-          base.doubles = (stat.doubles as number) || 0;
-          base.triples = (stat.triples as number) || 0;
-          base.plateAppearances = (stat.plateAppearances as number) || 0;
+        // Collect all splits across all levels
+        const allSplits: Array<{ stat: Record<string, unknown>; sportId: number }> = [];
+        for (let i = 0; i < sportIdsToTry.length; i++) {
+          const data = allRegularData[i];
+          const stats = data?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined;
+          const splits = stats?.[0]?.splits;
+          if (splits) {
+            for (const sp of splits) {
+              allSplits.push({ stat: sp.stat, sportId: sportIdsToTry[i] });
+            }
+          }
         }
 
-        // Parse sabermetrics for wRC+
+        if (allSplits.length === 0) return base;
+
+        // Combine stats across all levels
+        if (isPitcher) {
+          let totalG = 0, totalER = 0, totalIP = 0, totalK = 0, totalBB = 0;
+          let totalW = 0, totalL = 0, totalSV = 0, totalH = 0;
+          for (const { stat } of allSplits) {
+            totalG += (stat.gamesPlayed as number) || 0;
+            totalER += (stat.earnedRuns as number) || 0;
+            totalIP += parseIP((stat.inningsPitched as string) || '0');
+            totalK += (stat.strikeOuts as number) || 0;
+            totalBB += (stat.baseOnBalls as number) || 0;
+            totalW += (stat.wins as number) || 0;
+            totalL += (stat.losses as number) || 0;
+            totalSV += (stat.saves as number) || 0;
+            totalH += (stat.hits as number) || 0;
+          }
+          base.gamesPlayed = totalG;
+          base.era = totalIP > 0 ? (totalER * 9 / totalIP).toFixed(2) : '0.00';
+          base.whip = totalIP > 0 ? ((totalBB + totalH) / totalIP).toFixed(2) : '0.00';
+          base.inningsPitched = formatIP(totalIP);
+          base.pitchingStrikeouts = totalK;
+          base.walksAllowed = totalBB;
+          base.wins = totalW;
+          base.losses = totalL;
+          base.saves = totalSV;
+          base.kPer9 = totalIP > 0 ? (totalK * 9 / totalIP).toFixed(2) : '0.00';
+          base.bbPer9 = totalIP > 0 ? (totalBB * 9 / totalIP).toFixed(2) : '0.00';
+        } else {
+          let totalG = 0, totalAB = 0, totalH = 0, totalHR = 0, totalSB = 0;
+          let totalBB = 0, totalK = 0, totalPA = 0, totalD = 0, totalT = 0;
+          let totalHBP = 0, totalSF = 0, totalTB = 0;
+          for (const { stat } of allSplits) {
+            totalG += (stat.gamesPlayed as number) || 0;
+            totalAB += (stat.atBats as number) || 0;
+            totalH += (stat.hits as number) || 0;
+            totalHR += (stat.homeRuns as number) || 0;
+            totalSB += (stat.stolenBases as number) || 0;
+            totalBB += (stat.baseOnBalls as number) || 0;
+            totalK += (stat.strikeOuts as number) || 0;
+            totalPA += (stat.plateAppearances as number) || 0;
+            totalD += (stat.doubles as number) || 0;
+            totalT += (stat.triples as number) || 0;
+            totalHBP += (stat.hitByPitch as number) || 0;
+            totalSF += (stat.sacFlies as number) || 0;
+            totalTB += (stat.totalBases as number) || 0;
+          }
+          base.gamesPlayed = totalG;
+          base.avg = totalAB > 0 ? (totalH / totalAB).toFixed(3) : '.000';
+          const obpDenom = totalAB + totalBB + totalHBP + totalSF;
+          base.obp = obpDenom > 0 ? ((totalH + totalBB + totalHBP) / obpDenom).toFixed(3) : '.000';
+          base.slg = totalAB > 0 ? (totalTB / totalAB).toFixed(3) : '.000';
+          base.ops = (parseFloat(base.obp) + parseFloat(base.slg)).toFixed(3);
+          base.homeRuns = totalHR;
+          base.stolenBases = totalSB;
+          base.walks = totalBB;
+          base.strikeouts = totalK;
+          base.doubles = totalD;
+          base.triples = totalT;
+          base.plateAppearances = totalPA;
+        }
+
+        // Parse sabermetrics for wRC+ (use current level)
         const saberStats = saberData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined;
         const saber = saberStats?.[0]?.splits?.[0]?.stat;
         if (saber && !isPitcher) {

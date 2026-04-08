@@ -117,15 +117,135 @@ async function fetchKBO(url: string): Promise<string> {
   return res.text();
 }
 
+// Extract ASP.NET hidden fields from HTML
+function extractFormFields(html: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  // Match hidden inputs: name="..." value="..."
+  const regex = /name="([^"]*)"[^>]*value="([^"]*)"/g;
+  let m;
+  while ((m = regex.exec(html)) !== null) {
+    fields[m[1]] = m[2];
+  }
+  // Also try id-based hidden inputs (ASP.NET sometimes uses id before value)
+  const regex2 = /id="(__[^"]*)"[^>]*value="([^"]*)"/g;
+  while ((m = regex2.exec(html)) !== null) {
+    if (!fields[m[1]]) fields[m[1]] = m[2];
+  }
+  return fields;
+}
+
+// Extract selected value from a select dropdown by name
+function extractSelectValue(html: string, name: string): string {
+  const selectRegex = new RegExp(`name="${name.replace(/\$/g, '\\$')}"[^>]*>([\\s\\S]*?)</select>`);
+  const selectMatch = html.match(selectRegex);
+  if (!selectMatch) return '';
+  const selected = selectMatch[1].match(/selected[^>]*value="([^"]*)"/);
+  if (selected) return selected[1];
+  const first = selectMatch[1].match(/value="([^"]*)"/);
+  return first?.[1] || '';
+}
+
+// Fetch all pages of a KBO stats table using ASP.NET postback
+async function fetchAllKBOPages(baseUrl: string): Promise<string[]> {
+  // Page 1: simple GET
+  const page1Res = await fetch(baseUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+      'Accept': 'text/html,application/xhtml+xml',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+  if (!page1Res.ok) throw new Error(`KBO fetch failed: ${page1Res.status}`);
+
+  const cookies = (page1Res.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
+  const page1Html = await page1Res.text();
+  const pages = [page1Html];
+
+  // Detect how many pages exist (btnNo1, btnNo2, ...)
+  const pageButtons = page1Html.match(/ucPager_btnNo(\d+)/g);
+  if (!pageButtons) return pages;
+  const maxPage = Math.max(...[...new Set(pageButtons)].map(b => parseInt(b.replace('ucPager_btnNo', ''))));
+  if (maxPage <= 1) return pages;
+
+  // Fetch remaining pages using postback
+  let currentHtml = page1Html;
+  for (let pageNum = 2; pageNum <= maxPage; pageNum++) {
+    try {
+      const fields = extractFormFields(currentHtml);
+
+      // Build form data with all fields
+      const params = new URLSearchParams();
+      params.set('__EVENTTARGET', `ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ucPager$btnNo${pageNum}`);
+      params.set('__EVENTARGUMENT', '');
+      for (const key of ['__VIEWSTATE', '__VIEWSTATEGENERATOR', '__EVENTVALIDATION', '__LASTFOCUS']) {
+        if (fields[key]) params.set(key, fields[key]);
+      }
+
+      // Include all hidden fields and select dropdowns
+      for (const [k, v] of Object.entries(fields)) {
+        if (!k.startsWith('__') && !params.has(k)) params.set(k, v);
+      }
+
+      // Add select dropdown values
+      const selectNames = [
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlSeason$ddlSeason',
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlSeries$ddlSeries',
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlTeam$ddlTeam',
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlPos$ddlPos',
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlSituation$ddlSituation',
+        'ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlSituationDetail$ddlSituationDetail',
+      ];
+      for (const name of selectNames) {
+        if (!params.has(name)) {
+          params.set(name, extractSelectValue(currentHtml, name));
+        }
+      }
+
+      const res = await fetch(baseUrl, {
+        method: 'POST',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Cookie': cookies,
+          'Referer': baseUrl,
+          'Origin': 'https://www.koreabaseball.com',
+        },
+        body: params.toString(),
+      });
+
+      if (!res.ok) break;
+      const html = await res.text();
+      if (!html.includes('tData')) break; // Invalid response
+      pages.push(html);
+      currentHtml = html; // Use this page's state for next postback
+    } catch {
+      break; // Stop pagination on error
+    }
+  }
+
+  return pages;
+}
+
 export async function getKBOBatters(): Promise<KBOBatter[]> {
-  // Fetch both Basic1 (H, 2B, 3B, HR, SB, PA, AB, G) and Basic2 (BB, HBP, SO, SLG, OBP, OPS)
-  const [html1, html2] = await Promise.all([
-    fetchKBO(`${KBO_BASE}/HitterBasic/Basic1.aspx`),
-    fetchKBO(`${KBO_BASE}/HitterBasic/Basic2.aspx`),
+  // Fetch all pages of Basic1 and Basic2
+  const [pages1, pages2] = await Promise.all([
+    fetchAllKBOPages(`${KBO_BASE}/HitterBasic/Basic1.aspx`),
+    fetchAllKBOPages(`${KBO_BASE}/HitterBasic/Basic2.aspx`),
   ]);
 
-  const rows1 = parseHTMLTable(html1);
-  const rows2 = parseHTMLTable(html2);
+  // Parse all pages
+  const rows1: string[][] = [];
+  for (const html of pages1) {
+    const pageRows = parseHTMLTable(html);
+    // Skip header row (index 0) for pages after the first
+    rows1.push(...(rows1.length === 0 ? pageRows : pageRows.slice(1)));
+  }
+
+  const rows2: string[][] = [];
+  for (const html of pages2) {
+    const pageRows = parseHTMLTable(html);
+    rows2.push(...(rows2.length === 0 ? pageRows : pageRows.slice(1)));
+  }
 
   // Basic1 header: 순위, 선수명, 팀명, AVG, G, PA, AB, R, H, 2B, 3B, HR, TB, RBI, SAC, SF
   // Basic2 header: 순위, 선수명, 팀명, AVG, BB, IBB, HBP, SO, GDP, SLG, OBP, OPS, ...
@@ -152,7 +272,7 @@ export async function getKBOBatters(): Promise<KBOBatter[]> {
     const team = KBO_TEAMS[teamKr] || teamKr;
 
     batters.push({
-      name: nameKr, // Korean name — we'll use this for display
+      name: nameKr,
       nameKr,
       team,
       teamKr,
@@ -178,8 +298,13 @@ export async function getKBOBatters(): Promise<KBOBatter[]> {
 }
 
 export async function getKBOPitchers(): Promise<KBOPitcher[]> {
-  const html = await fetchKBO(`${KBO_BASE}/PitcherBasic/Basic1.aspx`);
-  const rows = parseHTMLTable(html);
+  const pages = await fetchAllKBOPages(`${KBO_BASE}/PitcherBasic/Basic1.aspx`);
+
+  const rows: string[][] = [];
+  for (const html of pages) {
+    const pageRows = parseHTMLTable(html);
+    rows.push(...(rows.length === 0 ? pageRows : pageRows.slice(1)));
+  }
 
   // Header: 순위, 선수명, 팀명, ERA, G, W, L, SV, HLD, WPCT, IP, H, HR, BB, HBP, SO, R, ER, WHIP
   const pitchers: KBOPitcher[] = [];

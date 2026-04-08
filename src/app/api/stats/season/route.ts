@@ -11,16 +11,25 @@ async function getNPBSeasonStats(players: FollowedPlayer[]): Promise<SeasonPlaye
   const currentYear = new Date().getFullYear();
   const prevYear = currentYear - 1;
 
-  // Fetch both years — use current if available, fall back to previous
-  const [batCur, pitCur, batPrev, pitPrev] = await Promise.all([
+  // Fetch current year; only fall back to previous year if current season has no data yet
+  const [batCur, pitCur] = await Promise.all([
     getNPBBatters(currentYear).catch(() => []),
     getNPBPitchers(currentYear).catch(() => []),
-    getNPBBatters(prevYear).catch(() => []),
-    getNPBPitchers(prevYear).catch(() => []),
   ]);
 
-  const batters = [...batCur, ...batPrev];
-  const pitchers = [...pitCur, ...pitPrev];
+  const seasonStarted = batCur.length > 0 || pitCur.length > 0;
+
+  let batters = batCur;
+  let pitchers = pitCur;
+  if (!seasonStarted) {
+    // Pre-season: fall back to previous year
+    const [batPrev, pitPrev] = await Promise.all([
+      getNPBBatters(prevYear).catch(() => []),
+      getNPBPitchers(prevYear).catch(() => []),
+    ]);
+    batters = batPrev;
+    pitchers = pitPrev;
+  }
 
   return npbPlayers.map((player): SeasonPlayerStats => {
     const isPitcher = player.primaryPosition === 'P';

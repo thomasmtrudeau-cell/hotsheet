@@ -180,6 +180,10 @@ export default function Home() {
     if (activeTab !== 'season') {
       const ad = a as DailyPlayerStats;
       const bd = b as DailyPlayerStats;
+      // Push DNP pitchers to the bottom (non-starting SP, pitchers who never entered)
+      const aDnpPitcher = ad.position === 'P' && ad.statLine === 'DNP';
+      const bDnpPitcher = bd.position === 'P' && bd.statLine === 'DNP';
+      if (aDnpPitcher !== bDnpPitcher) return aDnpPitcher ? 1 : -1;
       // Sort by game start time (earliest first), then by status tier, then grade
       const aTime = ad.gameStartTime ?? Infinity;
       const bTime = bd.gameStartTime ?? Infinity;
