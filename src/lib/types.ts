@@ -72,6 +72,8 @@ export interface DailyPlayerStats {
   gameStartTime?: number; // epoch ms for sorting
   gamePk?: number;
   lineupStatus?: 'starting' | 'not_starting' | 'probable_pitcher';
+  startingPosition?: string; // e.g. "SS", "3B", "DH"
+  battingOrder?: number; // 1-9
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

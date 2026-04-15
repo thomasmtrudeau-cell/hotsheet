@@ -198,8 +198,8 @@ interface ScheduleGame {
     home: { team: { id: number; name: string }; probablePitcher?: { id: number; fullName: string } };
   };
   lineups?: {
-    homePlayers?: Array<{ id: number }>;
-    awayPlayers?: Array<{ id: number }>;
+    homePlayers?: Array<{ id: number; primaryPosition?: { abbreviation: string } }>;
+    awayPlayers?: Array<{ id: number; primaryPosition?: { abbreviation: string } }>;
   };
 }
 
@@ -242,21 +242,41 @@ function getGameTime(game: ScheduleGame): string {
   return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }) + ' ET';
 }
 
-function getLineupStatus(player: FollowedPlayer, game: ScheduleGame): DailyPlayerStats['lineupStatus'] {
+function getLineupInfo(player: FollowedPlayer, game: ScheduleGame): {
+  lineupStatus: DailyPlayerStats['lineupStatus'];
+  startingPosition?: string;
+  battingOrder?: number;
+} {
   // Check probable pitcher
   const awayPP = game.teams.away.probablePitcher;
   const homePP = game.teams.home.probablePitcher;
-  if (awayPP?.id === player.id || homePP?.id === player.id) return 'probable_pitcher';
+  if (awayPP?.id === player.id || homePP?.id === player.id) {
+    return { lineupStatus: 'probable_pitcher', startingPosition: 'SP', battingOrder: undefined };
+  }
 
-  // Check lineups (position players)
+  // Check lineups (position players) — array order is batting order
   const lineups = game.lineups;
-  if (!lineups) return undefined; // lineups not yet posted
-  const allLineupIds = [
-    ...(lineups.homePlayers || []).map(p => p.id),
-    ...(lineups.awayPlayers || []).map(p => p.id),
+  if (!lineups) return { lineupStatus: undefined };
+  const allPlayers = [
+    ...(lineups.homePlayers || []),
+    ...(lineups.awayPlayers || []),
   ];
-  if (allLineupIds.length === 0) return undefined; // lineups not yet posted
-  return allLineupIds.includes(player.id) ? 'starting' : 'not_starting';
+  if (allPlayers.length === 0) return { lineupStatus: undefined };
+
+  // Find which side the player is on to get correct batting order index
+  const homeIdx = (lineups.homePlayers || []).findIndex(p => p.id === player.id);
+  const awayIdx = (lineups.awayPlayers || []).findIndex(p => p.id === player.id);
+  const idx = homeIdx >= 0 ? homeIdx : awayIdx;
+
+  if (idx < 0) return { lineupStatus: 'not_starting' };
+
+  const lineup = homeIdx >= 0 ? lineups.homePlayers! : lineups.awayPlayers!;
+  const pos = lineup[idx].primaryPosition?.abbreviation;
+  return {
+    lineupStatus: 'starting',
+    startingPosition: pos,
+    battingOrder: idx + 1, // 0-indexed → 1-indexed
+  };
 }
 
 interface BoxscorePlayer {
@@ -266,6 +286,7 @@ interface BoxscorePlayer {
     pitching?: Record<string, unknown>;
   };
   position: { abbreviation: string };
+  battingOrder?: string; // e.g. "500" = 5th
 }
 
 async function getBoxscore(gamePk: number): Promise<{
@@ -320,6 +341,12 @@ function buildDailyStats(
   base.gameTime = getGameTime(game);
   base.gameStartTime = new Date(game.gameDate).getTime();
   base.gamePk = game.gamePk;
+
+  // Populate starting position / batting order from boxscore (live/final games)
+  if (boxscorePlayer?.battingOrder) {
+    base.battingOrder = parseInt(boxscorePlayer.battingOrder, 10) / 100;
+    base.startingPosition = boxscorePlayer.position?.abbreviation;
+  }
 
   if (base.gameStatus === 'Scheduled') {
     base.performanceGrade = 'scheduled';
@@ -496,7 +523,10 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     if (status === 'Scheduled' || status === 'Postponed') {
       const stats = buildDailyStats(player, game, null);
       if (status === 'Scheduled') {
-        stats.lineupStatus = getLineupStatus(player, game);
+        const info = getLineupInfo(player, game);
+        stats.lineupStatus = info.lineupStatus;
+        stats.startingPosition = info.startingPosition;
+        stats.battingOrder = info.battingOrder;
       }
       return stats;
     }
