@@ -128,9 +128,21 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
       {/* Game context */}
       <div className="flex items-center gap-2 mb-2">
         <GameStatusDot status={stats.gameStatus} />
-        <span className="text-xs text-zinc-400">
-          {stats.gameStatus === 'No Game' ? 'No game' : stats.gameContext}
-        </span>
+        {stats.gameStatus === 'No Game' ? (
+          <span className="text-xs text-zinc-400">No game</span>
+        ) : stats.gamePk ? (
+          <a
+            href={`https://www.mlb.com/game/${stats.gamePk}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-xs text-zinc-400 hover:text-blue-400 hover:underline transition-colors"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {stats.gameContext}
+          </a>
+        ) : (
+          <span className="text-xs text-zinc-400">{stats.gameContext}</span>
+        )}
         {stats.gameTime && stats.gameStatus === 'Scheduled' && (
           <span className="text-xs text-zinc-500">{stats.gameTime}</span>
         )}
