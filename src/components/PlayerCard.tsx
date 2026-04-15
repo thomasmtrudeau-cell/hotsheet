@@ -139,7 +139,7 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
           <span className="text-xs text-zinc-400">No game</span>
         ) : stats.gamePk ? (
           <a
-            href={`https://www.mlb.com/game/${stats.gamePk}`}
+            href={`https://www.mlb.com/gameday/${stats.gamePk}`}
             target="_blank"
             rel="noopener noreferrer"
             className="text-xs text-zinc-400 hover:text-blue-400 hover:underline transition-colors"
