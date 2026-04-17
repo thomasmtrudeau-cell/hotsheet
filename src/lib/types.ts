@@ -29,6 +29,12 @@ export function isMiLB(sportId: number): boolean {
   return sportId >= 11 && sportId <= 14;
 }
 
+export interface InjuryStatus {
+  code: string; // e.g. "D10", "D60", "ILF"
+  label: string; // e.g. "10-Day IL"
+  note?: string; // e.g. "Left shoulder surgery recovery"
+}
+
 export interface FollowedPlayer {
   id: number;
   fullName: string;
@@ -41,6 +47,7 @@ export interface FollowedPlayer {
   parentOrg?: string;
   parentOrgAbbrev?: string; // e.g. "CWS" for Charlotte Knights
   followedAt: string;
+  injury?: InjuryStatus;
 }
 
 export interface SearchResult {
@@ -74,6 +81,7 @@ export interface DailyPlayerStats {
   lineupStatus?: 'starting' | 'not_starting' | 'probable_pitcher';
   startingPosition?: string; // e.g. "SS", "3B", "DH"
   battingOrder?: number; // 1-9
+  injury?: InjuryStatus;
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
@@ -136,6 +144,7 @@ export interface SeasonPlayerStats {
   kPer9?: string;
   bbPer9?: string;
   isPitcher: boolean;
+  injury?: InjuryStatus;
 }
 
 export type Grade = 'milestone' | 'standout' | 'good' | 'routine' | 'off_day' | 'scheduled' | 'no_game';

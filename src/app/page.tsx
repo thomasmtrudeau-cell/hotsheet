@@ -184,12 +184,12 @@ export default function Home() {
       const aDnpPitcher = ad.position === 'P' && ad.statLine === 'DNP';
       const bDnpPitcher = bd.position === 'P' && bd.statLine === 'DNP';
       if (aDnpPitcher !== bDnpPitcher) return aDnpPitcher ? 1 : -1;
-      // Sort by game start time (earliest first), then by status tier, then grade
+      // Sort by status tier (Live first), then by game start time, then grade
+      const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
+      if (statusDiff !== 0) return statusDiff;
       const aTime = ad.gameStartTime ?? Infinity;
       const bTime = bd.gameStartTime ?? Infinity;
       if (aTime !== bTime) return aTime - bTime;
-      const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
-      if (statusDiff !== 0) return statusDiff;
       return GRADE_ORDER.indexOf(ad.performanceGrade) - GRADE_ORDER.indexOf(bd.performanceGrade);
     }
     const aS = a as SeasonPlayerStats;

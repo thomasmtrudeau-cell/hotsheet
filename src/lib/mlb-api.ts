@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages, isMLBSystem } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages, isMLBSystem, InjuryStatus } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
@@ -71,6 +71,48 @@ async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
   return map;
 }
 
+// --- Injury status lookup (per-team roster) ---
+
+const IL_CODE_LABELS: Record<string, string> = {
+  D7: '7-Day IL',
+  D10: '10-Day IL',
+  D15: '15-Day IL',
+  D60: '60-Day IL',
+  ILF: 'Full-Season IL',
+};
+
+interface RosterEntry {
+  person: { id: number };
+  status?: { code?: string; description?: string };
+  note?: string;
+}
+
+async function getInjuryStatusForTeams(teamIds: number[]): Promise<Map<number, InjuryStatus>> {
+  const season = new Date().getFullYear();
+  const result = new Map<number, InjuryStatus>();
+  const uniqueIds = Array.from(new Set(teamIds));
+  const rosters = await Promise.all(
+    uniqueIds.map((id) =>
+      cachedFetch<{ roster?: RosterEntry[] }>(
+        `${MLB_API}/teams/${id}/roster?rosterType=fullRoster&season=${season}`,
+        600_000 // 10 min cache
+      ).catch(() => ({ roster: [] as RosterEntry[] }))
+    )
+  );
+  for (const data of rosters) {
+    for (const entry of data.roster ?? []) {
+      const code = entry.status?.code;
+      if (!code || !(code in IL_CODE_LABELS)) continue;
+      result.set(entry.person.id, {
+        code,
+        label: IL_CODE_LABELS[code],
+        note: entry.note,
+      });
+    }
+  }
+  return result;
+}
+
 // --- Hydrate followed players with correct team data + names ---
 
 export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise<FollowedPlayer[]> {
@@ -78,7 +120,7 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
 
   // Batch lookup player details to fix names + current team
   const ids = players.map((p) => p.id).join(',');
-  let playerDetails: Map<number, Record<string, unknown>> = new Map();
+  const playerDetails: Map<number, Record<string, unknown>> = new Map();
   try {
     const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
       `${MLB_API}/people?personIds=${ids}&hydrate=currentTeam`,
@@ -93,10 +135,9 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
     // Fall back to existing data
   }
 
-  return players.map((p) => {
+  // Resolve current team from player details first, so the roster lookup targets the right teams
+  const withTeams = players.map((p) => {
     const details = playerDetails.get(p.id);
-
-    // Update team from API if player was promoted/demoted
     let currentTeam = p.currentTeam;
     if (details?.currentTeam) {
       const apiTeam = details.currentTeam as Record<string, unknown>;
@@ -104,7 +145,14 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
         currentTeam = { id: apiTeam.id as number, name: apiTeam.name as string };
       }
     }
+    return { p, details, currentTeam };
+  });
 
+  const injuryMap = await getInjuryStatusForTeams(
+    withTeams.map(({ currentTeam }) => currentTeam.id)
+  );
+
+  return withTeams.map(({ p, details, currentTeam }) => {
     const teamInfo = teamMap.get(currentTeam.id);
     return {
       ...p,
@@ -113,6 +161,7 @@ export async function hydrateFollowedPlayers(players: FollowedPlayer[]): Promise
       sportId: teamInfo?.sportId ?? p.sportId,
       parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
+      injury: injuryMap.get(p.id),
     };
   });
 }
@@ -332,6 +381,7 @@ function buildDailyStats(
     isPitcherLine: false,
     performanceGrade: 'no_game',
     gradeReason: 'No game today',
+    injury: player.injury,
   };
 
   if (!game) return base;
@@ -560,6 +610,7 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
         parentOrgAbbrev: player.parentOrgAbbrev,
         gamesPlayed: 0,
         isPitcher,
+        injury: player.injury,
       };
 
       try {

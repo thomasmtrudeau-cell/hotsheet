@@ -1,6 +1,6 @@
 'use client';
 
-import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS } from '@/lib/types';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem } from '@/lib/types';
 import GradeBadge from './GradeBadge';
 
 interface DailyCardProps {
@@ -18,6 +18,14 @@ interface SeasonCardProps {
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
+
+function ILBadge({ label }: { label: string }) {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/20 text-red-400">
+      {label}
+    </span>
+  );
+}
 
 function LevelBadge({ sportId }: { sportId: number }) {
   let colorClass = 'bg-amber-500/20 text-amber-400'; // MiLB default
@@ -44,7 +52,7 @@ function GameStatusDot({ status }: { status: DailyPlayerStats['gameStatus'] }) {
 }
 
 function LineupBadge({ status, startingPosition, battingOrder }: {
-  status: 'starting' | 'not_starting' | 'probable_pitcher';
+  status: 'starting' | 'not_starting' | 'probable_pitcher' | 'tbd';
   startingPosition?: string;
   battingOrder?: number;
 }) {
@@ -56,6 +64,13 @@ function LineupBadge({ status, startingPosition, battingOrder }: {
     return (
       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-green-500/20 text-green-400">
         {label}
+      </span>
+    );
+  }
+  if (status === 'tbd') {
+    return (
+      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-zinc-700/50 text-zinc-400">
+        LINEUP TBD
       </span>
     );
   }
@@ -105,14 +120,18 @@ function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; is
 }
 
 function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void }) {
+  const borderClass = stats.injury
+    ? 'border-red-500/60 hover:border-red-500/80'
+    : 'border-zinc-700/50 hover:border-zinc-600/50';
   return (
-    <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-xl p-4 hover:border-zinc-600/50 transition-colors">
+    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
+            {stats.injury && <ILBadge label={stats.injury.label} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
@@ -165,8 +184,12 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
       {/* Lineup status + Grade */}
       <div className="flex items-center gap-2">
         <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
-        {stats.gameStatus === 'Scheduled' && stats.lineupStatus && (
-          <LineupBadge status={stats.lineupStatus} startingPosition={stats.startingPosition} battingOrder={stats.battingOrder} />
+        {stats.gameStatus === 'Scheduled' && isMLBSystem(stats.sportId) && (
+          <LineupBadge
+            status={stats.lineupStatus ?? 'tbd'}
+            startingPosition={stats.startingPosition}
+            battingOrder={stats.battingOrder}
+          />
         )}
       </div>
     </div>
@@ -177,15 +200,19 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
   // Use wRC+ if available, fall back to OPS+
   const adjustedPlus = stats.wrcPlus !== undefined ? stats.wrcPlus : stats.opsPlus;
   const adjustedPlusLabel = stats.wrcPlus !== undefined ? 'wRC+' : 'OPS+';
+  const borderClass = stats.injury
+    ? 'border-red-500/60 hover:border-red-500/80'
+    : 'border-zinc-700/50 hover:border-zinc-600/50';
 
   return (
-    <div className="bg-zinc-800/60 border border-zinc-700/50 rounded-xl p-4 hover:border-zinc-600/50 transition-colors">
+    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5">
+          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
+            {stats.injury && <ILBadge label={stats.injury.label} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
