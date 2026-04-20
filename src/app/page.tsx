@@ -203,6 +203,23 @@ export default function Home() {
     return aS.isPitcher ? 1 : -1;
   });
 
+  // Split into sections: Hitters → Pitchers → Injured (IL goes to the bottom)
+  const sections: Array<{ key: string; label: string; stats: SortableStat[] }> = (() => {
+    const hitters: SortableStat[] = [];
+    const pitchers: SortableStat[] = [];
+    const injured: SortableStat[] = [];
+    for (const s of sortedStats) {
+      if (s.injury) injured.push(s);
+      else if (s.position === 'P') pitchers.push(s);
+      else hitters.push(s);
+    }
+    return [
+      { key: 'hitters', label: 'Hitters', stats: hitters },
+      { key: 'pitchers', label: 'Pitchers', stats: pitchers },
+      { key: 'injured', label: 'Injured', stats: injured },
+    ].filter((sec) => sec.stats.length > 0);
+  })();
+
   if (!userChecked) {
     return (
       <div className="flex justify-center items-center min-h-screen">
@@ -292,15 +309,27 @@ export default function Home() {
           No players match your filters
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {sortedStats.map((stat) => (
-            <PlayerCard
-              key={stat.playerId}
-              type={activeTab === 'season' ? 'season' : 'daily'}
-              stats={stat as DailyPlayerStats & SeasonPlayerStats}
-              onUnfollow={unfollow}
-              leagueAvg={leagueAvgs.get(stat.sportId)}
-            />
+        <div className="space-y-6">
+          {sections.map((section) => (
+            <section key={section.key}>
+              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
+                {section.label}
+                <span className="ml-2 text-zinc-600 font-normal normal-case">
+                  {section.stats.length}
+                </span>
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                {section.stats.map((stat) => (
+                  <PlayerCard
+                    key={stat.playerId}
+                    type={activeTab === 'season' ? 'season' : 'daily'}
+                    stats={stat as DailyPlayerStats & SeasonPlayerStats}
+                    onUnfollow={unfollow}
+                    leagueAvg={leagueAvgs.get(stat.sportId)}
+                  />
+                ))}
+              </div>
+            </section>
           ))}
         </div>
       )}

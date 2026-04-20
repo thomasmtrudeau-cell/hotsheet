@@ -306,21 +306,17 @@ function getLineupInfo(player: FollowedPlayer, game: ScheduleGame): {
   // Check lineups (position players) — array order is batting order
   const lineups = game.lineups;
   if (!lineups) return { lineupStatus: undefined };
-  const allPlayers = [
-    ...(lineups.homePlayers || []),
-    ...(lineups.awayPlayers || []),
-  ];
-  if (allPlayers.length === 0) return { lineupStatus: undefined };
 
-  // Find which side the player is on to get correct batting order index
-  const homeIdx = (lineups.homePlayers || []).findIndex(p => p.id === player.id);
-  const awayIdx = (lineups.awayPlayers || []).findIndex(p => p.id === player.id);
-  const idx = homeIdx >= 0 ? homeIdx : awayIdx;
+  // Only the player's own team's lineup tells us whether they're starting.
+  // The opposing team may have posted before the player's team does.
+  const isHome = game.teams.home.team.id === player.currentTeam.id;
+  const ownLineup = isHome ? lineups.homePlayers : lineups.awayPlayers;
+  if (!ownLineup || ownLineup.length === 0) return { lineupStatus: undefined };
 
+  const idx = ownLineup.findIndex(p => p.id === player.id);
   if (idx < 0) return { lineupStatus: 'not_starting' };
 
-  const lineup = homeIdx >= 0 ? lineups.homePlayers! : lineups.awayPlayers!;
-  const pos = lineup[idx].primaryPosition?.abbreviation;
+  const pos = ownLineup[idx].primaryPosition?.abbreviation;
   return {
     lineupStatus: 'starting',
     startingPosition: pos,
