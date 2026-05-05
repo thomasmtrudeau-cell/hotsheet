@@ -562,25 +562,134 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
       return buildDailyStats(player, null, null);
     }
 
-    // Use first game (handle doubleheaders later if needed)
-    const game = playerGames[0];
-    const status = getGameStatus(game);
-
-    if (status === 'Scheduled' || status === 'Postponed') {
-      const stats = buildDailyStats(player, game, null);
-      if (status === 'Scheduled') {
-        const info = getLineupInfo(player, game);
-        stats.lineupStatus = info.lineupStatus;
-        stats.startingPosition = info.startingPosition;
-        stats.battingOrder = info.battingOrder;
-      }
-      return stats;
+    if (playerGames.length === 1) {
+      const game = playerGames[0];
+      return buildSingleGameStats(player, game, boxscores);
     }
 
-    const boxscore = boxscores.get(game.gamePk);
-    const boxscorePlayer = boxscore ? extractPlayerFromBoxscore(boxscore, player.id) : null;
-    return buildDailyStats(player, game, boxscorePlayer);
+    // Doubleheader: aggregate played games, fall through to scheduled if none played
+    const playedGames = playerGames.filter((g) => {
+      const s = getGameStatus(g);
+      return s === 'Live' || s === 'Final';
+    });
+    const upcomingGames = playerGames.filter((g) => getGameStatus(g) === 'Scheduled');
+
+    if (playedGames.length === 0) {
+      // All scheduled or postponed — use the first one
+      return buildSingleGameStats(player, playerGames[0], boxscores);
+    }
+
+    const perGame = playedGames.map((g) => {
+      const bs = boxscores.get(g.gamePk);
+      const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
+      return buildDailyStats(player, g, bp);
+    });
+    return aggregateDoubleheader(perGame, upcomingGames.length);
   });
+}
+
+function buildSingleGameStats(
+  player: FollowedPlayer,
+  game: ScheduleGame,
+  boxscores: Map<number, Awaited<ReturnType<typeof getBoxscore>>>
+): DailyPlayerStats {
+  const status = getGameStatus(game);
+  if (status === 'Scheduled' || status === 'Postponed') {
+    const stats = buildDailyStats(player, game, null);
+    if (status === 'Scheduled') {
+      const info = getLineupInfo(player, game);
+      stats.lineupStatus = info.lineupStatus;
+      stats.startingPosition = info.startingPosition;
+      stats.battingOrder = info.battingOrder;
+    }
+    return stats;
+  }
+  const boxscore = boxscores.get(game.gamePk);
+  const boxscorePlayer = boxscore ? extractPlayerFromBoxscore(boxscore, player.id) : null;
+  return buildDailyStats(player, game, boxscorePlayer);
+}
+
+function aggregateDoubleheader(games: DailyPlayerStats[], upcomingCount: number): DailyPlayerStats {
+  const first = games[0];
+  const tag = `(G1+${games.length === 2 ? 'G2' : `G${games.length}`}${upcomingCount > 0 ? ` · G${games.length + 1} upcoming` : ''})`;
+  const base: DailyPlayerStats = { ...first };
+  base.gameContext = `${first.gameContext} ${tag}`;
+
+  // Pick the most live status
+  base.gameStatus = games.some((g) => g.gameStatus === 'Live') ? 'Live'
+    : games.every((g) => g.gameStatus === 'Final') ? 'Final'
+    : first.gameStatus;
+
+  if (first.isPitcherLine) {
+    let totalIP = 0, er = 0, k = 0, bb = 0, h = 0, w = 0, l = 0, sv = 0;
+    for (const g of games) {
+      totalIP += parseIP(g.inningsPitched || '0');
+      er += g.earnedRuns || 0;
+      k += g.pitchingStrikeouts || 0;
+      bb += g.walksAllowed || 0;
+      h += g.hitsAllowed || 0;
+      w += g.wins || 0;
+      l += g.losses || 0;
+      sv += g.saves || 0;
+    }
+    base.inningsPitched = formatIP(totalIP);
+    base.earnedRuns = er;
+    base.pitchingStrikeouts = k;
+    base.walksAllowed = bb;
+    base.hitsAllowed = h;
+    base.wins = w;
+    base.losses = l;
+    base.saves = sv;
+    const { grade, reason } = gradePitcher({
+      inningsPitched: totalIP,
+      earnedRuns: er,
+      strikeouts: k,
+      walksAllowed: bb,
+      hitsAllowed: h,
+      saves: sv,
+      wins: w,
+      losses: l,
+    });
+    base.performanceGrade = grade;
+    base.gradeReason = `${reason} ${tag}`;
+    base.statLine = formatPitchingLine(base);
+  } else {
+    let h = 0, ab = 0, hr = 0, bb = 0, k = 0, sb = 0, d = 0, t = 0, hbp = 0;
+    for (const g of games) {
+      h += g.hits || 0;
+      ab += g.atBats || 0;
+      hr += g.homeRuns || 0;
+      bb += g.walks || 0;
+      k += g.strikeouts || 0;
+      sb += g.stolenBases || 0;
+      d += g.doubles || 0;
+      t += g.triples || 0;
+      hbp += g.hitByPitch || 0;
+    }
+    base.hits = h;
+    base.atBats = ab;
+    base.homeRuns = hr;
+    base.walks = bb;
+    base.strikeouts = k;
+    base.stolenBases = sb;
+    base.doubles = d;
+    base.triples = t;
+    base.hitByPitch = hbp;
+    if (ab > 0) {
+      const { grade, reason } = gradeHitter({
+        hits: h, atBats: ab, homeRuns: hr, walks: bb, strikeouts: k,
+        stolenBases: sb, doubles: d, triples: t, hitByPitch: hbp,
+      });
+      base.performanceGrade = grade;
+      base.gradeReason = `${reason} ${tag}`;
+      base.statLine = formatBattingLine(base);
+    } else {
+      base.performanceGrade = 'routine';
+      base.gradeReason = `Not in lineup ${tag}`;
+      base.statLine = 'DNP';
+    }
+  }
+  return base;
 }
 
 // --- Season Stats ---

@@ -350,4 +350,198 @@ export async function getKBOPitchers(): Promise<KBOPitcher[]> {
   return pitchers;
 }
 
+// Compute KBO league averages (OBP, SLG, OPS) from the qualified batter list.
+// Used as a denominator for an OPS+ approximation: 100*(OBP/lgOBP + SLG/lgSLG - 1).
+export function kboLeagueAverages(batters: KBOBatter[]): { lgOBP: number; lgSLG: number; lgOPS: number } | null {
+  if (batters.length === 0) return null;
+  let totOBP = 0, totSLG = 0, n = 0;
+  for (const b of batters) {
+    const obp = parseFloat(b.obp);
+    const slg = parseFloat(b.slg);
+    if (isFinite(obp) && isFinite(slg) && obp > 0 && slg > 0) {
+      totOBP += obp;
+      totSLG += slg;
+      n++;
+    }
+  }
+  if (n === 0) return null;
+  const lgOBP = totOBP / n;
+  const lgSLG = totSLG / n;
+  return { lgOBP, lgSLG, lgOPS: lgOBP + lgSLG };
+}
+
+// --- Per-player lookup (covers non-qualified batters like Ahn Hyun-min) ---
+
+const playerIdCache = new Map<string, number | null>();
+
+async function searchKBOPlayerId(nameKr: string, teamKr?: string): Promise<number | null> {
+  const cacheKey = `${nameKr}|${teamKr || ''}`;
+  if (playerIdCache.has(cacheKey)) return playerIdCache.get(cacheKey)!;
+
+  try {
+    const initRes = await fetch('https://www.koreabaseball.com/Player/Search.aspx', {
+      headers: { 'User-Agent': 'Mozilla/5.0' },
+    });
+    const initHtml = await initRes.text();
+    const cookies = (initRes.headers.getSetCookie?.() || []).map(c => c.split(';')[0]).join('; ');
+    const fields = extractFormFields(initHtml);
+
+    const params = new URLSearchParams();
+    params.set('__EVENTTARGET', '');
+    params.set('__EVENTARGUMENT', '');
+    for (const k of ['__VIEWSTATE', '__VIEWSTATEGENERATOR', '__EVENTVALIDATION']) {
+      if (fields[k]) params.set(k, fields[k]);
+    }
+    params.set('ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlTeam', teamKr === 'SSG' ? 'SK' : (teamKr || ''));
+    params.set('ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$ddlPosition', '');
+    params.set('ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$txtSearchPlayerName', nameKr);
+    params.set('ctl00$ctl00$ctl00$cphContents$cphContents$cphContents$btnSearch', '검색');
+
+    const res = await fetch('https://www.koreabaseball.com/Player/Search.aspx', {
+      method: 'POST',
+      headers: {
+        'User-Agent': 'Mozilla/5.0',
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Cookie': cookies,
+        'Referer': 'https://www.koreabaseball.com/Player/Search.aspx',
+      },
+      body: params.toString(),
+    });
+    const html = await res.text();
+    const match = html.match(/playerId=(\d+)/);
+    const id = match ? parseInt(match[1], 10) : null;
+    if (!id) {
+      console.warn(`[kbo] no playerId in search response for ${nameKr} team=${teamKr || ''}; htmlLen=${html.length}`);
+    }
+    playerIdCache.set(cacheKey, id);
+    return id;
+  } catch (err) {
+    console.warn(`[kbo] searchKBOPlayerId threw for ${nameKr} team=${teamKr || ''}:`, err);
+    playerIdCache.set(cacheKey, null);
+    return null;
+  }
+}
+
+// Parse the season-stats tables from a KBO player profile page.
+// The profile renders two adjacent <table class="tbl tt"> blocks for the current season.
+function parseProfileBatterStats(html: string): Partial<KBOBatter> | null {
+  const tables = [...html.matchAll(/<table[^>]*tbl tt[^>]*>([\s\S]*?)<\/table>/g)];
+  if (tables.length < 2) return null;
+
+  const extractRow = (tableHtml: string): string[] | null => {
+    const tbody = tableHtml.match(/<tbody>([\s\S]*?)<\/tbody>/);
+    if (!tbody) return null;
+    const rowMatch = tbody[1].match(/<tr>([\s\S]*?)<\/tr>/);
+    if (!rowMatch) return null;
+    return [...rowMatch[1].matchAll(/<td[^>]*>([^<]*)<\/td>/g)].map(m => m[1].trim());
+  };
+
+  const row1 = extractRow(tables[0][1]);
+  const row2 = extractRow(tables[1][1]);
+  if (!row1 || !row2) return null;
+
+  // Table 1: 팀명, AVG, G, PA, AB, R, H, 2B, 3B, HR, TB, RBI, SB, CS, SAC, SF
+  // Table 2: BB, IBB, HBP, SO, GDP, SLG, OBP, E, SB%, MH, OPS, RISP, PH-BA
+  const teamKr = row1[0];
+  return {
+    nameKr: '',
+    teamKr,
+    team: KBO_TEAMS[teamKr] || teamKr,
+    avg: row1[1],
+    g: parseInt(row1[2]) || 0,
+    pa: parseInt(row1[3]) || 0,
+    ab: parseInt(row1[4]) || 0,
+    h: parseInt(row1[6]) || 0,
+    doubles: parseInt(row1[7]) || 0,
+    triples: parseInt(row1[8]) || 0,
+    hr: parseInt(row1[9]) || 0,
+    sb: parseInt(row1[12]) || 0,
+    bb: parseInt(row2[0]) || 0,
+    hbp: parseInt(row2[2]) || 0,
+    so: parseInt(row2[3]) || 0,
+    slg: row2[5],
+    obp: row2[6],
+    ops: row2[10],
+  };
+}
+
+function parseProfilePitcherStats(html: string): Partial<KBOPitcher> | null {
+  const tables = [...html.matchAll(/<table[^>]*tbl tt[^>]*>([\s\S]*?)<\/table>/g)];
+  if (tables.length < 2) return null;
+  const extractRow = (tableHtml: string): string[] | null => {
+    const tbody = tableHtml.match(/<tbody>([\s\S]*?)<\/tbody>/);
+    if (!tbody) return null;
+    const rowMatch = tbody[1].match(/<tr>([\s\S]*?)<\/tr>/);
+    if (!rowMatch) return null;
+    return [...rowMatch[1].matchAll(/<td[^>]*>([^<]*)<\/td>/g)].map(m => m[1].trim());
+  };
+  const row1 = extractRow(tables[0][1]);
+  const row2 = extractRow(tables[1][1]);
+  if (!row1 || !row2) return null;
+  // Table 1 pitcher: 팀명, ERA, G, W, L, SV, HLD, WPCT, IP, H, HR, BB, HBP, SO, R, ER
+  // Table 2 pitcher: WHIP, ...
+  const teamKr = row1[0];
+  let ipStr = row1[8] || '0';
+  if (ipStr.includes('/')) {
+    const parts = ipStr.split(' ');
+    const whole = parseInt(parts[0]) || 0;
+    const frac = parts[1] === '1/3' ? 0.1 : parts[1] === '2/3' ? 0.2 : 0;
+    ipStr = (whole + frac).toFixed(1);
+  }
+  return {
+    nameKr: '',
+    teamKr,
+    team: KBO_TEAMS[teamKr] || teamKr,
+    era: row1[1],
+    g: parseInt(row1[2]) || 0,
+    w: parseInt(row1[3]) || 0,
+    l: parseInt(row1[4]) || 0,
+    sv: parseInt(row1[5]) || 0,
+    hld: parseInt(row1[6]) || 0,
+    ip: ipStr,
+    h: parseInt(row1[9]) || 0,
+    hr: parseInt(row1[10]) || 0,
+    bb: parseInt(row1[11]) || 0,
+    hbp: parseInt(row1[12]) || 0,
+    so: parseInt(row1[13]) || 0,
+    er: parseInt(row1[15]) || 0,
+    whip: row2[0] || '',
+  };
+}
+
+export async function getKBOPlayerSeason(nameKr: string, isPitcher: boolean, teamKr?: string): Promise<KBOBatter | KBOPitcher | null> {
+  const playerId = await searchKBOPlayerId(nameKr, teamKr);
+  if (!playerId) return null;
+
+  const url = isPitcher
+    ? `https://www.koreabaseball.com/Record/Player/PitcherDetail/Basic.aspx?playerId=${playerId}`
+    : `https://www.koreabaseball.com/Record/Player/HitterDetail/Basic.aspx?playerId=${playerId}`;
+
+  try {
+    const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0' } });
+    if (!res.ok) {
+      console.warn(`[kbo] detail fetch ${res.status} for ${nameKr} id=${playerId}`);
+      return null;
+    }
+    const html = await res.text();
+    if (isPitcher) {
+      const parsed = parseProfilePitcherStats(html);
+      if (!parsed) {
+        console.warn(`[kbo] pitcher detail parse failed for ${nameKr} id=${playerId}; htmlLen=${html.length}`);
+        return null;
+      }
+      return { ...parsed, name: nameKr, nameKr } as KBOPitcher;
+    }
+    const parsed = parseProfileBatterStats(html);
+    if (!parsed) {
+      console.warn(`[kbo] batter detail parse failed for ${nameKr} id=${playerId}; htmlLen=${html.length}`);
+      return null;
+    }
+    return { ...parsed, name: nameKr, nameKr } as KBOBatter;
+  } catch (err) {
+    console.warn(`[kbo] getKBOPlayerSeason threw for ${nameKr} id=${playerId}:`, err);
+    return null;
+  }
+}
+
 export type { KBOBatter, KBOPitcher };
