@@ -1,16 +1,17 @@
 'use client';
 
-import { useState, useCallback, useEffect, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages } from '@/lib/types';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP } from '@/lib/types';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
-import { getUsername, setUsername, clearUsername } from '@/lib/storage';
+import { createClient } from '@/lib/supabase/client';
 import SearchBar from '@/components/SearchBar';
 import TabNav from '@/components/TabNav';
 import FilterBar from '@/components/FilterBar';
 import PlayerCard from '@/components/PlayerCard';
 import EmptyState from '@/components/EmptyState';
 import LoginScreen from '@/components/LoginScreen';
+import GroupBar from '@/components/GroupBar';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -39,13 +40,16 @@ function statusTier(status: string): number {
 const GRADE_ORDER = ['milestone', 'standout', 'good', 'routine', 'off_day', 'scheduled', 'no_game'];
 
 export default function Home() {
-  const { players, loaded, follow, unfollow, reload } = useFollowedPlayers();
-  const [username, setUsernameState] = useState<string | null>(null);
-  const [userChecked, setUserChecked] = useState(false);
+  const {
+    user, players, groups, memberships, loaded,
+    follow, unfollow, addGroup, editGroup, removeGroup, assignGroups,
+  } = useFollowedPlayers();
   const [activeTab, setActiveTab] = useState<ViewTab>('today');
+  const [activeGroup, setActiveGroup] = useState<string>(ALL_PLAYERS_GROUP);
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [positionFilter, setPositionFilter] = useState<'all' | 'hitter' | 'pitcher'>('all');
   const [nameFilter, setNameFilter] = useState('');
+  const authError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('auth_error');
 
   const [dailyStats, setDailyStats] = useState<DailyPlayerStats[]>([]);
   const [yesterdayStats, setYesterdayStats] = useState<DailyPlayerStats[]>([]);
@@ -58,23 +62,35 @@ export default function Home() {
   const playersRef = useRef(players);
   playersRef.current = players;
 
-  // Check if user is logged in
+  const handleLogout = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setActiveGroup(ALL_PLAYERS_GROUP);
+  }, []);
+
+  // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const stored = getUsername();
-    setUsernameState(stored);
-    setUserChecked(true);
-  }, []);
+    if (activeGroup !== ALL_PLAYERS_GROUP && !groups.some((g) => g.id === activeGroup)) {
+      setActiveGroup(ALL_PLAYERS_GROUP);
+    }
+  }, [groups, activeGroup]);
 
-  const handleLogin = useCallback((name: string) => {
-    setUsername(name);
-    setUsernameState(name);
-    reload();
-  }, [reload]);
+  // Player count per group, for the GroupBar pills.
+  const groupCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    m.set(ALL_PLAYERS_GROUP, players.length);
+    for (const g of groups) m.set(g.id, 0);
+    memberships.forEach((ids) => {
+      for (const id of ids) m.set(id, (m.get(id) ?? 0) + 1);
+    });
+    return m;
+  }, [players.length, groups, memberships]);
 
-  const handleLogout = useCallback(() => {
-    clearUsername();
-    setUsernameState(null);
-  }, []);
+  const inActiveGroup = useCallback(
+    (playerId: number) =>
+      activeGroup === ALL_PLAYERS_GROUP || (memberships.get(playerId) ?? []).includes(activeGroup),
+    [activeGroup, memberships]
+  );
 
   // Fetch league averages once
   useEffect(() => {
@@ -165,6 +181,7 @@ export default function Home() {
 
   // Apply filters
   const filteredStats = currentStats.filter((s) => {
+    if (!inActiveGroup(s.playerId)) return false;
     if (levelFilter === 'MLB' && s.sportId !== 1) return false;
     if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
     if (levelFilter === 'NPB' && s.sportId !== 100) return false;
@@ -195,8 +212,8 @@ export default function Home() {
     const aS = a as SeasonPlayerStats;
     const bS = b as SeasonPlayerStats;
     if (!aS.isPitcher && !bS.isPitcher) {
-      const aPlus = aS.wrcPlus ?? aS.opsPlus ?? 0;
-      const bPlus = bS.wrcPlus ?? bS.opsPlus ?? 0;
+      const aPlus = aS.wrcPlus ?? aS.wrcPlusEst ?? aS.opsPlus ?? 0;
+      const bPlus = bS.wrcPlus ?? bS.wrcPlusEst ?? bS.opsPlus ?? 0;
       return bPlus - aPlus;
     }
     if (aS.isPitcher && bS.isPitcher) return parseFloat(aS.era || '99') - parseFloat(bS.era || '99');
@@ -209,7 +226,13 @@ export default function Home() {
     const pitchers: SortableStat[] = [];
     const injured: SortableStat[] = [];
     for (const s of sortedStats) {
-      if (s.injury) injured.push(s);
+      // A player on the IL with a game today (rehab assignment) belongs in the
+      // normal flow — only bench truly-not-playing injured players.
+      const playingToday =
+        activeTab !== 'season' &&
+        (s as DailyPlayerStats).gameStatus !== 'No Game' &&
+        (s as DailyPlayerStats).gameStatus !== 'Postponed';
+      if (s.injury && !playingToday) injured.push(s);
       else if (s.position === 'P') pitchers.push(s);
       else hitters.push(s);
     }
@@ -220,7 +243,8 @@ export default function Home() {
     ].filter((sec) => sec.stats.length > 0);
   })();
 
-  if (!userChecked) {
+  // Initial auth check still resolving.
+  if (!user && !loaded) {
     return (
       <div className="flex justify-center items-center min-h-screen">
         <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
@@ -228,8 +252,8 @@ export default function Home() {
     );
   }
 
-  if (!username) {
-    return <LoginScreen onLogin={handleLogin} />;
+  if (!user) {
+    return <LoginScreen authError={authError} />;
   }
 
   return (
@@ -241,7 +265,7 @@ export default function Home() {
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500">{username}</span>
+          <span className="text-xs text-zinc-500">{user.email}</span>
           <button
             onClick={handleLogout}
             className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
@@ -255,6 +279,17 @@ export default function Home() {
       <div className="mb-6">
         <SearchBar onFollow={follow} isFollowing={(id) => players.some(p => p.id === id)} />
       </div>
+
+      {/* Groups */}
+      <GroupBar
+        groups={groups}
+        activeGroup={activeGroup}
+        counts={groupCounts}
+        onSelect={setActiveGroup}
+        onCreate={addGroup}
+        onRename={editGroup}
+        onDelete={removeGroup}
+      />
 
       {/* Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
@@ -326,6 +361,11 @@ export default function Home() {
                     stats={stat as DailyPlayerStats & SeasonPlayerStats}
                     onUnfollow={unfollow}
                     leagueAvg={leagueAvgs.get(stat.sportId)}
+                    groupControl={{
+                      groups,
+                      memberOf: memberships.get(stat.playerId) ?? [],
+                      onAssignGroups: assignGroups,
+                    }}
                   />
                 ))}
               </div>

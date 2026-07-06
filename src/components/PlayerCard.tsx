@@ -1,13 +1,40 @@
 'use client';
 
-import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem } from '@/lib/types';
+import { useState } from 'react';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group } from '@/lib/types';
 import GradeBadge from './GradeBadge';
+import GroupTag from './GroupTag';
+import GameLog from './GameLog';
+import LevelBreakdown from './LevelBreakdown';
+
+// Chevron toggle for expanding a card's recent game log (MLB/MiLB only).
+function LogToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`transition-colors p-1 cursor-pointer ${open ? 'text-blue-400' : 'text-zinc-600 hover:text-zinc-400'}`}
+      title="Recent games"
+    >
+      <svg className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+      </svg>
+    </button>
+  );
+}
+
+// Optional per-card group-assignment controls (omitted in pre-auth states).
+interface GroupControl {
+  groups: Group[];
+  memberOf: string[];
+  onAssignGroups: (playerId: number, groupIds: string[]) => void;
+}
 
 interface DailyCardProps {
   type: 'daily';
   stats: DailyPlayerStats;
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
+  groupControl?: GroupControl;
 }
 
 interface SeasonCardProps {
@@ -15,9 +42,24 @@ interface SeasonCardProps {
   stats: SeasonPlayerStats;
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
+  groupControl?: GroupControl;
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
+
+// A player flagged on the IL who nonetheless has a game today is on a rehab
+// assignment — surface the game instead of burying them under "Injured".
+function isOnRehab(stats: DailyPlayerStats): boolean {
+  return Boolean(stats.injury) && stats.gameStatus !== 'No Game' && stats.gameStatus !== 'Postponed';
+}
+
+function RehabBadge() {
+  return (
+    <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
+      REHAB
+    </span>
+  );
+}
 
 function ILBadge({ label }: { label: string }) {
   return (
@@ -154,8 +196,12 @@ function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; is
   );
 }
 
-function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void }) {
-  const borderClass = stats.injury
+function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl }) {
+  const [logOpen, setLogOpen] = useState(false);
+  const canLog = isMLBSystem(stats.sportId);
+  const onRehab = isOnRehab(stats);
+  // Rehab players read as "active" — don't paint the whole card red.
+  const borderClass = stats.injury && !onRehab
     ? 'border-red-500/60 hover:border-red-500/80'
     : 'border-zinc-700/50 hover:border-zinc-600/50';
   return (
@@ -167,12 +213,22 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
+            {onRehab && <RehabBadge />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
           </div>
         </div>
         <div className="flex items-center gap-0.5">
+          {canLog && <LogToggle open={logOpen} onClick={() => setLogOpen((o) => !o)} />}
+          {groupControl && (
+            <GroupTag
+              playerId={stats.playerId}
+              groups={groupControl.groups}
+              memberOf={groupControl.memberOf}
+              onChange={groupControl.onAssignGroups}
+            />
+          )}
           <FGSearchLink playerName={stats.playerName} />
           <BRSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
@@ -229,14 +285,25 @@ function DailyCard({ stats, onUnfollow }: { stats: DailyPlayerStats; onUnfollow:
           />
         )}
       </div>
+
+      {logOpen && canLog && (
+        <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} />
+      )}
     </div>
   );
 }
 
-function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages }) {
-  // Use wRC+ if available, fall back to OPS+
-  const adjustedPlus = stats.wrcPlus !== undefined ? stats.wrcPlus : stats.opsPlus;
-  const adjustedPlusLabel = stats.wrcPlus !== undefined ? 'wRC+' : 'OPS+';
+function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages; groupControl?: GroupControl }) {
+  const [logOpen, setLogOpen] = useState(false);
+  const [levelOpen, setLevelOpen] = useState(false);
+  const canLog = isMLBSystem(stats.sportId);
+  const multiLevel = (stats.levelLines?.length ?? 0) > 1;
+  // Prefer real wRC+ (MLB), then estimated wRC+ (MiLB), then legacy OPS+ (NPB/KBO).
+  const plus = stats.wrcPlus ?? stats.wrcPlusEst ?? stats.opsPlus;
+  const plusIsEst = stats.wrcPlus === undefined && stats.wrcPlusEst !== undefined;
+  const adjustedPlusLabel = stats.wrcPlus !== undefined ? 'wRC+'
+    : plusIsEst ? 'wRC+*'
+    : stats.opsPlus !== undefined ? 'OPS+' : 'wRC+';
   const borderClass = stats.injury
     ? 'border-red-500/60 hover:border-red-500/80'
     : 'border-zinc-700/50 hover:border-zinc-600/50';
@@ -253,9 +320,29 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
+            {multiLevel && (
+              <>
+                {' '}&middot;{' '}
+                <button
+                  onClick={() => setLevelOpen((o) => !o)}
+                  className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+                >
+                  {stats.levelLines!.length} levels {levelOpen ? '▴' : '▾'}
+                </button>
+              </>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-0.5">
+          {canLog && <LogToggle open={logOpen} onClick={() => setLogOpen((o) => !o)} />}
+          {groupControl && (
+            <GroupTag
+              playerId={stats.playerId}
+              groups={groupControl.groups}
+              memberOf={groupControl.memberOf}
+              onChange={groupControl.onAssignGroups}
+            />
+          )}
           <FGSearchLink playerName={stats.playerName} />
           <BRSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
@@ -292,7 +379,8 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
             <StatCell label="SLG" value={stats.slg || '—'} />
             <StatCell label="ISO" value={isoValue(stats.avg, stats.slg)} highlight={isoFloat(stats.avg, stats.slg) >= 0.2} />
             <StatCell label="OPS" value={stats.ops || '—'} highlight={parseFloat(stats.ops || '0') >= 0.9} />
-            <StatCell label={adjustedPlusLabel} value={adjustedPlus !== undefined ? Math.round(adjustedPlus).toString() : '—'} highlight={(adjustedPlus || 0) >= 130} />
+            <StatCell label="wOBA" value={stats.woba || '—'} highlight={parseFloat(stats.woba || '0') >= 0.36} />
+            <StatCell label={adjustedPlusLabel} value={plus !== undefined ? Math.round(plus).toString() : '—'} highlight={(plus || 0) >= 130} />
             <StatCell label="HR" value={stats.homeRuns?.toString() || '—'} />
             <StatCell label="SB" value={stats.stolenBases?.toString() || '—'} />
             <StatCell label="BB" value={stats.walks?.toString() || '—'} />
@@ -303,7 +391,16 @@ function SeasonCard({ stats, onUnfollow, leagueAvg }: { stats: SeasonPlayerStats
         {leagueAvg && (
           <LeagueContext leagueAvg={leagueAvg} isPitcher={stats.isPitcher} />
         )}
+        {plusIsEst && (
+          <div className="mt-1.5 text-[9px] text-zinc-600">* wRC+ estimated (no minor-league park factor)</div>
+        )}
       </div>
+
+      {levelOpen && multiLevel && <LevelBreakdown lines={stats.levelLines!} />}
+
+      {logOpen && canLog && (
+        <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.isPitcher} />
+      )}
     </div>
   );
 }
@@ -336,7 +433,7 @@ function StatCell({ label, value, highlight }: { label: string; value: string; h
 
 export default function PlayerCard(props: PlayerCardProps) {
   if (props.type === 'daily') {
-    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} />;
+    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} />;
   }
-  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} />;
+  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} />;
 }

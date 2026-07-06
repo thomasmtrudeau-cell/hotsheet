@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, FollowedPlayer, LeagueAverages, isMLBSystem, InjuryStatus } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
@@ -9,6 +9,39 @@ function formatIP(ip: number): string {
   const whole = Math.floor(ip);
   const frac = Math.round((ip - whole) * 3);
   return `${whole}.${frac}`;
+}
+
+// --- wOBA / wRC+ estimation ---
+// Generic (league-agnostic) linear weights + scale. These don't vary by year/level
+// here, so the resulting wRC+ is an ESTIMATE — good enough to track FanGraphs to a
+// few points, but not park- or run-environment-adjusted. Always label it as such.
+const WOBA_WEIGHTS = { bb: 0.69, hbp: 0.72, b1: 0.89, b2: 1.27, b3: 1.62, hr: 2.10 };
+const WOBA_SCALE = 1.24;
+
+interface WobaComponents {
+  ab: number; h: number; doubles: number; triples: number; hr: number;
+  bb: number; ibb: number; hbp: number; sf: number;
+}
+
+function computeWoba(c: WobaComponents): number | null {
+  const denom = c.ab + c.bb - c.ibb + c.sf + c.hbp;
+  if (denom <= 0) return null;
+  const uBB = Math.max(0, c.bb - c.ibb);
+  const singles = Math.max(0, c.h - c.doubles - c.triples - c.hr);
+  const num =
+    WOBA_WEIGHTS.bb * uBB +
+    WOBA_WEIGHTS.hbp * c.hbp +
+    WOBA_WEIGHTS.b1 * singles +
+    WOBA_WEIGHTS.b2 * c.doubles +
+    WOBA_WEIGHTS.b3 * c.triples +
+    WOBA_WEIGHTS.hr * c.hr;
+  return num / denom;
+}
+
+// wRC+ estimate (no park factor): ((wOBA - lgwOBA)/scale + lgR/PA) / (lgR/PA) * 100
+function estimateWrcPlus(woba: number, lgWoba?: number, lgRunsPerPA?: number): number | undefined {
+  if (!lgWoba || !lgRunsPerPA || lgRunsPerPA <= 0) return undefined;
+  return Math.round((((woba - lgWoba) / WOBA_SCALE + lgRunsPerPA) / lgRunsPerPA) * 100);
 }
 
 // Simple in-memory cache for server-side API routes
@@ -694,6 +727,59 @@ function aggregateDoubleheader(games: DailyPlayerStats[], upcomingCount: number)
 
 // --- Season Stats ---
 
+// Per-level aggregates (summed across stints within one level).
+interface HitAgg { sid: number; g: number; ab: number; h: number; hr: number; sb: number; bb: number; ibb: number; k: number; pa: number; d: number; t: number; hbp: number; sf: number; tb: number }
+interface PitAgg { sid: number; g: number; er: number; ip: number; k: number; bb: number; w: number; l: number; sv: number; h: number }
+
+const LEVEL_RANK: Record<number, number> = { 1: 0, 11: 1, 12: 2, 13: 3, 14: 4 };
+
+function buildHitterLine(a: HitAgg, lg: LeagueAverages | null, saberStat?: Record<string, unknown>): SeasonLevelLine {
+  const avg = a.ab > 0 ? (a.h / a.ab).toFixed(3) : '.000';
+  const obpDen = a.ab + a.bb + a.hbp + a.sf;
+  const obp = obpDen > 0 ? ((a.h + a.bb + a.hbp) / obpDen).toFixed(3) : '.000';
+  const slg = a.ab > 0 ? (a.tb / a.ab).toFixed(3) : '.000';
+  const ops = (parseFloat(obp) + parseFloat(slg)).toFixed(3);
+
+  const wobaNum = computeWoba({ ab: a.ab, h: a.h, doubles: a.d, triples: a.t, hr: a.hr, bb: a.bb, ibb: a.ibb, hbp: a.hbp, sf: a.sf });
+  // FanGraphs rescales MiLB wOBA so league wOBA == league OBP. Match that convention
+  // for the DISPLAYED value (wRC+ below still uses the raw value + raw league wOBA,
+  // which is scale-invariant).
+  let woba: string | undefined;
+  if (wobaNum !== null) {
+    const lgObp = lg ? parseFloat(lg.lgOBP) : NaN;
+    const scaleK = lg?.lgWoba && lg.lgWoba > 0 && isFinite(lgObp) ? lgObp / lg.lgWoba : 1;
+    woba = (wobaNum * scaleK).toFixed(3);
+  }
+  let wrcPlus: number | undefined;
+  let wrcPlusEst: number | undefined;
+
+  // Real wOBA/wRC+ exist only for MLB time (sportId 1) via the sabermetrics endpoint.
+  if (a.sid === 1 && saberStat) {
+    const realWrc = (saberStat.wRcPlus ?? saberStat.wrcPlus) as number | undefined;
+    const realWoba = saberStat.woba as number | undefined;
+    if (realWoba !== undefined) woba = realWoba.toFixed(3);
+    if (realWrc !== undefined) wrcPlus = Math.round(realWrc);
+  }
+  if (wrcPlus === undefined && wobaNum !== null) {
+    wrcPlusEst = estimateWrcPlus(wobaNum, lg?.lgWoba, lg?.lgRunsPerPA);
+  }
+
+  return {
+    level: LEVEL_LABELS[a.sid] || '?', sportId: a.sid, isPitcher: false,
+    gamesPlayed: a.g, plateAppearances: a.pa, avg, obp, slg, ops, woba, wrcPlus, wrcPlusEst, homeRuns: a.hr,
+  };
+}
+
+function buildPitcherLine(a: PitAgg): SeasonLevelLine {
+  return {
+    level: LEVEL_LABELS[a.sid] || '?', sportId: a.sid, isPitcher: true,
+    gamesPlayed: a.g,
+    era: a.ip > 0 ? (a.er * 9 / a.ip).toFixed(2) : '0.00',
+    whip: a.ip > 0 ? ((a.bb + a.h) / a.ip).toFixed(2) : '0.00',
+    inningsPitched: formatIP(a.ip),
+  };
+}
+
 export async function getSeasonStats(players: FollowedPlayer[], season?: number): Promise<SeasonPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -721,7 +807,8 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
       try {
         const group = isPitcher ? 'pitching' : 'hitting';
 
-        // For MiLB/MLB players, fetch all sport IDs to catch promotions/demotions/rehab stints
+        // Fetch every level (catches promotions/demotions/rehab) + MLB sabermetrics
+        // (the only level with real wOBA/wRC+).
         const sportIdsToTry = isMLBSystem(player.sportId) ? ALL_SPORT_IDS : [player.sportId];
         const [allRegularData, saberData] = await Promise.all([
           Promise.all(
@@ -732,106 +819,109 @@ export async function getSeasonStats(players: FollowedPlayer[], season?: number)
             )
           ),
           cachedFetch<Record<string, unknown>>(
-            `${MLB_API}/people/${player.id}/stats?stats=sabermetrics&group=${group}&season=${currentSeason}&sportId=${player.sportId}`
+            `${MLB_API}/people/${player.id}/stats?stats=sabermetrics&group=${group}&season=${currentSeason}&sportId=1`
           ).catch(() => null),
         ]);
+        const saberStat = (saberData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined)?.[0]?.splits?.[0]?.stat;
 
-        // Collect all splits across all levels
-        const allSplits: Array<{ stat: Record<string, unknown>; sportId: number }> = [];
+        // Aggregate each level separately — NEVER blend rate stats across levels.
+        const hitAggs: HitAgg[] = [];
+        const pitAggs: PitAgg[] = [];
         for (let i = 0; i < sportIdsToTry.length; i++) {
-          const data = allRegularData[i];
-          const stats = data?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined;
-          const splits = stats?.[0]?.splits;
-          if (splits) {
+          const sid = sportIdsToTry[i];
+          const splits = (allRegularData[i]?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined)?.[0]?.splits;
+          if (!splits || splits.length === 0) continue;
+
+          if (isPitcher) {
+            const a: PitAgg = { sid, g: 0, er: 0, ip: 0, k: 0, bb: 0, w: 0, l: 0, sv: 0, h: 0 };
             for (const sp of splits) {
-              allSplits.push({ stat: sp.stat, sportId: sportIdsToTry[i] });
+              const s = sp.stat;
+              a.g += (s.gamesPlayed as number) || 0;
+              a.er += (s.earnedRuns as number) || 0;
+              a.ip += parseIP((s.inningsPitched as string) || '0');
+              a.k += (s.strikeOuts as number) || 0;
+              a.bb += (s.baseOnBalls as number) || 0;
+              a.w += (s.wins as number) || 0;
+              a.l += (s.losses as number) || 0;
+              a.sv += (s.saves as number) || 0;
+              a.h += (s.hits as number) || 0;
             }
+            if (a.g > 0 || a.ip > 0) pitAggs.push(a);
+          } else {
+            const a: HitAgg = { sid, g: 0, ab: 0, h: 0, hr: 0, sb: 0, bb: 0, ibb: 0, k: 0, pa: 0, d: 0, t: 0, hbp: 0, sf: 0, tb: 0 };
+            for (const sp of splits) {
+              const s = sp.stat;
+              a.g += (s.gamesPlayed as number) || 0;
+              a.ab += (s.atBats as number) || 0;
+              a.h += (s.hits as number) || 0;
+              a.hr += (s.homeRuns as number) || 0;
+              a.sb += (s.stolenBases as number) || 0;
+              a.bb += (s.baseOnBalls as number) || 0;
+              a.ibb += (s.intentionalWalks as number) || 0;
+              a.k += (s.strikeOuts as number) || 0;
+              a.pa += (s.plateAppearances as number) || 0;
+              a.d += (s.doubles as number) || 0;
+              a.t += (s.triples as number) || 0;
+              a.hbp += (s.hitByPitch as number) || 0;
+              a.sf += (s.sacFlies as number) || 0;
+              a.tb += (s.totalBases as number) || 0;
+            }
+            if (a.pa > 0 || a.g > 0) hitAggs.push(a);
           }
         }
 
-        if (allSplits.length === 0) return base;
-
-        // Combine stats across all levels
         if (isPitcher) {
-          let totalG = 0, totalER = 0, totalIP = 0, totalK = 0, totalBB = 0;
-          let totalW = 0, totalL = 0, totalSV = 0, totalH = 0;
-          for (const { stat } of allSplits) {
-            totalG += (stat.gamesPlayed as number) || 0;
-            totalER += (stat.earnedRuns as number) || 0;
-            totalIP += parseIP((stat.inningsPitched as string) || '0');
-            totalK += (stat.strikeOuts as number) || 0;
-            totalBB += (stat.baseOnBalls as number) || 0;
-            totalW += (stat.wins as number) || 0;
-            totalL += (stat.losses as number) || 0;
-            totalSV += (stat.saves as number) || 0;
-            totalH += (stat.hits as number) || 0;
+          if (pitAggs.length === 0) return base;
+          // Current level = the one matching the (re-hydrated) current sportId, else most IP.
+          const current = pitAggs.find((a) => a.sid === player.sportId) ??
+            [...pitAggs].sort((x, y) => y.ip - x.ip)[0];
+          const c = current;
+          base.level = LEVEL_LABELS[c.sid] || base.level;
+          base.sportId = c.sid;
+          base.gamesPlayed = c.g;
+          base.era = c.ip > 0 ? (c.er * 9 / c.ip).toFixed(2) : '0.00';
+          base.whip = c.ip > 0 ? ((c.bb + c.h) / c.ip).toFixed(2) : '0.00';
+          base.inningsPitched = formatIP(c.ip);
+          base.pitchingStrikeouts = c.k;
+          base.walksAllowed = c.bb;
+          base.wins = c.w;
+          base.losses = c.l;
+          base.saves = c.sv;
+          base.kPer9 = c.ip > 0 ? (c.k * 9 / c.ip).toFixed(2) : '0.00';
+          base.bbPer9 = c.ip > 0 ? (c.bb * 9 / c.ip).toFixed(2) : '0.00';
+          if (pitAggs.length > 1) {
+            base.levelLines = [...pitAggs].sort((x, y) => (LEVEL_RANK[x.sid] ?? 9) - (LEVEL_RANK[y.sid] ?? 9)).map(buildPitcherLine);
           }
-          base.gamesPlayed = totalG;
-          base.era = totalIP > 0 ? (totalER * 9 / totalIP).toFixed(2) : '0.00';
-          base.whip = totalIP > 0 ? ((totalBB + totalH) / totalIP).toFixed(2) : '0.00';
-          base.inningsPitched = formatIP(totalIP);
-          base.pitchingStrikeouts = totalK;
-          base.walksAllowed = totalBB;
-          base.wins = totalW;
-          base.losses = totalL;
-          base.saves = totalSV;
-          base.kPer9 = totalIP > 0 ? (totalK * 9 / totalIP).toFixed(2) : '0.00';
-          base.bbPer9 = totalIP > 0 ? (totalBB * 9 / totalIP).toFixed(2) : '0.00';
         } else {
-          let totalG = 0, totalAB = 0, totalH = 0, totalHR = 0, totalSB = 0;
-          let totalBB = 0, totalK = 0, totalPA = 0, totalD = 0, totalT = 0;
-          let totalHBP = 0, totalSF = 0, totalTB = 0;
-          for (const { stat } of allSplits) {
-            totalG += (stat.gamesPlayed as number) || 0;
-            totalAB += (stat.atBats as number) || 0;
-            totalH += (stat.hits as number) || 0;
-            totalHR += (stat.homeRuns as number) || 0;
-            totalSB += (stat.stolenBases as number) || 0;
-            totalBB += (stat.baseOnBalls as number) || 0;
-            totalK += (stat.strikeOuts as number) || 0;
-            totalPA += (stat.plateAppearances as number) || 0;
-            totalD += (stat.doubles as number) || 0;
-            totalT += (stat.triples as number) || 0;
-            totalHBP += (stat.hitByPitch as number) || 0;
-            totalSF += (stat.sacFlies as number) || 0;
-            totalTB += (stat.totalBases as number) || 0;
-          }
-          base.gamesPlayed = totalG;
-          base.avg = totalAB > 0 ? (totalH / totalAB).toFixed(3) : '.000';
-          const obpDenom = totalAB + totalBB + totalHBP + totalSF;
-          base.obp = obpDenom > 0 ? ((totalH + totalBB + totalHBP) / obpDenom).toFixed(3) : '.000';
-          base.slg = totalAB > 0 ? (totalTB / totalAB).toFixed(3) : '.000';
-          base.ops = (parseFloat(base.obp) + parseFloat(base.slg)).toFixed(3);
-          base.homeRuns = totalHR;
-          base.stolenBases = totalSB;
-          base.walks = totalBB;
-          base.strikeouts = totalK;
-          base.doubles = totalD;
-          base.triples = totalT;
-          base.plateAppearances = totalPA;
-        }
-
-        // Parse sabermetrics for wRC+ (use current level)
-        const saberStats = saberData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }> | undefined;
-        const saber = saberStats?.[0]?.splits?.[0]?.stat;
-        if (saber && !isPitcher) {
-          base.wrcPlus = saber.wRcPlus as number | undefined;
-          if (base.wrcPlus === undefined) {
-            base.wrcPlus = saber.wrcPlus as number | undefined;
-          }
-        }
-
-        // Calculate OPS+ as fallback when wRC+ is unavailable
-        if (!isPitcher && base.wrcPlus === undefined && base.obp && base.slg) {
-          const lgAvg = await getLeagueAverages(player.sportId, currentSeason);
-          if (lgAvg) {
-            const playerOBP = parseFloat(base.obp);
-            const playerSLG = parseFloat(base.slg);
-            const lgOBP = parseFloat(lgAvg.lgOBP);
-            const lgSLG = parseFloat(lgAvg.lgSLG);
-            if (lgOBP > 0 && lgSLG > 0) {
-              base.opsPlus = Math.round(100 * (playerOBP / lgOBP + playerSLG / lgSLG - 1));
-            }
+          if (hitAggs.length === 0) return base;
+          const current = hitAggs.find((a) => a.sid === player.sportId) ??
+            [...hitAggs].sort((x, y) => y.pa - x.pa)[0];
+          const c = current;
+          // League averages for the current level → wRC+ estimate.
+          const lgAvg = await getLeagueAverages(c.sid, currentSeason);
+          const line = buildHitterLine(c, lgAvg, saberStat);
+          base.level = line.level;
+          base.sportId = c.sid;
+          base.gamesPlayed = c.g;
+          base.avg = line.avg;
+          base.obp = line.obp;
+          base.slg = line.slg;
+          base.ops = line.ops;
+          base.woba = line.woba;
+          base.wrcPlus = line.wrcPlus;
+          base.wrcPlusEst = line.wrcPlusEst;
+          base.homeRuns = c.hr;
+          base.stolenBases = c.sb;
+          base.walks = c.bb;
+          base.strikeouts = c.k;
+          base.doubles = c.d;
+          base.triples = c.t;
+          base.plateAppearances = c.pa;
+          if (hitAggs.length > 1) {
+            const ordered = [...hitAggs].sort((x, y) => (LEVEL_RANK[x.sid] ?? 9) - (LEVEL_RANK[y.sid] ?? 9));
+            base.levelLines = await Promise.all(
+              ordered.map(async (a) => buildHitterLine(a, await getLeagueAverages(a.sid, currentSeason), saberStat))
+            );
           }
         }
 
@@ -887,11 +977,15 @@ async function getLeagueAverages(sportId: number, season?: number): Promise<Leag
         ]);
 
         let lgOPS = '.000', lgOBP = '.000', lgSLG = '.000', lgERA = '0.00';
+        let lgWoba: number | undefined;
+        let lgRunsPerPA: number | undefined;
 
-        // Compute weighted averages from team splits
+        // Compute weighted averages + league wOBA/R-per-PA from team splits
         const hittingSplits = (hittingData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }>)?.[0]?.splits;
         if (hittingSplits && hittingSplits.length > 0) {
           let totalPA = 0, weightedOPS = 0, weightedOBP = 0, weightedSLG = 0;
+          // League component totals for wOBA
+          let tAB = 0, tH = 0, t2B = 0, t3B = 0, tHR = 0, tBB = 0, tIBB = 0, tHBP = 0, tSF = 0, tR = 0, tPA = 0;
           for (const sp of hittingSplits) {
             const s = sp.stat;
             const pa = (s.plateAppearances as number) || 0;
@@ -899,12 +993,26 @@ async function getLeagueAverages(sportId: number, season?: number): Promise<Leag
             weightedOPS += pa * parseFloat((s.ops as string) || '0');
             weightedOBP += pa * parseFloat((s.obp as string) || '0');
             weightedSLG += pa * parseFloat((s.slg as string) || '0');
+            tAB += (s.atBats as number) || 0;
+            tH += (s.hits as number) || 0;
+            t2B += (s.doubles as number) || 0;
+            t3B += (s.triples as number) || 0;
+            tHR += (s.homeRuns as number) || 0;
+            tBB += (s.baseOnBalls as number) || 0;
+            tIBB += (s.intentionalWalks as number) || 0;
+            tHBP += (s.hitByPitch as number) || 0;
+            tSF += (s.sacFlies as number) || 0;
+            tR += (s.runs as number) || 0;
+            tPA += pa;
           }
           if (totalPA > 0) {
             lgOPS = (weightedOPS / totalPA).toFixed(3);
             lgOBP = (weightedOBP / totalPA).toFixed(3);
             lgSLG = (weightedSLG / totalPA).toFixed(3);
           }
+          const woba = computeWoba({ ab: tAB, h: tH, doubles: t2B, triples: t3B, hr: tHR, bb: tBB, ibb: tIBB, hbp: tHBP, sf: tSF });
+          if (woba !== null) lgWoba = woba;
+          if (tPA > 0) lgRunsPerPA = tR / tPA;
         }
 
         const pitchingSplits = (pitchingData?.stats as Array<{ splits: Array<{ stat: Record<string, unknown> }> }>)?.[0]?.splits;
@@ -931,6 +1039,8 @@ async function getLeagueAverages(sportId: number, season?: number): Promise<Leag
           lgOBP,
           lgSLG,
           lgERA,
+          lgWoba,
+          lgRunsPerPA,
         });
       } catch {
         // Skip this level
@@ -947,4 +1057,85 @@ export async function getAllLeagueAverages(): Promise<LeagueAverages[]> {
   // Ensure cache is populated
   await getLeagueAverages(1, season);
   return Array.from(leagueAvgCache?.values() || []);
+}
+
+// --- Game logs (MLB + MiLB only; NPB/KBO have no equivalent endpoint) ---
+
+interface GameLogSplit {
+  date?: string;
+  isHome?: boolean;
+  team?: { id: number; name: string };
+  opponent?: { id: number; name: string };
+  sport?: { id: number };
+  stat?: Record<string, unknown>;
+}
+
+function shortTeamName(name: string): string {
+  // "Los Angeles Dodgers" -> "Dodgers"; "Red Sox" -> "Red Sox" (keep two-word nicknames)
+  const parts = name.trim().split(' ');
+  if (parts.length <= 1) return name;
+  const last = parts[parts.length - 1];
+  const TWO_WORD = new Set(['Sox', 'Jays']);
+  return TWO_WORD.has(last) ? `${parts[parts.length - 2]} ${last}` : last;
+}
+
+function num(v: unknown): number | undefined {
+  const n = typeof v === 'string' ? parseFloat(v) : typeof v === 'number' ? v : NaN;
+  return isFinite(n) ? n : undefined;
+}
+
+// Recent per-game log for an MLB/MiLB player. `sportId` filters to a level;
+// pass undefined to let the API return the player's games across levels.
+export async function getGameLog(
+  playerId: number,
+  isPitcher: boolean,
+  sportId?: number,
+  season?: number,
+  limit = 10
+): Promise<GameLogEntry[]> {
+  const year = season ?? new Date().getFullYear();
+  const group = isPitcher ? 'pitching' : 'hitting';
+  const sportParam = sportId ? `&sportId=${sportId}` : '';
+  const url = `${MLB_API}/people/${playerId}/stats?stats=gameLog&group=${group}&season=${year}${sportParam}`;
+
+  let splits: GameLogSplit[] = [];
+  try {
+    const data = await cachedFetch<{ stats?: Array<{ splits?: GameLogSplit[] }> }>(url, 5 * 60_000);
+    splits = data?.stats?.[0]?.splits ?? [];
+  } catch {
+    return [];
+  }
+
+  // Splits are chronological; take the most recent `limit`, newest first.
+  return splits.slice(-limit).reverse().map((split): GameLogEntry => {
+    const s = split.stat ?? {};
+    const opponent = split.opponent?.name ? shortTeamName(split.opponent.name) : '—';
+    const prefix = split.isHome ? 'vs' : '@';
+
+    const statLine = isPitcher
+      ? formatPitchingLine({
+          inningsPitched: s.inningsPitched as string | undefined,
+          earnedRuns: num(s.earnedRuns),
+          pitchingStrikeouts: num(s.strikeOuts),
+          walksAllowed: num(s.baseOnBalls),
+          hitsAllowed: num(s.hits),
+        })
+      : formatBattingLine({
+          atBats: num(s.atBats),
+          hits: num(s.hits),
+          homeRuns: num(s.homeRuns),
+          doubles: num(s.doubles),
+          triples: num(s.triples),
+          walks: num(s.baseOnBalls),
+          strikeouts: num(s.strikeOuts),
+          stolenBases: num(s.stolenBases),
+        });
+
+    return {
+      date: split.date ?? '',
+      opponent: `${prefix} ${opponent}`,
+      level: split.sport?.id ? LEVEL_LABELS[split.sport.id] : undefined,
+      statLine,
+    };
+  });
 }
