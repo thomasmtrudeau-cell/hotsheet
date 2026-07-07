@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchPlayers } from '@/lib/mlb-api';
+import { fuzzySearchPlayers } from '@/lib/player-index';
 import { getNPBBatters, getNPBPitchers } from '@/lib/npb-scraper';
 import { getKBOBatters, getKBOPitchers } from '@/lib/kbo-scraper';
 import { getEnglishName } from '@/lib/korean-romanize';
@@ -113,10 +114,19 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [mlbResults, intlPool] = await Promise.all([
-      searchPlayers(query),
+    const [fuzzyResults, intlPool] = await Promise.all([
+      fuzzySearchPlayers(query).catch(() => [] as SearchResult[]),
       getIntlSearchPool(),
     ]);
+
+    // The roster index covers active MLB/MiLB players typo-tolerantly; the
+    // people/search endpoint backfills anyone it misses (just-signed, etc.).
+    let mlbResults = fuzzyResults;
+    if (mlbResults.length < 3) {
+      const apiResults = await searchPlayers(query).catch(() => []);
+      const seen = new Set(mlbResults.map((r) => r.id));
+      mlbResults = [...mlbResults, ...apiResults.filter((r) => !seen.has(r.id))];
+    }
 
     // Filter international players by search terms
     const searchTerms = query.toLowerCase().split(/\s+/).filter(Boolean);

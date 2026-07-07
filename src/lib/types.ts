@@ -108,6 +108,28 @@ export interface DailyPlayerStats {
   gradeReason: string;
 }
 
+// One line of a player's season at a single level (for the multi-level breakdown).
+export interface SeasonLevelLine {
+  level: string;
+  sportId: number;
+  gamesPlayed: number;
+  plateAppearances?: number;
+  isPitcher: boolean;
+  // Batting
+  avg?: string;
+  obp?: string;
+  slg?: string;
+  ops?: string;
+  woba?: string;
+  wrcPlus?: number;     // real (MLB only, from API)
+  wrcPlusEst?: number;  // estimated (MiLB; no park factor)
+  homeRuns?: number;
+  // Pitching
+  era?: string;
+  whip?: string;
+  inningsPitched?: string;
+}
+
 export interface SeasonPlayerStats {
   playerId: number;
   playerName: string;
@@ -118,13 +140,18 @@ export interface SeasonPlayerStats {
   parentOrg?: string;
   parentOrgAbbrev?: string;
   gamesPlayed: number;
+  // Per-level breakdown when the player has appeared at >1 level this season.
+  // The headline fields below reflect the CURRENT level only (never blended).
+  levelLines?: SeasonLevelLine[];
   // Batting
   avg?: string;
   obp?: string;
   slg?: string;
   ops?: string;
-  wrcPlus?: number;
-  opsPlus?: number;
+  woba?: string;
+  wrcPlus?: number;     // real (MLB only, from API)
+  wrcPlusEst?: number;  // estimated (MiLB; no park factor)
+  opsPlus?: number;     // legacy fallback (NPB/KBO)
   homeRuns?: number;
   stolenBases?: number;
   walks?: number;
@@ -174,7 +201,25 @@ export interface LeagueAverages {
   lgERA: string;
   lgOBP: string;
   lgSLG: string;
+  lgWoba?: number;        // league wOBA, for wRC+ estimation
+  lgRunsPerPA?: number;   // league R/PA, for wRC+ estimation
 }
+
+export interface Group {
+  id: string;
+  name: string;
+  sortOrder: number;
+}
+
+export interface GameLogEntry {
+  date: string;      // YYYY-MM-DD
+  opponent: string;  // e.g. "vs Dodgers" / "@ Giants"
+  level?: string;    // sport-level label (shows level changes during rehab/promotions)
+  statLine: string;  // formatted batting or pitching line
+}
+
+// Special sentinel for the implicit "All Players" view (not a stored group).
+export const ALL_PLAYERS_GROUP = 'all';
 
 export type ViewTab = 'today' | 'yesterday' | 'season';
 

@@ -74,7 +74,7 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
           value={query}
           onChange={(e) => handleChange(e.target.value)}
           onFocus={() => query.length >= 2 && setOpen(true)}
-          placeholder="Search MLB & MiLB players..."
+          placeholder="Search any player — partial names & typos OK"
           className="w-full pl-10 pr-4 py-2.5 bg-zinc-800/80 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm"
         />
         {loading && (
