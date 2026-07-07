@@ -1,7 +1,9 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import type { User } from '@supabase/supabase-js';
 import { FollowedPlayer, Group } from '@/lib/types';
+import { createClient } from '@/lib/supabase/client';
 import * as store from '@/lib/storage';
 import {
   HotNotification,
@@ -23,6 +25,7 @@ function rosterSignature(players: FollowedPlayer[]): string {
 }
 
 export function useFollowedPlayers() {
+  const [user, setUser] = useState<User | null>(null);
   const [players, setPlayers] = useState<FollowedPlayer[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   // playerId -> groupIds[]
@@ -52,57 +55,138 @@ export function useFollowedPlayers() {
       if (events.length > 0) setNotifications(addNotifications(events));
 
       // Persist the refreshed copies so the next visit diffs against these.
-      store.setPlayers(fresh);
+      store.setCachedPlayers(fresh);
+      await store.bulkUpsertCloudPlayers(fresh);
       if (rosterSignature(fresh) !== rosterSignature(prev)) setPlayers(fresh);
     } catch {
       // Offline / API hiccup — diff again next load.
     }
   }, []);
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      let loadedPlayers = store.getPlayers();
-      if (loadedPlayers.length === 0) {
-        const imported = await store.importLegacyPlayersOnce();
-        if (imported) loadedPlayers = imported;
+  // Load everything for the signed-in user, migrating any pre-account
+  // localStorage data (players, groups, memberships) up on first login.
+  const loadAll = useCallback(async () => {
+    let cloudPlayers = await store.fetchCloudPlayers();
+    if (cloudPlayers.length === 0) {
+      // First login: adopt whatever this browser already had.
+      let local = store.getCachedPlayers();
+      if (local.length === 0) {
+        local = (await store.importLegacyPlayersOnce()) ?? [];
       }
+      if (local.length > 0) {
+        await store.bulkUpsertCloudPlayers(local);
+        cloudPlayers = local;
+      }
+    }
+
+    let cloudGroups = await store.fetchGroups();
+    let migratedGroups = false;
+    if (cloudGroups.length === 0) {
+      const localGroups = store.getCachedGroups();
+      if (localGroups.length > 0) {
+        await store.bulkInsertGroups(localGroups);
+        cloudGroups = localGroups;
+        migratedGroups = true;
+      } else {
+        // Brand-new account: start with the same defaults the local app seeded.
+        const seeded = [
+          await store.createGroup('Watch List', 0),
+          await store.createGroup('My Team', 1),
+        ].filter((g): g is Group => g !== null);
+        cloudGroups = seeded;
+      }
+    }
+
+    let cloudMemberships = await store.fetchMemberships();
+    if (cloudMemberships.size === 0 && migratedGroups) {
+      // Group UUIDs were preserved, so local membership rows apply verbatim.
+      const localMemberships = store.getCachedMemberships();
+      if (localMemberships.size > 0) {
+        await store.bulkInsertMemberships(
+          localMemberships,
+          new Set(cloudPlayers.map((p) => p.id)),
+          new Set(cloudGroups.map((g) => g.id))
+        );
+        cloudMemberships = localMemberships;
+      }
+    }
+
+    setPlayers(cloudPlayers);
+    setGroups(cloudGroups);
+    setMemberships(cloudMemberships);
+    setNotifications(getNotifications());
+    setLoaded(true);
+    refreshAndDiff(cloudPlayers);
+  }, [refreshAndDiff]);
+
+  // Track auth state.
+  useEffect(() => {
+    const supabase = createClient();
+    let active = true;
+    let loadedForUserId: string | null = null;
+
+    supabase.auth.getUser().then(({ data }) => {
       if (!active) return;
-      setPlayers(loadedPlayers);
-      setGroups(store.seedDefaultGroupsOnce());
-      setMemberships(store.getMemberships());
-      setNotifications(getNotifications());
-      setLoaded(true);
-      refreshAndDiff(loadedPlayers);
-    })();
+      setUser(data.user ?? null);
+      if (data.user) {
+        loadedForUserId = data.user.id;
+        loadAll();
+      } else {
+        setLoaded(true);
+      }
+    });
+
+    const { data: sub } = supabase.auth.onAuthStateChange((_event, session) => {
+      const nextUser = session?.user ?? null;
+      setUser(nextUser);
+      if (nextUser) {
+        // Token refreshes fire this too — only reload on an actual user change.
+        if (loadedForUserId !== nextUser.id) {
+          loadedForUserId = nextUser.id;
+          setLoaded(false);
+          loadAll();
+        }
+      } else {
+        loadedForUserId = null;
+        setPlayers([]);
+        setGroups([]);
+        setMemberships(new Map());
+        setLoaded(true);
+      }
+    });
+
     return () => {
       active = false;
+      sub.subscription.unsubscribe();
     };
-  }, [refreshAndDiff]);
+  }, [loadAll]);
 
   // --- Player actions ---
 
-  const follow = useCallback((player: FollowedPlayer) => {
+  const follow = useCallback(async (player: FollowedPlayer) => {
+    const withTime = { ...player, followedAt: new Date().toISOString() };
     setPlayers((prev) => {
       if (prev.some((p) => p.id === player.id)) return prev;
-      const updated = [...prev, { ...player, followedAt: new Date().toISOString() }];
-      store.setPlayers(updated);
+      const updated = [...prev, withTime];
+      store.setCachedPlayers(updated);
       return updated;
     });
+    await store.upsertCloudPlayer(withTime);
   }, []);
 
-  const unfollow = useCallback((playerId: number) => {
+  const unfollow = useCallback(async (playerId: number) => {
     setPlayers((prev) => {
       const updated = prev.filter((p) => p.id !== playerId);
-      store.setPlayers(updated);
+      store.setCachedPlayers(updated);
       return updated;
     });
     setMemberships((prev) => {
       const next = new Map(prev);
       next.delete(playerId);
-      store.setMemberships(next);
+      store.setCachedMemberships(next);
       return next;
     });
+    await store.deleteCloudPlayer(playerId);
   }, []);
 
   const isFollowing = useCallback(
@@ -112,47 +196,52 @@ export function useFollowedPlayers() {
 
   // --- Group actions ---
 
-  const addGroup = useCallback((name: string) => {
-    const group: Group = { id: crypto.randomUUID(), name: name.trim(), sortOrder: 0 };
-    setGroups((prev) => {
-      const updated = [...prev, { ...group, sortOrder: prev.length }];
-      store.setGroups(updated);
-      return updated;
-    });
+  const addGroup = useCallback(async (name: string) => {
+    const group = await store.createGroup(name.trim(), groups.length);
+    if (group) {
+      setGroups((prev) => {
+        const updated = [...prev, group];
+        store.setCachedGroups(updated);
+        return updated;
+      });
+    }
     return group;
-  }, []);
+  }, [groups.length]);
 
-  const editGroup = useCallback((groupId: string, name: string) => {
+  const editGroup = useCallback(async (groupId: string, name: string) => {
     setGroups((prev) => {
       const updated = prev.map((g) => (g.id === groupId ? { ...g, name: name.trim() } : g));
-      store.setGroups(updated);
+      store.setCachedGroups(updated);
       return updated;
     });
+    await store.renameGroup(groupId, name.trim());
   }, []);
 
-  const removeGroup = useCallback((groupId: string) => {
+  const removeGroup = useCallback(async (groupId: string) => {
     setGroups((prev) => {
       const updated = prev.filter((g) => g.id !== groupId);
-      store.setGroups(updated);
+      store.setCachedGroups(updated);
       return updated;
     });
     // Drop this group from membership state (players stay in "All").
     setMemberships((prev) => {
       const next = new Map<number, string[]>();
       prev.forEach((ids, pid) => next.set(pid, ids.filter((id) => id !== groupId)));
-      store.setMemberships(next);
+      store.setCachedMemberships(next);
       return next;
     });
+    await store.deleteGroup(groupId);
   }, []);
 
   // Set exactly which groups a player belongs to.
-  const assignGroups = useCallback((playerId: number, groupIds: string[]) => {
+  const assignGroups = useCallback(async (playerId: number, groupIds: string[]) => {
     setMemberships((prev) => {
       const next = new Map(prev);
       next.set(playerId, groupIds);
-      store.setMemberships(next);
+      store.setCachedMemberships(next);
       return next;
     });
+    await store.setPlayerGroups(playerId, groupIds);
   }, []);
 
   // --- Notification actions ---
@@ -173,6 +262,7 @@ export function useFollowedPlayers() {
   }, []);
 
   return {
+    user,
     players,
     groups,
     memberships,

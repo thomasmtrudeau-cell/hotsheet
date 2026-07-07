@@ -5,7 +5,9 @@ import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverag
 import { rehabNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
+import { createClient } from '@/lib/supabase/client';
 import SearchBar from '@/components/SearchBar';
+import LoginScreen from '@/components/LoginScreen';
 import TabNav from '@/components/TabNav';
 import FilterBar from '@/components/FilterBar';
 import PlayerCard from '@/components/PlayerCard';
@@ -41,10 +43,11 @@ const GRADE_ORDER = ['milestone', 'standout', 'good', 'routine', 'off_day', 'sch
 
 export default function Home() {
   const {
-    players, groups, memberships, notifications, loaded,
+    user, players, groups, memberships, notifications, loaded,
     follow, unfollow, addGroup, editGroup, removeGroup, assignGroups,
     ingestNotifications, markNotificationsRead, clearAllNotifications,
   } = useFollowedPlayers();
+  const authError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('auth_error');
   const [activeTab, setActiveTab] = useState<ViewTab>('today');
   const [activeGroup, setActiveGroup] = useState<string>(ALL_PLAYERS_GROUP);
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
@@ -61,6 +64,12 @@ export default function Home() {
   const loadedTabs = useRef<Set<string>>(new Set());
   const playersRef = useRef(players);
   playersRef.current = players;
+
+  const handleLogout = useCallback(async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    setActiveGroup(ALL_PLAYERS_GROUP);
+  }, []);
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
@@ -245,6 +254,19 @@ export default function Home() {
     ].filter((sec) => sec.stats.length > 0);
   })();
 
+  // Initial auth check still resolving.
+  if (!user && !loaded) {
+    return (
+      <div className="flex justify-center items-center min-h-screen">
+        <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <LoginScreen authError={authError} />;
+  }
+
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Header */}
@@ -253,11 +275,22 @@ export default function Home() {
           <h1 className="text-2xl font-bold text-zinc-100 mb-1">Hot Sheet</h1>
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
-        <NotificationBell
-          notifications={notifications}
-          onOpen={markNotificationsRead}
-          onClear={clearAllNotifications}
-        />
+        <div className="flex items-center gap-3">
+          <NotificationBell
+            notifications={notifications}
+            onOpen={markNotificationsRead}
+            onClear={clearAllNotifications}
+          />
+          <div className="flex flex-col items-end">
+            <span className="text-xs text-zinc-500">{user.email}</span>
+            <button
+              onClick={handleLogout}
+              className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+            >
+              Log out
+            </button>
+          </div>
+        </div>
       </div>
 
       {/* Search */}
