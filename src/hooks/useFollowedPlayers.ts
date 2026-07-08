@@ -66,10 +66,17 @@ export function useFollowedPlayers() {
   // Load everything for the signed-in user, migrating any pre-account
   // localStorage data (players, groups, memberships) up on first login.
   const loadAll = useCallback(async () => {
+    // Snapshot pre-account local data BEFORE any cloud fetch. The fetch helpers
+    // overwrite the localStorage cache with the (possibly empty) cloud copy, so
+    // reading the cache *after* fetching would wipe the very data we migrate.
+    const localPlayers0 = store.getCachedPlayers();
+    const localGroups0 = store.getCachedGroups();
+    const localMemberships0 = store.getCachedMemberships();
+
     let cloudPlayers = await store.fetchCloudPlayers();
     if (cloudPlayers.length === 0) {
       // First login: adopt whatever this browser already had.
-      let local = store.getCachedPlayers();
+      let local = localPlayers0;
       if (local.length === 0) {
         local = (await store.importLegacyPlayersOnce()) ?? [];
       }
@@ -81,10 +88,9 @@ export function useFollowedPlayers() {
 
     let cloudGroups = await store.fetchGroups();
     if (cloudGroups.length === 0) {
-      const localGroups = store.getCachedGroups();
-      if (localGroups.length > 0) {
-        await store.bulkInsertGroups(localGroups);
-        cloudGroups = localGroups;
+      if (localGroups0.length > 0) {
+        await store.bulkInsertGroups(localGroups0);
+        cloudGroups = localGroups0;
       } else {
         // Brand-new account: start with the same defaults the local app seeded.
         const seeded = [
@@ -103,11 +109,11 @@ export function useFollowedPlayers() {
     // back to matching by name (re-seeded groups got fresh UUIDs).
     let cloudMemberships = await store.fetchMemberships();
     if (cloudMemberships.size === 0) {
-      const localMemberships = store.getCachedMemberships();
+      const localMemberships = localMemberships0;
       if (localMemberships.size > 0) {
         const cloudIds = new Set(cloudGroups.map((g) => g.id));
         const cloudIdByName = new Map(cloudGroups.map((g) => [g.name, g.id]));
-        const localNameById = new Map(store.getCachedGroups().map((g) => [g.id, g.name]));
+        const localNameById = new Map(localGroups0.map((g) => [g.id, g.name]));
         const remapped = new Map<number, string[]>();
         localMemberships.forEach((groupIds, playerId) => {
           const mapped = groupIds
