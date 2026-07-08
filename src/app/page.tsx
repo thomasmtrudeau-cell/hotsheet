@@ -237,20 +237,20 @@ export default function Home() {
     const pitchers: SortableStat[] = [];
     const injured: SortableStat[] = [];
     for (const s of sortedStats) {
-      // A player on the IL with a game today (rehab assignment) belongs in the
-      // normal flow — only bench truly-not-playing injured players.
-      const playingToday =
-        activeTab !== 'season' &&
-        (s as DailyPlayerStats).gameStatus !== 'No Game' &&
-        (s as DailyPlayerStats).gameStatus !== 'Postponed';
-      if (s.injury && !playingToday) injured.push(s);
+      // A player on the IL is not in the lineup even when their team has a game
+      // today — so they belong in the IL section, NOT among healthy hitters.
+      // The one exception: a rehab assignment (onRehab), where the player IS
+      // actually playing (in the minors) — those stay in the normal flow with
+      // the REHAB badge.
+      const onIL = Boolean(s.injury) && !(s as DailyPlayerStats).onRehab;
+      if (onIL) injured.push(s);
       else if (s.position === 'P') pitchers.push(s);
       else hitters.push(s);
     }
     return [
       { key: 'hitters', label: 'Hitters', stats: hitters },
       { key: 'pitchers', label: 'Pitchers', stats: pitchers },
-      { key: 'injured', label: 'Injured', stats: injured },
+      { key: 'injured', label: 'IL', stats: injured },
     ].filter((sec) => sec.stats.length > 0);
   })();
 
