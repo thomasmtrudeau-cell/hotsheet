@@ -80,13 +80,11 @@ export function useFollowedPlayers() {
     }
 
     let cloudGroups = await store.fetchGroups();
-    let migratedGroups = false;
     if (cloudGroups.length === 0) {
       const localGroups = store.getCachedGroups();
       if (localGroups.length > 0) {
         await store.bulkInsertGroups(localGroups);
         cloudGroups = localGroups;
-        migratedGroups = true;
       } else {
         // Brand-new account: start with the same defaults the local app seeded.
         const seeded = [
@@ -97,17 +95,34 @@ export function useFollowedPlayers() {
       }
     }
 
+    // Migrate local group memberships up whenever the account has none yet.
+    // NOT gated on "groups migrated this load" — across multiple sign-ins the
+    // groups can already exist in the cloud while memberships still don't, and
+    // the old gate skipped them forever. Map each local group id to its cloud
+    // id: prefer an exact UUID match (migrated groups keep their id), else fall
+    // back to matching by name (re-seeded groups got fresh UUIDs).
     let cloudMemberships = await store.fetchMemberships();
-    if (cloudMemberships.size === 0 && migratedGroups) {
-      // Group UUIDs were preserved, so local membership rows apply verbatim.
+    if (cloudMemberships.size === 0) {
       const localMemberships = store.getCachedMemberships();
       if (localMemberships.size > 0) {
-        await store.bulkInsertMemberships(
-          localMemberships,
-          new Set(cloudPlayers.map((p) => p.id)),
-          new Set(cloudGroups.map((g) => g.id))
-        );
-        cloudMemberships = localMemberships;
+        const cloudIds = new Set(cloudGroups.map((g) => g.id));
+        const cloudIdByName = new Map(cloudGroups.map((g) => [g.name, g.id]));
+        const localNameById = new Map(store.getCachedGroups().map((g) => [g.id, g.name]));
+        const remapped = new Map<number, string[]>();
+        localMemberships.forEach((groupIds, playerId) => {
+          const mapped = groupIds
+            .map((gid) => (cloudIds.has(gid) ? gid : cloudIdByName.get(localNameById.get(gid) ?? '')))
+            .filter((gid): gid is string => Boolean(gid));
+          if (mapped.length > 0) remapped.set(playerId, mapped);
+        });
+        if (remapped.size > 0) {
+          await store.bulkInsertMemberships(
+            remapped,
+            new Set(cloudPlayers.map((p) => p.id)),
+            new Set(cloudGroups.map((g) => g.id))
+          );
+          cloudMemberships = remapped;
+        }
       }
     }
 
