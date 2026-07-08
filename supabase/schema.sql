@@ -9,8 +9,12 @@ create table if not exists public.profiles (
   id           uuid primary key references auth.users (id) on delete cascade,
   email        text,
   display_name text,
+  tier         text not null default 'free',  -- 'free' | 'premium' — feature gate for future monetization
   created_at   timestamptz not null default now()
 );
+
+-- Idempotent add for projects created before `tier` existed.
+alter table public.profiles add column if not exists tier text not null default 'free';
 
 alter table public.profiles enable row level security;
 
@@ -23,6 +27,28 @@ drop policy if exists "profiles: update own" on public.profiles;
 create policy "profiles: update own"
   on public.profiles for update
   using (auth.uid() = id);
+
+-- Long-term monetization control: a user may edit their own profile (display_name)
+-- but must never grant themselves premium. RLS can't gate a single column, so a
+-- trigger blocks any tier change coming from the browser. Only the service role
+-- (or SQL editor) — i.e. you — can move someone to 'premium'.
+create or replace function public.lock_profile_tier()
+returns trigger
+language plpgsql
+security definer set search_path = public
+as $$
+begin
+  if new.tier is distinct from old.tier and auth.role() <> 'service_role' then
+    new.tier := old.tier;  -- silently ignore self-escalation attempts
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists profiles_lock_tier on public.profiles;
+create trigger profiles_lock_tier
+  before update on public.profiles
+  for each row execute function public.lock_profile_tier();
 
 -- Auto-create a profile row whenever a new auth user signs up.
 create or replace function public.handle_new_user()
