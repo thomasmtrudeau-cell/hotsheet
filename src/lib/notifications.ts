@@ -1,4 +1,4 @@
-import { FollowedPlayer, DailyPlayerStats, LEVEL_LABELS, isMLBSystem, isMiLB } from './types';
+import { FollowedPlayer, DailyPlayerStats, LEVEL_LABELS, isMLBSystem } from './types';
 
 export type NotificationType = 'il_off' | 'il_on' | 'promoted' | 'demoted' | 'team_change' | 'rehab';
 
@@ -108,14 +108,15 @@ export function diffPlayer(prev: FollowedPlayer, next: FollowedPlayer): HotNotif
   return out;
 }
 
-// A player still on the IL but in today's lineup at a minor-league level is
-// on a rehab assignment — the early signal before formal activation.
+// A player on an official rehab assignment (MLB roster status "RA") with a game
+// today — the early signal before formal activation. This is the roster-derived
+// flag, NOT "on the IL + has a minor-league game" (that also matches an ordinary
+// injured minor-leaguer, who is not rehabbing).
 export function rehabNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
   return stats
     .filter(
       (s) =>
-        s.injury &&
-        isMiLB(s.sportId) &&
+        s.onRehab &&
         (s.gameStatus === 'Scheduled' || s.gameStatus === 'Live' || s.gameStatus === 'Final')
     )
     .map((s) =>

@@ -47,10 +47,12 @@ interface SeasonCardProps {
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
 
-// A player flagged on the IL who nonetheless has a game today is on a rehab
-// assignment — surface the game instead of burying them under "Injured".
+// A rehab assignment is a specific MLB roster status ("RA"): an IL player
+// (usually from the majors) temporarily playing for a minor-league affiliate.
+// This is distinct from a minor-leaguer who is simply on the minor-league IL —
+// so we rely on the roster-derived flag, NOT "injured + has a game today".
 function isOnRehab(stats: DailyPlayerStats): boolean {
-  return Boolean(stats.injury) && stats.gameStatus !== 'No Game' && stats.gameStatus !== 'Postponed';
+  return Boolean(stats.onRehab);
 }
 
 function RehabBadge() {

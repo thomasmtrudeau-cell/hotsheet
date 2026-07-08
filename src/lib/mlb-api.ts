@@ -122,6 +122,19 @@ interface RosterEntry {
   note?: string;
 }
 
+// A rehab assignment is a distinct MLB roster status ("RA"): an IL player
+// temporarily playing for a minor-league affiliate. The player carries many
+// historical RA entries across affiliates/leagues — only the one flagged
+// isActive is the current assignment. This is NOT the same as being on the
+// minor-league IL (code "D7"/"D60"), which is just an injured minor-leaguer.
+function isOnRehabAssignment(details?: Record<string, unknown>): boolean {
+  const entries = (details?.rosterEntries as Array<{
+    status?: { code?: string };
+    isActive?: boolean;
+  }>) ?? [];
+  return entries.some((e) => e.isActive && e.status?.code === 'RA');
+}
+
 async function getInjuryStatusForTeams(
   teamIds: number[],
   failedTeams?: Set<number>
@@ -167,7 +180,7 @@ export async function hydrateFollowedPlayers(
   const playerDetails: Map<number, Record<string, unknown>> = new Map();
   try {
     const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
-      `${MLB_API}/people?personIds=${ids}&hydrate=currentTeam`,
+      `${MLB_API}/people?personIds=${ids}&hydrate=currentTeam,rosterEntries`,
       3600_000
     );
     if (data.people) {
@@ -207,6 +220,7 @@ export async function hydrateFollowedPlayers(
       parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
       injury: injuryMap.get(p.id),
+      onRehab: isOnRehabAssignment(details),
     };
   });
 }
@@ -423,6 +437,7 @@ function buildDailyStats(
     performanceGrade: 'no_game',
     gradeReason: 'No game today',
     injury: player.injury,
+    onRehab: player.onRehab,
   };
 
   if (!game) return base;

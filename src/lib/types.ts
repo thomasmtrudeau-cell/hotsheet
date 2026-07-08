@@ -48,6 +48,7 @@ export interface FollowedPlayer {
   parentOrgAbbrev?: string; // e.g. "CWS" for Charlotte Knights
   followedAt: string;
   injury?: InjuryStatus;
+  onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
 }
 
 export interface SearchResult {
@@ -82,6 +83,7 @@ export interface DailyPlayerStats {
   startingPosition?: string; // e.g. "SS", "3B", "DH"
   battingOrder?: number; // 1-9
   injury?: InjuryStatus;
+  onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
