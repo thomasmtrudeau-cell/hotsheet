@@ -153,7 +153,7 @@ function XSearchLink({ playerName }: { playerName: string }) {
 }
 
 function FGSearchLink({ playerName }: { playerName: string }) {
-  const url = `https://www.fangraphs.com/players/search?q=${encodeURIComponent(stripParen(playerName))}`;
+  const url = `https://www.fangraphs.com/search?q=${encodeURIComponent(stripParen(playerName))}`;
   return (
     <a
       href={url}
