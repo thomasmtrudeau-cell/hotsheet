@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
@@ -612,9 +612,14 @@ interface DateRangeStat {
   hitByPitch?: number;
   sacFlies?: number;
   stolenBases?: number;
+  avg?: string;
   ops?: string;
   era?: string;
   inningsPitched?: string;
+  whip?: string;
+  strikeOuts?: number;
+  saves?: number;
+  wins?: number;
 }
 
 // `wrcPlus` is the last-15-day wRC+ ESTIMATE (byDateRange has no real wOBA/wRC+),
@@ -754,6 +759,73 @@ async function getMatchups(
     });
   });
   return result;
+}
+
+// --- Range query: last-N-day stats for an arbitrary player set (any level) ---
+
+export async function getRangeStats(
+  players: FollowedPlayer[],
+  windowDays: number,
+  endDate: string
+): Promise<RangePlayerStats[]> {
+  const season = new Date(endDate + 'T00:00:00Z').getUTCFullYear();
+  const start = new Date(endDate + 'T00:00:00Z');
+  start.setUTCDate(start.getUTCDate() - (windowDays - 1));
+  const startStr = start.toISOString().slice(0, 10);
+
+  const results = await Promise.all(
+    players.map(async (p) => {
+      const isPitcher = p.primaryPosition === 'P';
+      const group = isPitcher ? 'pitching' : 'hitting';
+      try {
+        const data = await cachedFetch<{ stats?: Array<{ splits?: Array<{ stat: DateRangeStat }> }> }>(
+          `${MLB_API}/people/${p.id}/stats?stats=byDateRange&startDate=${startStr}&endDate=${endDate}&group=${group}&sportId=${p.sportId}&season=${season}`,
+          1800_000
+        );
+        const st = data.stats?.[0]?.splits?.[0]?.stat;
+        if (!st || !st.gamesPlayed) return null; // no games in window → nothing to show
+        const base: RangePlayerStats = {
+          playerId: p.id,
+          playerName: p.fullName,
+          team: p.currentTeam.name,
+          level: LEVEL_LABELS[p.sportId] || 'Unknown',
+          sportId: p.sportId,
+          position: p.primaryPosition,
+          parentOrgAbbrev: p.parentOrgAbbrev,
+          isPitcher,
+          gamesPlayed: st.gamesPlayed ?? 0,
+        };
+        if (isPitcher) {
+          base.inningsPitched = st.inningsPitched;
+          base.era = st.era;
+          base.whip = st.whip;
+          base.strikeOuts = st.strikeOuts;
+          base.saves = st.saves;
+          base.wins = st.wins;
+        } else {
+          base.plateAppearances = st.plateAppearances;
+          base.atBats = st.atBats;
+          base.homeRuns = st.homeRuns;
+          base.stolenBases = st.stolenBases;
+          base.avg = st.avg;
+          base.ops = st.ops;
+          const woba = computeWoba({
+            ab: st.atBats ?? 0, h: st.hits ?? 0, doubles: st.doubles ?? 0, triples: st.triples ?? 0,
+            hr: st.homeRuns ?? 0, bb: st.baseOnBalls ?? 0, ibb: st.intentionalWalks ?? 0,
+            hbp: st.hitByPitch ?? 0, sf: st.sacFlies ?? 0,
+          });
+          if (woba !== null) {
+            const lg = await getLeagueAverages(p.sportId, season);
+            base.wrcPlus = estimateWrcPlus(woba, lg?.lgWoba, lg?.lgRunsPerPA);
+          }
+        }
+        return base;
+      } catch {
+        return null;
+      }
+    })
+  );
+  return results.filter((r): r is RangePlayerStats => r !== null);
 }
 
 // --- Two-start week (SP with 2+ starts in the current Mon–Sun fantasy week) ---

@@ -242,6 +242,39 @@ export interface GameLogEntry {
 // Special sentinel for the implicit "All Players" view (not a stored group).
 export const ALL_PLAYERS_GROUP = 'all';
 
-export type ViewTab = 'today' | 'yesterday' | 'season';
+export type ViewTab = 'today' | 'yesterday' | 'season' | 'range';
 
 export type LevelFilter = 'all' | 'MLB' | 'MiLB' | 'NPB' | 'KBO';
+
+// Rolling-window "range" query (last N days) for any player set — including
+// MiLB, which is the piece the big sites don't expose well.
+export type RangeWindow = 15 | 30 | 60;
+
+export type RangeSortKey = 'wrcPlus' | 'ops' | 'homeRuns' | 'stolenBases' | 'plateAppearances' | 'era' | 'strikeOuts' | 'inningsPitched' | 'saves';
+
+export interface RangePlayerStats {
+  playerId: number;
+  playerName: string;
+  team: string;
+  level: string;
+  sportId: number;
+  position: string;
+  parentOrgAbbrev?: string;
+  isPitcher: boolean;
+  gamesPlayed: number;
+  // Hitter
+  plateAppearances?: number;
+  atBats?: number;
+  homeRuns?: number;
+  stolenBases?: number;
+  avg?: string;
+  ops?: string;
+  wrcPlus?: number; // estimate over the window
+  // Pitcher
+  inningsPitched?: string;
+  era?: string;
+  whip?: string;
+  strikeOuts?: number;
+  saves?: number;
+  wins?: number;
+}

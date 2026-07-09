@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, RangePlayerStats, RangeWindow, RangeSortKey } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -14,6 +14,7 @@ import PlayerCard from '@/components/PlayerCard';
 import EmptyState from '@/components/EmptyState';
 import GroupBar from '@/components/GroupBar';
 import NotificationBell from '@/components/NotificationBell';
+import RangeView from '@/components/RangeView';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -60,6 +61,9 @@ export default function Home() {
   const [dailyStats, setDailyStats] = useState<DailyPlayerStats[]>([]);
   const [yesterdayStats, setYesterdayStats] = useState<DailyPlayerStats[]>([]);
   const [seasonStats, setSeasonStats] = useState<SeasonPlayerStats[]>([]);
+  const [rangeStats, setRangeStats] = useState<RangePlayerStats[]>([]);
+  const [rangeWindow, setRangeWindow] = useState<RangeWindow>(15);
+  const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -155,6 +159,21 @@ export default function Home() {
     }
   }, []);
 
+  const fetchRangeStats = useCallback(async (windowDays: number) => {
+    if (playersRef.current.length === 0) { setRangeStats([]); return; }
+    try {
+      const res = await fetch('/api/stats/range', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ players: playersRef.current, window: windowDays, endDate: getDateString(0) }),
+      });
+      const data = await res.json();
+      if (Array.isArray(data)) setRangeStats(data);
+    } catch (e) {
+      console.error('Failed to fetch range stats:', e);
+    }
+  }, []);
+
   const fetchActiveTab = useCallback(async () => {
     setLoading(true);
     try {
@@ -162,6 +181,8 @@ export default function Home() {
         await fetchDailyStats(getDateString(0), setDailyStats, true);
       } else if (activeTab === 'yesterday') {
         await fetchDailyStats(getDateString(-1), setYesterdayStats);
+      } else if (activeTab === 'range') {
+        await fetchRangeStats(rangeWindow);
       } else {
         await fetchSeasonStats();
       }
@@ -169,7 +190,18 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, fetchDailyStats, fetchSeasonStats]);
+  }, [activeTab, fetchDailyStats, fetchSeasonStats, fetchRangeStats, rangeWindow]);
+
+  // Re-query the range window when it changes (while on the Range tab).
+  useEffect(() => {
+    if (!loaded || players.length === 0 || activeTab !== 'range') return;
+    setLoading(true);
+    fetchRangeStats(rangeWindow).finally(() => {
+      setLastRefresh(new Date());
+      setLoading(false);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rangeWindow]);
 
   // Fetch when players change
   useEffect(() => {
@@ -261,6 +293,19 @@ export default function Home() {
       { key: 'injured', label: 'IL', stats: injured },
     ].filter((sec) => sec.stats.length > 0);
   })();
+
+  // Range stats share the same group/level/position/name filters.
+  const filteredRange = rangeStats.filter((s) => {
+    if (!inActiveGroup(s.playerId)) return false;
+    if (levelFilter === 'MLB' && s.sportId !== 1) return false;
+    if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
+    if (levelFilter === 'NPB' && s.sportId !== 100) return false;
+    if (levelFilter === 'KBO' && s.sportId !== 101) return false;
+    if (positionFilter === 'pitcher' && s.position !== 'P') return false;
+    if (positionFilter === 'hitter' && s.position === 'P') return false;
+    if (nameFilter && !s.playerName.toLowerCase().includes(nameFilter.toLowerCase())) return false;
+    return true;
+  });
 
   const toggleSelected = (id: number) =>
     setSelectedIds((prev) => {
@@ -357,11 +402,12 @@ export default function Home() {
       {/* Refresh indicator */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-xs text-zinc-600">
-          {sortedStats.length} player{sortedStats.length !== 1 ? 's' : ''}
-          {filteredStats.length !== currentStats.length && ` (${currentStats.length} total)`}
+          {activeTab === 'range'
+            ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
+            : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
         </div>
         <div className="flex items-center gap-2">
-          {groups.length > 0 && players.length > 0 && (
+          {groups.length > 0 && players.length > 0 && activeTab !== 'range' && (
             <button
               onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
               className={`text-xs transition-colors cursor-pointer ${selectMode ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
@@ -397,6 +443,15 @@ export default function Home() {
         </div>
       ) : players.length === 0 ? (
         <EmptyState />
+      ) : activeTab === 'range' ? (
+        <RangeView
+          stats={filteredRange}
+          window={rangeWindow}
+          onWindow={setRangeWindow}
+          sortKey={rangeSort}
+          onSort={setRangeSort}
+          loading={loading}
+        />
       ) : sortedStats.length === 0 && !loading ? (
         <div className="text-center py-12 text-sm text-zinc-500">
           No players match your filters
