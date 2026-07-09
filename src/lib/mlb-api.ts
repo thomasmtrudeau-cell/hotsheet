@@ -1,5 +1,6 @@
 import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
+import { fetchWarMap } from './war';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
 const ALL_SPORT_IDS = [1, 11, 12, 13, 14];
@@ -902,42 +903,121 @@ async function getRecentCallups(date: string, windowDays = 10): Promise<Map<numb
   return result;
 }
 
-// Pre-built discovery list: everyone recalled/selected to MLB in the last N days.
-export async function getCallupList(date: string, windowDays = 7): Promise<CallUp[]> {
-  const callupMap = await getRecentCallups(date, windowDays);
-  const ids = Array.from(callupMap.keys());
+// Estimated wRC+ for a stat block at a given level (reuses the wOBA + league-avg machinery).
+async function wrcPlusFromStat(st: DateRangeStat, sportId: number, season: number): Promise<number | undefined> {
+  const woba = computeWoba({
+    ab: st.atBats ?? 0, h: st.hits ?? 0, doubles: st.doubles ?? 0, triples: st.triples ?? 0,
+    hr: st.homeRuns ?? 0, bb: st.baseOnBalls ?? 0, ibb: st.intentionalWalks ?? 0,
+    hbp: st.hitByPitch ?? 0, sf: st.sacFlies ?? 0,
+  });
+  if (woba === null) return undefined;
+  const lg = await getLeagueAverages(sportId, season);
+  return estimateWrcPlus(woba, lg?.lgWoba, lg?.lgRunsPerPA);
+}
+
+// Pre-built discovery list: MLB call-ups in the last N days, enriched with the
+// prior-level season line + a last-30 figure and sorted by peak WAR (upside)
+// when a WAR sheet is configured. The WAR *number* is stripped for non-premium
+// by the route, but the WAR-derived ORDER stays for everyone.
+export async function getCallupList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
+  const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
+  const end = new Date(date + 'T00:00:00Z');
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - windowDays);
+  const startStr = start.toISOString().slice(0, 10);
+
+  // Transactions carry the fromTeam, so we can show the level they came up from.
+  const txData = await cachedFetch<{ transactions?: Array<{ typeCode?: string; effectiveDate?: string; date?: string; person?: { id?: number }; fromTeam?: { id?: number } }> }>(
+    `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=1`,
+    3600_000
+  );
+  const info = new Map<number, { date: string; fromTeamId?: number }>();
+  for (const t of txData.transactions ?? []) {
+    if ((t.typeCode === 'CU' || t.typeCode === 'SE') && t.person?.id) {
+      const when = (t.effectiveDate || t.date || '').slice(0, 10);
+      const prev = info.get(t.person.id);
+      if (!prev || when > prev.date) info.set(t.person.id, { date: when, fromTeamId: t.fromTeam?.id });
+    }
+  }
+  const ids = Array.from(info.keys());
   if (ids.length === 0) return [];
 
-  const [teamMap, data] = await Promise.all([
+  const [teamMap, peopleData] = await Promise.all([
     getTeamLookup(),
-    cachedFetch<{ people?: Array<Record<string, unknown>> }>(
-      `${MLB_API}/people?personIds=${ids.join(',')}&hydrate=currentTeam`,
-      1800_000
-    ),
+    cachedFetch<{ people?: Array<Record<string, unknown>> }>(`${MLB_API}/people?personIds=${ids.join(',')}&hydrate=currentTeam`, 1800_000),
   ]);
 
+  const l30 = new Date(end);
+  l30.setUTCDate(end.getUTCDate() - 29);
+  const l30Str = l30.toISOString().slice(0, 10);
+
   const out: CallUp[] = [];
-  for (const p of data.people ?? []) {
+  await Promise.all((peopleData.people ?? []).map(async (p) => {
     const team = p.currentTeam as Record<string, unknown> | undefined;
-    if (!team?.id) continue;
+    if (!team?.id) return;
     const teamId = team.id as number;
     const teamInfo = teamMap.get(teamId);
-    const sportId = teamInfo?.sportId ?? 1;
-    if (sportId !== 1) continue; // now on an MLB roster (it's an MLB call-up list)
-    const pos = p.primaryPosition as Record<string, unknown> | undefined;
-    out.push({
+    if ((teamInfo?.sportId ?? 1) !== 1) return; // MLB call-ups only
+    const meta = info.get(p.id as number);
+    if (!meta) return;
+    const isPitcher = ((p.primaryPosition as Record<string, unknown> | undefined)?.abbreviation as string) === 'P';
+    const fromSid = meta.fromTeamId ? teamMap.get(meta.fromTeamId)?.sportId : undefined;
+
+    const cu: CallUp = {
       id: p.id as number,
       fullName: formatDisplayName(p),
-      primaryPosition: (pos?.abbreviation as string) || 'Unknown',
+      primaryPosition: ((p.primaryPosition as Record<string, unknown> | undefined)?.abbreviation as string) || 'Unknown',
       currentTeam: { id: teamId, name: team.name as string },
-      sportId,
-      level: LEVEL_LABELS[sportId] || 'MLB',
+      sportId: 1,
+      level: 'MLB',
       parentOrg: teamInfo?.parentOrgName,
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
-      calledUpDate: callupMap.get(p.id as number) ?? '',
-    });
+      calledUpDate: meta.date,
+      isPitcher,
+      fromLevel: fromSid ? LEVEL_LABELS[fromSid] : undefined,
+    };
+
+    // Prior-level season line + last-30, at the level they were promoted from.
+    if (fromSid && isMLBSystem(fromSid)) {
+      const group = isPitcher ? 'pitching' : 'hitting';
+      const [seasonData, l30Data] = await Promise.all([
+        cachedFetch<{ stats?: Array<{ splits?: Array<{ stat: DateRangeStat }> }> }>(`${MLB_API}/people/${cu.id}/stats?stats=season&group=${group}&season=${season}&sportId=${fromSid}`, 1800_000).catch(() => null),
+        cachedFetch<{ stats?: Array<{ splits?: Array<{ stat: DateRangeStat }> }> }>(`${MLB_API}/people/${cu.id}/stats?stats=byDateRange&startDate=${l30Str}&endDate=${date}&group=${group}&season=${season}&sportId=${fromSid}`, 1800_000).catch(() => null),
+      ]);
+      const ss = seasonData?.stats?.[0]?.splits?.[0]?.stat;
+      const l3 = l30Data?.stats?.[0]?.splits?.[0]?.stat;
+      if (ss) {
+        if (isPitcher) cu.priorLine = `${cu.fromLevel} · ${ss.era ?? '—'} ERA · ${ss.strikeOuts ?? 0} K · ${ss.inningsPitched ?? '0.0'} IP`;
+        else {
+          const w = await wrcPlusFromStat(ss, fromSid, season);
+          cu.priorLine = `${cu.fromLevel} · ${w ?? '—'} wRC+ · ${ss.homeRuns ?? 0} HR · ${ss.stolenBases ?? 0} SB`;
+        }
+      }
+      if (l3 && (l3.gamesPlayed ?? 0) > 0) {
+        if (isPitcher) cu.last30Line = `L30 ${l3.era ?? '—'} ERA`;
+        else {
+          const w = await wrcPlusFromStat(l3, fromSid, season);
+          cu.last30Line = `L30 ${w ?? '—'} wRC+`;
+        }
+      }
+    }
+    out.push(cu);
+  }));
+
+  // Join peak WAR for the sort (upside-first). The route decides whether to
+  // expose the number; the ordering benefits everyone regardless.
+  if (warSheetId) {
+    try {
+      const warMap = await fetchWarMap(
+        out.map((c) => ({ id: c.id, fullName: c.fullName, primaryPosition: c.primaryPosition, currentTeam: c.currentTeam, sportId: c.sportId, followedAt: '' } as FollowedPlayer)),
+        warSheetId
+      );
+      for (const c of out) c.war = warMap[c.id];
+    } catch {
+      // WAR unavailable — fall back to date order below.
+    }
   }
-  out.sort((a, b) => b.calledUpDate.localeCompare(a.calledUpDate)); // most recent first
+  out.sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity) || b.calledUpDate.localeCompare(a.calledUpDate));
   return out;
 }
 

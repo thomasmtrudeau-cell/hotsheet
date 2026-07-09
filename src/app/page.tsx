@@ -433,18 +433,20 @@ export default function Home() {
         onDelete={removeGroup}
       />
 
-      {/* Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <TabNav activeTab={activeTab} onChange={setActiveTab} />
-        <FilterBar
-          levelFilter={levelFilter}
-          onLevelChange={setLevelFilter}
-          positionFilter={positionFilter}
-          onPositionChange={setPositionFilter}
-          nameFilter={nameFilter}
-          onNameChange={setNameFilter}
-        />
-      </div>
+      {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
+      {!isCallups && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
+          <TabNav activeTab={activeTab} onChange={setActiveTab} />
+          <FilterBar
+            levelFilter={levelFilter}
+            onLevelChange={setLevelFilter}
+            positionFilter={positionFilter}
+            onPositionChange={setPositionFilter}
+            nameFilter={nameFilter}
+            onNameChange={setNameFilter}
+          />
+        </div>
+      )}
 
       {/* Refresh indicator */}
       <div className="flex items-center justify-between mb-4">

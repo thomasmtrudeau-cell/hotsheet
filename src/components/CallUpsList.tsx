@@ -37,13 +37,25 @@ export default function CallUpsList({ callups, onFollow, isFollowing, loading }:
             className="flex items-center justify-between gap-3 px-3 py-2 bg-zinc-800/50 border border-zinc-700/40 rounded-lg"
           >
             <div className="min-w-0">
-              <div className="flex items-center gap-1.5">
+              <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-400">MLB</span>
+                {c.war !== undefined && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR">
+                    {c.war.toFixed(1)} WAR
+                  </span>
+                )}
               </div>
               <div className="text-[11px] text-zinc-500 truncate">
                 {c.primaryPosition} · {c.currentTeam.name} · called up {fmtDate(c.calledUpDate)}
               </div>
+              {(c.priorLine || c.last30Line) && (
+                <div className="text-[11px] text-zinc-400 truncate mt-0.5">
+                  {c.priorLine}
+                  {c.priorLine && c.last30Line && <span className="text-zinc-600"> · </span>}
+                  {c.last30Line && <span className="text-zinc-500">{c.last30Line}</span>}
+                </div>
+              )}
             </div>
             <button
               onClick={() =>

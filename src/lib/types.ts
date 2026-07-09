@@ -70,6 +70,11 @@ export interface FollowedPlayer {
 // A recent MLB call-up (browsable discovery list; followable like a search hit).
 export interface CallUp extends SearchResult {
   calledUpDate: string;
+  isPitcher: boolean;
+  war?: number;         // peak WAR — drives the sort always; number shown to premium only
+  fromLevel?: string;   // level promoted from, e.g. "AAA"
+  priorLine?: string;   // season line at the prior level (the production that earned it)
+  last30Line?: string;  // rolling last-30 figure at the prior level
 }
 
 export interface SearchResult {
