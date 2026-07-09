@@ -57,6 +57,15 @@ function isOnRehab(stats: DailyPlayerStats): boolean {
   return Boolean(stats.onRehab);
 }
 
+// Subtle level tint on the card border so MLB vs MiLB (vs NPB/KBO) reads at a glance.
+function levelBorderClass(sportId: number): string {
+  if (sportId === 1) return 'border-blue-500/25 hover:border-blue-500/40';
+  if (sportId >= 11 && sportId <= 14) return 'border-amber-500/25 hover:border-amber-500/40';
+  if (sportId === 100) return 'border-rose-500/25 hover:border-rose-500/40';
+  if (sportId === 101) return 'border-purple-500/25 hover:border-purple-500/40';
+  return 'border-zinc-700/50 hover:border-zinc-600/50';
+}
+
 function CallUpBadge({ date }: { date: string }) {
   const label = (() => {
     const [, m, d] = date.split('-');
@@ -272,12 +281,15 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
   const onRehab = isOnRehab(stats);
-  // Rehab players read as "active" — don't paint the whole card red.
-  const borderClass = stats.injury && !onRehab
-    ? 'border-red-500/60 hover:border-red-500/80'
-    : 'border-zinc-700/50 hover:border-zinc-600/50';
+  const isInjured = Boolean(stats.injury) && !onRehab;
+  const notPlaying = stats.gameStatus === 'No Game' || stats.gameStatus === 'Postponed';
+  // IL keeps the red border; otherwise tint by level. Dim players not in a game.
+  const borderClass = isInjured ? 'border-red-500/60 hover:border-red-500/80' : levelBorderClass(stats.sportId);
   return (
-    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
+    <div
+      className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 h-full flex flex-col transition-colors ${notPlaying && !isInjured ? 'opacity-60' : ''}`}
+      title={stats.injury?.note}
+    >
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
@@ -388,10 +400,10 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats
     : stats.opsPlus !== undefined ? 'OPS+' : 'wRC+';
   const borderClass = stats.injury
     ? 'border-red-500/60 hover:border-red-500/80'
-    : 'border-zinc-700/50 hover:border-zinc-600/50';
+    : levelBorderClass(stats.sportId);
 
   return (
-    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
+    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 h-full flex flex-col transition-colors`} title={stats.injury?.note}>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">

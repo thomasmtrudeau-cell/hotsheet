@@ -282,23 +282,46 @@ export default function Home() {
 
   // Split into sections: Hitters → Pitchers → Injured (IL goes to the bottom)
   const sections: Array<{ key: string; label: string; stats: SortableStat[] }> = (() => {
-    const hitters: SortableStat[] = [];
-    const pitchers: SortableStat[] = [];
+    // A player on the IL is not in the lineup even when their team has a game;
+    // rehab assignments (onRehab) are actually playing, so they stay in-flow.
+    const isIL = (s: SortableStat) => Boolean(s.injury) && !(s as DailyPlayerStats).onRehab;
+
+    // Season view has no "playing today" concept — keep hitters/pitchers/IL.
+    if (activeTab === 'season') {
+      const hitters: SortableStat[] = [];
+      const pitchers: SortableStat[] = [];
+      const injured: SortableStat[] = [];
+      for (const s of sortedStats) {
+        if (isIL(s)) injured.push(s);
+        else if (s.position === 'P') pitchers.push(s);
+        else hitters.push(s);
+      }
+      return [
+        { key: 'hitters', label: 'Hitters', stats: hitters },
+        { key: 'pitchers', label: 'Pitchers', stats: pitchers },
+        { key: 'injured', label: 'IL', stats: injured },
+      ].filter((sec) => sec.stats.length > 0);
+    }
+
+    // Daily views: Playing (MLB) → Playing (MiLB) → Not playing → IL.
+    const playingMLB: SortableStat[] = [];
+    const playingMiLB: SortableStat[] = [];
+    const notPlaying: SortableStat[] = [];
     const injured: SortableStat[] = [];
     for (const s of sortedStats) {
-      // A player on the IL is not in the lineup even when their team has a game
-      // today — so they belong in the IL section, NOT among healthy hitters.
-      // The one exception: a rehab assignment (onRehab), where the player IS
-      // actually playing (in the minors) — those stay in the normal flow with
-      // the REHAB badge.
-      const onIL = Boolean(s.injury) && !(s as DailyPlayerStats).onRehab;
-      if (onIL) injured.push(s);
-      else if (s.position === 'P') pitchers.push(s);
-      else hitters.push(s);
+      if (isIL(s)) { injured.push(s); continue; }
+      const g = (s as DailyPlayerStats).gameStatus;
+      const inAction = g === 'Scheduled' || g === 'Live' || g === 'Final';
+      if (!inAction) { notPlaying.push(s); continue; }
+      if (s.sportId >= 11 && s.sportId <= 14) playingMiLB.push(s);
+      else playingMLB.push(s);
     }
+    // Within a bucket, cluster hitters before pitchers (keeping the sort order).
+    const hp = (arr: SortableStat[]) => [...arr.filter((x) => x.position !== 'P'), ...arr.filter((x) => x.position === 'P')];
     return [
-      { key: 'hitters', label: 'Hitters', stats: hitters },
-      { key: 'pitchers', label: 'Pitchers', stats: pitchers },
+      { key: 'playing-mlb', label: 'Playing Today · MLB', stats: hp(playingMLB) },
+      { key: 'playing-milb', label: 'Playing Today · MiLB', stats: hp(playingMiLB) },
+      { key: 'notplaying', label: 'Not Playing', stats: hp(notPlaying) },
       { key: 'injured', label: 'IL', stats: injured },
     ].filter((sec) => sec.stats.length > 0);
   })();
@@ -474,13 +497,13 @@ export default function Home() {
                   {section.stats.length}
                 </span>
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 auto-rows-fr">
                 {section.stats.map((stat) => {
                   const selected = selectedIds.has(stat.playerId);
                   return (
                     <div
                       key={stat.playerId}
-                      className={`relative rounded-xl ${selectMode ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                      className={`relative rounded-xl h-full ${selectMode ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-blue-500' : ''}`}
                       onClick={selectMode ? () => toggleSelected(stat.playerId) : undefined}
                     >
                       <PlayerCard
