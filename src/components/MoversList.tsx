@@ -10,6 +10,7 @@ interface MoversListProps {
   caption: string;   // e.g. "MLB call-ups in the last 7 days · tap Follow to add"
   emptyText: string; // e.g. "No MLB call-ups in the last 7 days"
   verb: string;      // "called up" | "promoted"
+  showWar?: boolean; // honor the premium WAR toggle (default true)
 }
 
 function fmtDate(d: string): string {
@@ -23,7 +24,7 @@ function levelBadgeClass(sportId: number): string {
   return 'bg-zinc-500/20 text-zinc-300';
 }
 
-export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb }: MoversListProps) {
+export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true }: MoversListProps) {
   if (loading && items.length === 0) {
     return (
       <div className="flex justify-center py-16">
@@ -49,7 +50,7 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${levelBadgeClass(c.sportId)}`}>{c.level}</span>
-                {c.war !== undefined && (
+                {showWar && c.war !== undefined && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR">
                     {c.war.toFixed(1)} WAR
                   </span>

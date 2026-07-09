@@ -516,6 +516,13 @@ export default function Home() {
         </div>
       </div>
 
+      {/* NPB/KBO are season-only in the app — no live/daily feed */}
+      {!isDiscovery && (levelFilter === 'NPB' || levelFilter === 'KBO') && (
+        <div className="mb-4 text-[11px] text-zinc-400 bg-zinc-800/40 border border-zinc-700/40 rounded-lg px-3 py-2">
+          ⓘ NPB &amp; KBO show <span className="text-zinc-300">season stats only</span> — not generated live, and there are no daily game lines.
+        </div>
+      )}
+
       {/* Content */}
       {!loaded ? (
         <div className="flex justify-center py-16">
@@ -530,6 +537,7 @@ export default function Home() {
           caption="MLB call-ups in the last 7 days · tap Follow to add"
           emptyText="No MLB call-ups in the last 7 days"
           verb="called up"
+          showWar={showWar}
         />
       ) : isPromotions ? (
         <MoversList
@@ -540,6 +548,7 @@ export default function Home() {
           caption="MiLB players promoted a level in the last 7 days · tap Follow to add"
           emptyText="No MiLB promotions in the last 7 days"
           verb="promoted"
+          showWar={showWar}
         />
       ) : players.length === 0 ? (
         <EmptyState />
