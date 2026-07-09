@@ -2,13 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getPromotionsList } from '@/lib/mlb-api';
 import { createClient } from '@/lib/supabase/server';
 
-// MiLB players promoted a level in the last 3 days, WAR-sorted. WAR number is
+// MiLB players promoted a level in the last 7 days, WAR-sorted. WAR number is
 // premium-only; the WAR-derived order is kept for everyone.
 export async function GET(request: NextRequest) {
   try {
     const date = request.nextUrl.searchParams.get('date') || new Date().toISOString().slice(0, 10);
     const sheetId = process.env.WAR_SHEET_ID;
-    const list = await getPromotionsList(date, 3, sheetId);
+    const list = await getPromotionsList(date, 7, sheetId);
 
     let premium = false;
     if (sheetId) {

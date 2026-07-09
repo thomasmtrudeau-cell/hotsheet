@@ -1034,7 +1034,7 @@ export async function getCallupList(date: string, windowDays = 7, warSheetId?: s
 // Pre-built discovery list: MiLB players who moved UP a level in the last N days
 // (genuine promotions — excludes rehab moves and lateral/down moves). Same
 // enrichment + WAR sort as call-ups.
-export async function getPromotionsList(date: string, windowDays = 3, warSheetId?: string): Promise<CallUp[]> {
+export async function getPromotionsList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
   const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
   const end = new Date(date + 'T00:00:00Z');
   const start = new Date(end);
@@ -1093,6 +1093,49 @@ export async function getPromotionsList(date: string, windowDays = 3, warSheetId
   return warSortMovers(out, warSheetId);
 }
 
+// --- Next announced start for followed pitchers (MLB + MiLB) ---
+
+async function getNextStarts(players: FollowedPlayer[], date: string): Promise<Map<number, { date: string; opponent: string }>> {
+  const pitcherIds = new Set(players.filter((p) => p.primaryPosition === 'P').map((p) => p.id));
+  const result = new Map<number, { date: string; opponent: string }>();
+  if (pitcherIds.size === 0) return result;
+
+  // Look at the next 7 days, only for the levels our pitchers actually play at.
+  const sids = Array.from(new Set(players.filter((p) => p.primaryPosition === 'P').map((p) => p.sportId))).filter((s) => isMLBSystem(s));
+  const startD = new Date(date + 'T00:00:00Z');
+  startD.setUTCDate(startD.getUTCDate() + 1); // tomorrow onward — "next" start after today
+  const endD = new Date(date + 'T00:00:00Z');
+  endD.setUTCDate(endD.getUTCDate() + 7);
+  const startStr = startD.toISOString().slice(0, 10);
+  const endStr = endD.toISOString().slice(0, 10);
+
+  const perSport = await Promise.all(
+    sids.map((sid) =>
+      cachedFetch<{ dates?: Array<{ date: string; games: ScheduleGame[] }> }>(
+        `${MLB_API}/schedule?sportId=${sid}&startDate=${startStr}&endDate=${endStr}&hydrate=probablePitcher,team`,
+        3600_000
+      ).catch(() => ({ dates: [] as Array<{ date: string; games: ScheduleGame[] }> }))
+    )
+  );
+
+  // Dates come back ascending, so the first match per pitcher is their next start.
+  for (const data of perSport) {
+    for (const dt of data.dates ?? []) {
+      for (const g of dt.games ?? []) {
+        const ap = g.teams.away.probablePitcher?.id;
+        const hp = g.teams.home.probablePitcher?.id;
+        if (ap && pitcherIds.has(ap) && !result.has(ap)) {
+          result.set(ap, { date: dt.date, opponent: `@ ${g.teams.home.team.name}` });
+        }
+        if (hp && pitcherIds.has(hp) && !result.has(hp)) {
+          result.set(hp, { date: dt.date, opponent: `vs ${g.teams.away.team.name}` });
+        }
+      }
+    }
+  }
+  return result;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -1133,12 +1176,13 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + matchup + two-start weeks + recent call-ups, alongside game data.
-  const [recentFormMap, matchupMap, twoStartMap, callupMap] = await Promise.all([
+  // Rolling recent form + matchup + two-start + call-ups + next starts, alongside game data.
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, nextStartMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
     getRecentCallups(date),
+    getNextStarts(players, date),
   ]);
 
   // Build stats for each player
@@ -1172,6 +1216,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.matchup = matchupMap.get(player.id);
     stat.twoStartDates = twoStartMap.get(player.id);
     stat.calledUpDate = callupMap.get(player.id);
+    stat.nextStart = nextStartMap.get(player.id);
     return stat;
   });
 }

@@ -277,6 +277,19 @@ function MatchupRow({ m }: { m: Matchup }) {
   );
 }
 
+// Pitcher's next announced start (MLB + MiLB), when scheduled.
+function NextStartRow({ next }: { next: { date: string; opponent: string } }) {
+  const [, m, d] = next.date.split('-');
+  const label = m && d ? `${parseInt(m, 10)}/${parseInt(d, 10)}` : next.date;
+  return (
+    <div className="flex items-center gap-1.5 mb-2 text-[11px] text-indigo-300/90">
+      <span className="text-zinc-500">Next start</span>
+      <span className="font-medium">{label}</span>
+      <span className="text-zinc-500">{next.opponent}</span>
+    </div>
+  );
+}
+
 function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; war?: number }) {
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
@@ -357,6 +370,9 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
       {stats.matchup && (stats.gameStatus === 'Scheduled' || stats.gameStatus === 'Live') && (
         <MatchupRow m={stats.matchup} />
       )}
+
+      {/* Next announced start (pitchers) */}
+      {stats.nextStart && <NextStartRow next={stats.nextStart} />}
 
       {/* Stat line */}
       {stats.statLine && stats.gameStatus !== 'Scheduled' && stats.gameStatus !== 'No Game' && (

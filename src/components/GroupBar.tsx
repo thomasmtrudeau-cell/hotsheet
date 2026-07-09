@@ -67,7 +67,7 @@ export default function GroupBar({
         className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
           activeGroup === PROMOTIONS_VIEW ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
         }`}
-        title="MiLB players promoted a level in the last 3 days"
+        title="MiLB players promoted a level in the last 7 days"
       >
         ⬆️ Promoted
       </button>

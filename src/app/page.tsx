@@ -523,8 +523,8 @@ export default function Home() {
           onFollow={follow}
           isFollowing={(id) => players.some((p) => p.id === id)}
           loading={promotionsLoading}
-          caption="MiLB players promoted a level in the last 3 days · tap Follow to add"
-          emptyText="No MiLB promotions in the last 3 days"
+          caption="MiLB players promoted a level in the last 7 days · tap Follow to add"
+          emptyText="No MiLB promotions in the last 7 days"
           verb="promoted"
         />
       ) : players.length === 0 ? (
