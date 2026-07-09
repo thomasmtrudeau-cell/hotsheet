@@ -756,6 +756,48 @@ async function getMatchups(
   return result;
 }
 
+// --- Two-start week (SP with 2+ starts in the current Mon–Sun fantasy week) ---
+
+async function getTwoStartPitchers(date: string): Promise<Map<number, string[]>> {
+  const d = new Date(date + 'T00:00:00Z');
+  const toMonday = (d.getUTCDay() + 6) % 7; // days back to Monday (week start)
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() - toMonday);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  const startStr = monday.toISOString().slice(0, 10);
+  const endStr = sunday.toISOString().slice(0, 10);
+
+  const result = new Map<number, string[]>();
+  try {
+    // MLB fantasy concept — sportId 1 only. Probables persist on already-played
+    // games, so counting the full week catches the completed + upcoming start.
+    const data = await cachedFetch<{ dates?: Array<{ date: string; games: ScheduleGame[] }> }>(
+      `${MLB_API}/schedule?sportId=1&startDate=${startStr}&endDate=${endStr}&hydrate=probablePitcher`,
+      3600_000 // 1 hr; probables shift through the week
+    );
+    const byPitcher = new Map<number, string[]>();
+    for (const dt of data.dates ?? []) {
+      for (const g of dt.games ?? []) {
+        for (const side of ['away', 'home'] as const) {
+          const pp = g.teams[side].probablePitcher;
+          if (pp?.id) {
+            const arr = byPitcher.get(pp.id) ?? [];
+            arr.push(dt.date);
+            byPitcher.set(pp.id, arr);
+          }
+        }
+      }
+    }
+    byPitcher.forEach((dates, pid) => {
+      if (dates.length >= 2) result.set(pid, dates.sort());
+    });
+  } catch {
+    // No two-start data this run; cards simply omit the badge.
+  }
+  return result;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -796,10 +838,11 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + today's matchup, fetched alongside the game data.
-  const [recentFormMap, matchupMap] = await Promise.all([
+  // Rolling recent form + today's matchup + two-start weeks, alongside game data.
+  const [recentFormMap, matchupMap, twoStartMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
+    getTwoStartPitchers(date),
   ]);
 
   // Build stats for each player
@@ -831,6 +874,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     }
     stat.recentForm = recentFormMap.get(player.id);
     stat.matchup = matchupMap.get(player.id);
+    stat.twoStartDates = twoStartMap.get(player.id);
     return stat;
   });
 }

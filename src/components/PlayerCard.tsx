@@ -55,6 +55,22 @@ function isOnRehab(stats: DailyPlayerStats): boolean {
   return Boolean(stats.onRehab);
 }
 
+function TwoStartBadge({ dates }: { dates: string[] }) {
+  // "2026-07-06" -> "7/6"
+  const fmt = (d: string) => {
+    const [, m, day] = d.split('-');
+    return `${parseInt(m, 10)}/${parseInt(day, 10)}`;
+  };
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300"
+      title={`Two starts this week: ${dates.map(fmt).join(' & ')}`}
+    >
+      2-START WK
+    </span>
+  );
+}
+
 function RehabBadge() {
   return (
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
@@ -257,6 +273,7 @@ function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStat
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
             {onRehab && <RehabBadge />}
+            {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />

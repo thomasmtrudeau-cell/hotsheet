@@ -100,8 +100,9 @@ export interface DailyPlayerStats {
   battingOrder?: number; // 1-9
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
-  recentForm?: RecentForm; // rolling last-15-day line
-  matchup?: Matchup;       // today's opposing starter + park (hitters only)
+  recentForm?: RecentForm;   // rolling last-15-day line
+  matchup?: Matchup;         // today's opposing starter + park (hitters only)
+  twoStartDates?: string[];  // ISO dates of this SP's 2+ starts in the current fantasy week
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
