@@ -65,6 +65,7 @@ export default function Home() {
   const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [warMap, setWarMap] = useState<Record<number, number>>({}); // peak WAR, premium only
+  const [showWar, setShowWar] = useState(true); // premium toggle (for clean screenshots)
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
@@ -260,6 +261,8 @@ export default function Home() {
   const isCallups = activeGroup === CALLUPS_VIEW;
   const isPromotions = activeGroup === PROMOTIONS_VIEW;
   const isDiscovery = isCallups || isPromotions;
+  // WAR only comes back populated for premium accounts, so a non-empty map = premium.
+  const isPremium = Object.keys(warMap).length > 0;
 
   const currentStats: SortableStat[] =
     activeTab === 'today' ? dailyStats :
@@ -408,6 +411,17 @@ export default function Home() {
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
         <div className="flex items-center gap-3">
+          {isPremium && (
+            <button
+              onClick={() => setShowWar((v) => !v)}
+              className={`text-[11px] px-2 py-1 rounded-full border transition-colors cursor-pointer ${
+                showWar ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
+              }`}
+              title="Show/hide WAR (only you can see this toggle)"
+            >
+              WAR {showWar ? 'on' : 'off'}
+            </button>
+          )}
           <NotificationBell
             notifications={notifications}
             onOpen={markNotificationsRead}
@@ -551,13 +565,13 @@ export default function Home() {
                   {section.stats.length}
                 </span>
               </h2>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3 auto-rows-fr">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                 {section.stats.map((stat) => {
                   const selected = selectedIds.has(stat.playerId);
                   return (
                     <div
                       key={stat.playerId}
-                      className={`relative rounded-xl h-full ${selectMode ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                      className={`relative rounded-xl ${selectMode ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-blue-500' : ''}`}
                       onClick={selectMode ? () => toggleSelected(stat.playerId) : undefined}
                     >
                       <PlayerCard
@@ -565,7 +579,7 @@ export default function Home() {
                         stats={stat as DailyPlayerStats & SeasonPlayerStats}
                         onUnfollow={unfollow}
                         leagueAvg={leagueAvgs.get(stat.sportId)}
-                        war={warMap[stat.playerId]}
+                        war={showWar ? warMap[stat.playerId] : undefined}
                         groupControl={{
                           groups,
                           memberOf: memberships.get(stat.playerId) ?? [],

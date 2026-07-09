@@ -104,6 +104,9 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
               >
                 {loading === 'magic' ? 'Sending…' : 'Email me a sign-in link'}
               </button>
+              <p className="text-[11px] text-zinc-500 text-center">
+                Email links are limited and can be slow — <span className="text-zinc-400">Google sign-in is fastest &amp; most reliable</span>.
+              </p>
             </form>
 
             {error && <p className="text-xs text-red-400 text-center">{error}</p>}

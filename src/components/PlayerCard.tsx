@@ -300,7 +300,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
   const borderClass = isInjured ? 'border-red-500/60 hover:border-red-500/80' : levelBorderClass(stats.sportId);
   return (
     <div
-      className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 h-full flex flex-col transition-colors ${notPlaying && !isInjured ? 'opacity-60' : ''}`}
+      className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors ${notPlaying && !isInjured ? 'opacity-60' : ''}`}
       title={stats.injury?.note}
     >
       {/* Header */}
@@ -419,7 +419,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats
     : levelBorderClass(stats.sportId);
 
   return (
-    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 h-full flex flex-col transition-colors`} title={stats.injury?.note}>
+    <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
       {/* Header */}
       <div className="flex items-start justify-between mb-3">
         <div className="flex-1 min-w-0">
