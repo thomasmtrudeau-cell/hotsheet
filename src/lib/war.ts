@@ -65,8 +65,10 @@ function parseTab(csv: string, nameHeader: string): Map<string, number> {
   return out;
 }
 
-// 1-hour in-memory cache of the parsed sheet, keyed by sheet id.
-let cache: { sheetId: string; at: number; byName: Map<string, number> } | null = null;
+// 1-hour in-memory cache of the parsed sheet, keyed by sheet id. Hitting and
+// pitching are kept SEPARATE — some names appear in both (position players who
+// pitched), so we must pick WAR by the player's actual role, not merge.
+let cache: { sheetId: string; at: number; hitters: Map<string, number>; pitchers: Map<string, number> } | null = null;
 const TTL = 3600_000;
 
 async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
@@ -76,32 +78,32 @@ async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
   return res.text();
 }
 
-async function getNameWarMap(sheetId: string): Promise<Map<string, number>> {
+async function getWarMaps(sheetId: string): Promise<{ hitters: Map<string, number>; pitchers: Map<string, number> }> {
   const now = Date.now();
-  if (cache && cache.sheetId === sheetId && now - cache.at < TTL) return cache.byName;
+  if (cache && cache.sheetId === sheetId && now - cache.at < TTL) return cache;
   const [hitCsv, pitCsv] = await Promise.all([
     fetchCsvTab(sheetId, HIT_TAB),
     fetchCsvTab(sheetId, PIT_TAB),
   ]);
-  const byName = new Map<string, number>();
-  // Hitters first, then pitchers (a name appears in only one tab in practice).
-  for (const [k, v] of parseTab(hitCsv, 'name')) byName.set(k, v);
-  for (const [k, v] of parseTab(pitCsv, 'player')) byName.set(k, v);
-  cache = { sheetId, at: now, byName };
-  return byName;
+  const hitters = parseTab(hitCsv, 'name');
+  const pitchers = parseTab(pitCsv, 'player');
+  cache = { sheetId, at: now, hitters, pitchers };
+  return cache;
 }
 
-// Join WAR to the given players by normalized name. Returns playerId -> WAR.
-// `misses` (optional) collects names with no sheet match, for logging.
+// Join WAR to the given players by normalized name, using the role-appropriate
+// sheet (pitchers → Peak Pitching, everyone else → Peak Hitting). Returns
+// playerId -> WAR.
 export async function fetchWarMap(
   players: FollowedPlayer[],
   sheetId: string
 ): Promise<Record<number, number>> {
-  const byName = await getNameWarMap(sheetId);
+  const { hitters, pitchers } = await getWarMaps(sheetId);
   const result: Record<number, number> = {};
   const misses: string[] = [];
   for (const p of players) {
-    const war = byName.get(normalizeName(p.fullName));
+    const key = normalizeName(p.fullName);
+    const war = p.primaryPosition === 'P' ? pitchers.get(key) : hitters.get(key);
     if (war !== undefined) result[p.id] = war;
     else misses.push(p.fullName);
   }
