@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { User } from '@supabase/supabase-js';
 import { FollowedPlayer, Group } from '@/lib/types';
 import { createClient } from '@/lib/supabase/client';
@@ -181,6 +181,16 @@ export function useFollowedPlayers() {
       sub.subscription.unsubscribe();
     };
   }, [loadAll]);
+
+  // Re-check the roster periodically so promotions/demotions of followed
+  // players ping you during an open session, not only on load.
+  const playersRef = useRef(players);
+  useEffect(() => { playersRef.current = players; }, [players]);
+  useEffect(() => {
+    if (!loaded || players.length === 0) return;
+    const id = setInterval(() => refreshAndDiff(playersRef.current), 15 * 60 * 1000);
+    return () => clearInterval(id);
+  }, [loaded, players.length, refreshAndDiff]);
 
   // --- Player actions ---
 

@@ -92,9 +92,9 @@ function TwoStartBadge({ dates }: { dates: string[] }) {
   return (
     <span
       className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-500/20 text-indigo-300"
-      title={`Two starts this week: ${dates.map(fmt).join(' & ')}`}
+      title={`Two starts next week: ${dates.map(fmt).join(' & ')}`}
     >
-      2-START WK
+      2-START NEXT WK
     </span>
   );
 }

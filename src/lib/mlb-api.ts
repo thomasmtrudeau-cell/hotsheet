@@ -831,10 +831,14 @@ export async function getRangeStats(
 // --- Two-start week (SP with 2+ starts in the current Mon–Sun fantasy week) ---
 
 async function getTwoStartPitchers(date: string): Promise<Map<number, string[]>> {
+  // NEXT calendar week (Mon–Sun) — a two-start week is only actionable before
+  // it starts, for setting fantasy lineups. Note: probables are announced only
+  // ~5 days out, so next week fills in progressively (most complete over the
+  // weekend before it begins).
   const d = new Date(date + 'T00:00:00Z');
-  const toMonday = (d.getUTCDay() + 6) % 7; // days back to Monday (week start)
+  const toMonday = (d.getUTCDay() + 6) % 7; // days back to THIS week's Monday
   const monday = new Date(d);
-  monday.setUTCDate(d.getUTCDate() - toMonday);
+  monday.setUTCDate(d.getUTCDate() - toMonday + 7); // next Monday
   const sunday = new Date(monday);
   sunday.setUTCDate(monday.getUTCDate() + 6);
   const startStr = monday.toISOString().slice(0, 10);
@@ -842,8 +846,7 @@ async function getTwoStartPitchers(date: string): Promise<Map<number, string[]>>
 
   const result = new Map<number, string[]>();
   try {
-    // MLB fantasy concept — sportId 1 only. Probables persist on already-played
-    // games, so counting the full week catches the completed + upcoming start.
+    // MLB fantasy concept — sportId 1 only.
     const data = await cachedFetch<{ dates?: Array<{ date: string; games: ScheduleGame[] }> }>(
       `${MLB_API}/schedule?sportId=1&startDate=${startStr}&endDate=${endStr}&hydrate=probablePitcher`,
       3600_000 // 1 hr; probables shift through the week

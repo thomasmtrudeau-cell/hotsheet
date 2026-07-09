@@ -186,13 +186,13 @@ export function lineupNotifications(stats: DailyPlayerStats[], date: string): Ho
   return out;
 }
 
-// Two-start week: a followed SP with 2+ starts in the current fantasy week.
-// Keyed by the week's Monday so it fires once per week per pitcher, not daily.
+// Two-start week: a followed SP lined up for 2+ starts NEXT fantasy week.
+// Keyed by next week's Monday so it fires once per week per pitcher, not daily.
 export function twoStartNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
   const d = new Date(date + 'T00:00:00Z');
-  const monday = new Date(d);
-  monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
-  const weekKey = monday.toISOString().slice(0, 10);
+  const nextMonday = new Date(d);
+  nextMonday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 7);
+  const weekKey = nextMonday.toISOString().slice(0, 10);
   const fmt = (s: string) => {
     const [, m, day] = s.split('-');
     return `${parseInt(m, 10)}/${parseInt(day, 10)}`;
@@ -201,7 +201,7 @@ export function twoStartNotifications(stats: DailyPlayerStats[], date: string): 
     .filter((s) => (s.twoStartDates?.length ?? 0) >= 2)
     .map((s) =>
       makeNotification({ id: s.playerId }, s.playerName, 'two_start', weekKey,
-        `Two-start week — starts ${s.twoStartDates!.map(fmt).join(' & ')}`)
+        `Two-start week ahead — starts ${s.twoStartDates!.map(fmt).join(' & ')}`)
     );
 }
 
