@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ date: today, inserted: records.length });
   } catch (error) {
     console.error('war-snapshot error:', error);
-    return NextResponse.json({ error: 'snapshot failed' }, { status: 500 });
+    const detail = error instanceof Error ? error.message : String(error);
+    return NextResponse.json({ error: 'snapshot failed', detail }, { status: 500 });
   }
 }

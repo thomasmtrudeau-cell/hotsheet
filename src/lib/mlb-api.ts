@@ -1691,7 +1691,7 @@ export async function getGameLog(
   isPitcher: boolean,
   sportId?: number,
   season?: number,
-  limit = 10
+  limit = 15
 ): Promise<GameLogEntry[]> {
   const year = season ?? new Date().getFullYear();
   const group = isPitcher ? 'pitching' : 'hitting';

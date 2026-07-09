@@ -361,9 +361,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
         ) : (
           <span className="text-xs text-zinc-400">{stats.gameContext}</span>
         )}
-        {stats.gameTime && stats.gameStatus === 'Scheduled' && (
-          <span className="text-xs text-zinc-500">{stats.gameTime}</span>
-        )}
+        {/* Time is shown once, in the grade row ("Game at …") for scheduled games. */}
       </div>
 
       {/* Matchup (hitters, upcoming/live game) */}
@@ -393,11 +391,13 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
         )}
       </div>
 
-      {/* Recent form (rolling last 15 days) */}
-      {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
-
+      {/* Recent form + game log — revealed together via the chevron (keeps the
+          default card lean; expand to see the L15 line + last 15 games). */}
       {logOpen && canLog && (
-        <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} />
+        <>
+          {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
+          <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} />
+        </>
       )}
     </div>
   );
