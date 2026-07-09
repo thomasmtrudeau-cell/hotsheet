@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group } from '@/lib/types';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup } from '@/lib/types';
 import GradeBadge from './GradeBadge';
 import GroupTag from './GroupTag';
 import GameLog from './GameLog';
@@ -198,6 +198,47 @@ function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; is
   );
 }
 
+// Rolling last-15-day line; green when hot, red when cold, numbers stay primary.
+function RecentFormRow({ form }: { form: RecentForm }) {
+  if (!form.gamesPlayed) return null;
+  const color = form.trend === 'hot' ? 'text-emerald-400' : form.trend === 'cold' ? 'text-red-400' : 'text-zinc-300';
+  return (
+    <div className="mt-2 flex items-center gap-1.5 text-[11px]" title={`Last 15 days (${form.gamesPlayed} G)`}>
+      <span className="text-zinc-500 font-medium">L15</span>
+      <span className={`font-mono ${color}`}>{form.line}</span>
+      {form.trend === 'hot' && <span aria-label="hot">🔥</span>}
+      {form.trend === 'cold' && <span aria-label="cold">🧊</span>}
+    </div>
+  );
+}
+
+// Today's opposing starter + park, colored by favorability to the hitter
+// (weak pitcher / hitter-friendly park = green; tough / pitcher-friendly = red).
+function MatchupRow({ m }: { m: Matchup }) {
+  const hand = m.oppStarterHand ? `${m.oppStarterHand}HP ` : '';
+  const eraColor = m.oppStarterEra === undefined ? 'text-zinc-300'
+    : m.oppStarterEra >= 4.5 ? 'text-emerald-400'
+    : m.oppStarterEra <= 3.25 ? 'text-red-400' : 'text-zinc-300';
+  const pfColor = m.parkFactor === undefined ? 'text-zinc-300'
+    : m.parkFactor >= 103 ? 'text-emerald-400'
+    : m.parkFactor <= 97 ? 'text-red-400' : 'text-zinc-300';
+  return (
+    <div className="flex items-center gap-1.5 mb-2 text-[11px] text-zinc-500 flex-wrap">
+      {m.oppStarterName && (
+        <span>
+          vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span>
+          {m.oppStarterEra !== undefined && <> · <span className={eraColor}>{m.oppStarterEra.toFixed(2)} ERA</span></>}
+        </span>
+      )}
+      {m.parkFactor !== undefined && (
+        <span title="Park factor (100 = neutral, higher = more offense)">
+          {m.oppStarterName ? '· ' : ''}<span className={pfColor}>Park {m.parkFactor}</span>
+        </span>
+      )}
+    </div>
+  );
+}
+
 function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl }) {
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
@@ -269,6 +310,11 @@ function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStat
         )}
       </div>
 
+      {/* Matchup (hitters, upcoming/live game) */}
+      {stats.matchup && (stats.gameStatus === 'Scheduled' || stats.gameStatus === 'Live') && (
+        <MatchupRow m={stats.matchup} />
+      )}
+
       {/* Stat line */}
       {stats.statLine && stats.gameStatus !== 'Scheduled' && stats.gameStatus !== 'No Game' && (
         <div className="mb-2 px-3 py-2 bg-zinc-900/50 rounded-lg">
@@ -287,6 +333,9 @@ function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStat
           />
         )}
       </div>
+
+      {/* Recent form (rolling last 15 days) */}
+      {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
 
       {logOpen && canLog && (
         <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} />

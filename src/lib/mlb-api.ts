@@ -1,8 +1,29 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
 const ALL_SPORT_IDS = [1, 11, 12, 13, 14];
+
+// Approximate multi-year runs park factors (100 = neutral, >100 hitter-friendly).
+// Keyed by venue-name substring so renames/variants still match. MLB parks only;
+// anything unmatched (incl. MiLB) is treated as neutral and simply omitted.
+const PARK_FACTORS: Array<[string, number]> = [
+  ['Coors Field', 112], ['Fenway Park', 106], ['Great American Ball Park', 105],
+  ['Citizens Bank Park', 103], ['Chase Field', 103], ['Yankee Stadium', 103],
+  ['Camden Yards', 101], ['Wrigley Field', 102], ['Globe Life Field', 100],
+  ['Truist Park', 101], ['Nationals Park', 101], ['American Family Field', 101],
+  ['Rogers Centre', 101], ['Daikin Park', 101], ['Minute Maid', 101], ['Rate Field', 101],
+  ['Angel Stadium', 100], ['Dodger Stadium', 99], ['Target Field', 99],
+  ['Progressive Field', 98], ['Kauffman Stadium', 98], ['Busch Stadium', 97],
+  ['PNC Park', 97], ['Comerica Park', 97], ['loanDepot park', 96], ['Citi Field', 96],
+  ['Petco Park', 95], ['Oracle Park', 94], ['T-Mobile Park', 93],
+];
+
+function parkFactorFor(venueName?: string): number | undefined {
+  if (!venueName) return undefined;
+  const hit = PARK_FACTORS.find(([name]) => venueName.includes(name));
+  return hit?.[1];
+}
 
 // Convert decimal IP (e.g. 6.333) back to standard notation (e.g. "6.1")
 function formatIP(ip: number): string {
@@ -301,6 +322,7 @@ interface ScheduleGame {
   gamePk: number;
   gameDate: string;
   status: { abstractGameState: string; detailedState: string };
+  venue?: { id: number; name: string };
   teams: {
     away: { team: { id: number; name: string }; probablePitcher?: { id: number; fullName: string } };
     home: { team: { id: number; name: string }; probablePitcher?: { id: number; fullName: string } };
@@ -317,7 +339,7 @@ async function getGamesForDate(date: string): Promise<ScheduleGame[]> {
   const results = await Promise.all(
     ALL_SPORT_IDS.map((sportId) =>
       cachedFetch<{ dates?: Array<{ games: ScheduleGame[] }> }>(
-        `${MLB_API}/schedule?date=${date}&sportId=${sportId}&hydrate=team,probablePitcher,lineups`
+        `${MLB_API}/schedule?date=${date}&sportId=${sportId}&hydrate=team,probablePitcher,lineups,venue`
       ).catch(() => ({ dates: [] }))
     )
   );
@@ -575,6 +597,131 @@ function buildDailyStats(
   return base;
 }
 
+// --- Recent form (rolling last-15-day line) ---
+
+interface DateRangeStat {
+  gamesPlayed?: number;
+  atBats?: number;
+  homeRuns?: number;
+  avg?: string;
+  ops?: string;
+  era?: string;
+  inningsPitched?: string;
+}
+
+function buildRecentForm(st: DateRangeStat, isPitcher: boolean): RecentForm {
+  const gp = st.gamesPlayed ?? 0;
+  if (isPitcher) {
+    const era = st.era !== undefined ? parseFloat(st.era) : NaN;
+    const ip = parseIP(st.inningsPitched ?? '0');
+    let trend: RecentForm['trend'] = 'neutral';
+    if (ip >= 4 && !Number.isNaN(era)) {
+      if (era <= 3.0) trend = 'hot';
+      else if (era >= 5.5) trend = 'cold';
+    }
+    return { gamesPlayed: gp, isPitcher: true, trend, line: `${st.era ?? '—'} ERA · ${st.inningsPitched ?? '0.0'} IP` };
+  }
+  const ab = st.atBats ?? 0;
+  const ops = st.ops !== undefined ? parseFloat(st.ops) : NaN;
+  let trend: RecentForm['trend'] = 'neutral';
+  if (ab >= 15 && !Number.isNaN(ops)) {
+    if (ops >= 0.85) trend = 'hot';
+    else if (ops <= 0.62) trend = 'cold';
+  }
+  return { gamesPlayed: gp, isPitcher: false, trend, line: `${st.avg ?? '—'} · ${st.homeRuns ?? 0} HR · ${st.ops ?? '—'} OPS` };
+}
+
+async function getRecentForm(players: FollowedPlayer[], date: string): Promise<Map<number, RecentForm>> {
+  const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
+  const start = new Date(date + 'T00:00:00Z');
+  start.setUTCDate(start.getUTCDate() - 14); // 15-day inclusive window ending on `date`
+  const startStr = start.toISOString().slice(0, 10);
+
+  const entries = await Promise.all(
+    players.map(async (p) => {
+      const isPitcher = p.primaryPosition === 'P';
+      const group = isPitcher ? 'pitching' : 'hitting';
+      try {
+        const data = await cachedFetch<{ stats?: Array<{ splits?: Array<{ stat: DateRangeStat }> }> }>(
+          `${MLB_API}/people/${p.id}/stats?stats=byDateRange&startDate=${startStr}&endDate=${date}&group=${group}&sportId=${p.sportId}&season=${season}`,
+          1800_000 // 30 min
+        );
+        const st = data.stats?.[0]?.splits?.[0]?.stat;
+        if (!st || !st.gamesPlayed) return null;
+        return [p.id, buildRecentForm(st, isPitcher)] as const;
+      } catch {
+        return null;
+      }
+    })
+  );
+  const result = new Map<number, RecentForm>();
+  for (const e of entries) if (e) result.set(e[0], e[1]);
+  return result;
+}
+
+// --- Matchup (today's opposing starter + park), hitters only ---
+
+async function getMatchups(
+  players: FollowedPlayer[],
+  teamGames: Map<number, ScheduleGame[]>
+): Promise<Map<number, Matchup>> {
+  const season = new Date().getFullYear();
+  const raw = new Map<number, { oppId?: number; venue?: string }>();
+  const pitcherIds = new Set<number>();
+
+  for (const p of players) {
+    if (p.primaryPosition === 'P') continue; // matchup is a hitter-vs-starter read
+    const games = teamGames.get(p.currentTeam.id);
+    if (!games || games.length === 0) continue;
+    const game = games.find((g) => {
+      const s = getGameStatus(g);
+      return s === 'Scheduled' || s === 'Live'; // moot once final
+    });
+    if (!game) continue;
+    const isHome = game.teams.home.team.id === p.currentTeam.id;
+    const opp = isHome ? game.teams.away.probablePitcher : game.teams.home.probablePitcher;
+    raw.set(p.id, { oppId: opp?.id, venue: game.venue?.name });
+    if (opp?.id) pitcherIds.add(opp.id);
+  }
+
+  // One batched call for every opposing starter's hand + season ERA.
+  const pInfo = new Map<number, { name: string; hand?: 'L' | 'R'; era?: number }>();
+  if (pitcherIds.size > 0) {
+    try {
+      const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
+        `${MLB_API}/people?personIds=${Array.from(pitcherIds).join(',')}&hydrate=stats(group=pitching,type=season,season=${season})`,
+        1800_000
+      );
+      for (const person of data.people ?? []) {
+        const hand = (person.pitchHand as { code?: string } | undefined)?.code;
+        const stats = person.stats as Array<{ splits?: Array<{ stat?: { era?: string } }> }> | undefined;
+        const eraStr = stats?.[0]?.splits?.[0]?.stat?.era;
+        pInfo.set(person.id as number, {
+          name: person.fullName as string,
+          hand: hand === 'L' || hand === 'R' ? hand : undefined,
+          era: eraStr !== undefined ? parseFloat(eraStr) : undefined,
+        });
+      }
+    } catch {
+      // Leave pInfo empty — matchup can still show park factor.
+    }
+  }
+
+  const result = new Map<number, Matchup>();
+  raw.forEach(({ oppId, venue }, playerId) => {
+    const info = oppId ? pInfo.get(oppId) : undefined;
+    const parkFactor = parkFactorFor(venue);
+    if (!info && parkFactor === undefined) return; // nothing useful
+    result.set(playerId, {
+      oppStarterName: info?.name ?? '',
+      oppStarterHand: info?.hand,
+      oppStarterEra: info?.era,
+      parkFactor,
+    });
+  });
+  return result;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -615,36 +762,42 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
+  // Rolling recent form + today's matchup, fetched alongside the game data.
+  const [recentFormMap, matchupMap] = await Promise.all([
+    getRecentForm(players, date),
+    getMatchups(players, teamGames),
+  ]);
+
   // Build stats for each player
   return players.map((player) => {
+    let stat: DailyPlayerStats;
     const playerGames = teamGames.get(player.currentTeam.id);
     if (!playerGames || playerGames.length === 0) {
-      return buildDailyStats(player, null, null);
+      stat = buildDailyStats(player, null, null);
+    } else if (playerGames.length === 1) {
+      stat = buildSingleGameStats(player, playerGames[0], boxscores);
+    } else {
+      // Doubleheader: aggregate played games, fall through to scheduled if none played
+      const playedGames = playerGames.filter((g) => {
+        const s = getGameStatus(g);
+        return s === 'Live' || s === 'Final';
+      });
+      const upcomingGames = playerGames.filter((g) => getGameStatus(g) === 'Scheduled');
+
+      if (playedGames.length === 0) {
+        stat = buildSingleGameStats(player, playerGames[0], boxscores);
+      } else {
+        const perGame = playedGames.map((g) => {
+          const bs = boxscores.get(g.gamePk);
+          const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
+          return buildDailyStats(player, g, bp);
+        });
+        stat = aggregateDoubleheader(perGame, upcomingGames.length);
+      }
     }
-
-    if (playerGames.length === 1) {
-      const game = playerGames[0];
-      return buildSingleGameStats(player, game, boxscores);
-    }
-
-    // Doubleheader: aggregate played games, fall through to scheduled if none played
-    const playedGames = playerGames.filter((g) => {
-      const s = getGameStatus(g);
-      return s === 'Live' || s === 'Final';
-    });
-    const upcomingGames = playerGames.filter((g) => getGameStatus(g) === 'Scheduled');
-
-    if (playedGames.length === 0) {
-      // All scheduled or postponed — use the first one
-      return buildSingleGameStats(player, playerGames[0], boxscores);
-    }
-
-    const perGame = playedGames.map((g) => {
-      const bs = boxscores.get(g.gamePk);
-      const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
-      return buildDailyStats(player, g, bp);
-    });
-    return aggregateDoubleheader(perGame, upcomingGames.length);
+    stat.recentForm = recentFormMap.get(player.id);
+    stat.matchup = matchupMap.get(player.id);
+    return stat;
   });
 }
 

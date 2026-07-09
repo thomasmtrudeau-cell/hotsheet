@@ -29,6 +29,22 @@ export function isMiLB(sportId: number): boolean {
   return sportId >= 11 && sportId <= 14;
 }
 
+// Rolling last-15-day performance, for a "hot/cold" read on each card.
+export interface RecentForm {
+  gamesPlayed: number;
+  line: string;                       // numeric line, e.g. ".312 · 4 HR · .955 OPS" or "2.45 ERA · 18.1 IP"
+  trend: 'hot' | 'cold' | 'neutral';  // color accent only; numbers stay primary
+  isPitcher: boolean;
+}
+
+// Today's matchup context for a hitter: the opposing probable starter and park.
+export interface Matchup {
+  oppStarterName: string;
+  oppStarterHand?: 'L' | 'R';
+  oppStarterEra?: number;  // season ERA (number, not a tier)
+  parkFactor?: number;     // runs park factor, 100 = neutral (>100 hitter-friendly)
+}
+
 export interface InjuryStatus {
   code: string; // e.g. "D10", "D60", "ILF"
   label: string; // e.g. "10-Day IL"
@@ -84,6 +100,8 @@ export interface DailyPlayerStats {
   battingOrder?: number; // 1-9
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
+  recentForm?: RecentForm; // rolling last-15-day line
+  matchup?: Matchup;       // today's opposing starter + park (hitters only)
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
