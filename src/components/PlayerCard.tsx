@@ -203,7 +203,7 @@ function RecentFormRow({ form }: { form: RecentForm }) {
   if (!form.gamesPlayed) return null;
   const color = form.trend === 'hot' ? 'text-emerald-400' : form.trend === 'cold' ? 'text-red-400' : 'text-zinc-300';
   return (
-    <div className="mt-2 flex items-center gap-1.5 text-[11px]" title={`Last 15 days (${form.gamesPlayed} G)`}>
+    <div className="mt-2 flex items-center gap-1.5 text-[11px]" title={`Last 15 days (${form.gamesPlayed} G)${form.isPitcher ? '' : ' · wRC+ estimated'}`}>
       <span className="text-zinc-500 font-medium">L15</span>
       <span className={`font-mono ${color}`}>{form.line}</span>
       {form.trend === 'hot' && <span aria-label="hot">🔥</span>}

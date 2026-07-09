@@ -601,15 +601,25 @@ function buildDailyStats(
 
 interface DateRangeStat {
   gamesPlayed?: number;
+  plateAppearances?: number;
   atBats?: number;
+  hits?: number;
+  doubles?: number;
+  triples?: number;
   homeRuns?: number;
-  avg?: string;
+  baseOnBalls?: number;
+  intentionalWalks?: number;
+  hitByPitch?: number;
+  sacFlies?: number;
+  stolenBases?: number;
   ops?: string;
   era?: string;
   inningsPitched?: string;
 }
 
-function buildRecentForm(st: DateRangeStat, isPitcher: boolean): RecentForm {
+// `wrcPlus` is the last-15-day wRC+ ESTIMATE (byDateRange has no real wOBA/wRC+),
+// computed by the caller from league averages; undefined when unavailable.
+function buildRecentForm(st: DateRangeStat, isPitcher: boolean, wrcPlus?: number): RecentForm {
   const gp = st.gamesPlayed ?? 0;
   if (isPitcher) {
     const era = st.era !== undefined ? parseFloat(st.era) : NaN;
@@ -621,14 +631,26 @@ function buildRecentForm(st: DateRangeStat, isPitcher: boolean): RecentForm {
     }
     return { gamesPlayed: gp, isPitcher: true, trend, line: `${st.era ?? '—'} ERA · ${st.inningsPitched ?? '0.0'} IP` };
   }
-  const ab = st.atBats ?? 0;
+  const pa = st.plateAppearances ?? 0;
   const ops = st.ops !== undefined ? parseFloat(st.ops) : NaN;
+  // Prefer wRC+ for the hot/cold read; fall back to OPS when it's unavailable.
   let trend: RecentForm['trend'] = 'neutral';
-  if (ab >= 15 && !Number.isNaN(ops)) {
-    if (ops >= 0.85) trend = 'hot';
-    else if (ops <= 0.62) trend = 'cold';
+  if (pa >= 20) {
+    if (wrcPlus !== undefined) {
+      if (wrcPlus >= 130) trend = 'hot';
+      else if (wrcPlus <= 70) trend = 'cold';
+    } else if (!Number.isNaN(ops)) {
+      if (ops >= 0.85) trend = 'hot';
+      else if (ops <= 0.62) trend = 'cold';
+    }
   }
-  return { gamesPlayed: gp, isPitcher: false, trend, line: `${st.avg ?? '—'} · ${st.homeRuns ?? 0} HR · ${st.ops ?? '—'} OPS` };
+  const wrc = wrcPlus !== undefined ? `${wrcPlus}` : '—';
+  return {
+    gamesPlayed: gp,
+    isPitcher: false,
+    trend,
+    line: `${pa} PA · ${wrc} wRC+ · ${st.homeRuns ?? 0} HR · ${st.stolenBases ?? 0} SB`,
+  };
 }
 
 async function getRecentForm(players: FollowedPlayer[], date: string): Promise<Map<number, RecentForm>> {
@@ -648,7 +670,19 @@ async function getRecentForm(players: FollowedPlayer[], date: string): Promise<M
         );
         const st = data.stats?.[0]?.splits?.[0]?.stat;
         if (!st || !st.gamesPlayed) return null;
-        return [p.id, buildRecentForm(st, isPitcher)] as const;
+        let wrcPlus: number | undefined;
+        if (!isPitcher) {
+          const woba = computeWoba({
+            ab: st.atBats ?? 0, h: st.hits ?? 0, doubles: st.doubles ?? 0, triples: st.triples ?? 0,
+            hr: st.homeRuns ?? 0, bb: st.baseOnBalls ?? 0, ibb: st.intentionalWalks ?? 0,
+            hbp: st.hitByPitch ?? 0, sf: st.sacFlies ?? 0,
+          });
+          if (woba !== null) {
+            const lg = await getLeagueAverages(p.sportId, season);
+            wrcPlus = estimateWrcPlus(woba, lg?.lgWoba, lg?.lgRunsPerPA);
+          }
+        }
+        return [p.id, buildRecentForm(st, isPitcher, wrcPlus)] as const;
       } catch {
         return null;
       }
