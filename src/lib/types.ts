@@ -67,6 +67,11 @@ export interface FollowedPlayer {
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
 }
 
+// A recent MLB call-up (browsable discovery list; followable like a search hit).
+export interface CallUp extends SearchResult {
+  calledUpDate: string;
+}
+
 export interface SearchResult {
   id: number;
   fullName: string;
@@ -242,6 +247,9 @@ export interface GameLogEntry {
 
 // Special sentinel for the implicit "All Players" view (not a stored group).
 export const ALL_PLAYERS_GROUP = 'all';
+
+// Special sentinel for the pre-built MLB call-ups discovery list (not a group).
+export const CALLUPS_VIEW = 'callups';
 
 export type ViewTab = 'today' | 'yesterday' | 'last15' | 'last30' | 'season';
 

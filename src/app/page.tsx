@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, RangePlayerStats, RangeSortKey } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, RangePlayerStats, RangeSortKey, CallUp } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -15,6 +15,7 @@ import EmptyState from '@/components/EmptyState';
 import GroupBar from '@/components/GroupBar';
 import NotificationBell from '@/components/NotificationBell';
 import RangeView from '@/components/RangeView';
+import CallUpsList from '@/components/CallUpsList';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -64,6 +65,8 @@ export default function Home() {
   const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [warMap, setWarMap] = useState<Record<number, number>>({}); // peak WAR, premium only
+  const [callups, setCallups] = useState<CallUp[]>([]);
+  const [callupsLoading, setCallupsLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -80,10 +83,21 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    if (activeGroup !== ALL_PLAYERS_GROUP && !groups.some((g) => g.id === activeGroup)) {
+    if (activeGroup !== ALL_PLAYERS_GROUP && activeGroup !== CALLUPS_VIEW && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
   }, [groups, activeGroup]);
+
+  // Fetch the pre-built call-ups list when that view is opened.
+  useEffect(() => {
+    if (activeGroup !== CALLUPS_VIEW) return;
+    setCallupsLoading(true);
+    fetch(`/api/callups?date=${getDateString(0)}`)
+      .then((r) => r.json())
+      .then((d) => setCallups(Array.isArray(d) ? d : []))
+      .catch(() => setCallups([]))
+      .finally(() => setCallupsLoading(false));
+  }, [activeGroup]);
 
   // Player count per group, for the GroupBar pills.
   const groupCounts = useMemo(() => {
@@ -232,6 +246,7 @@ export default function Home() {
 
   const isRange = activeTab === 'last15' || activeTab === 'last30';
   const rangeWindow = activeTab === 'last30' ? 30 : 15;
+  const isCallups = activeGroup === CALLUPS_VIEW;
 
   const currentStats: SortableStat[] =
     activeTab === 'today' ? dailyStats :
@@ -434,7 +449,9 @@ export default function Home() {
       {/* Refresh indicator */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-xs text-zinc-600">
-          {isRange
+          {isCallups
+            ? `${callups.length} recent call-up${callups.length !== 1 ? 's' : ''}`
+            : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
         </div>
@@ -473,6 +490,13 @@ export default function Home() {
         <div className="flex justify-center py-16">
           <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
         </div>
+      ) : isCallups ? (
+        <CallUpsList
+          callups={callups}
+          onFollow={follow}
+          isFollowing={(id) => players.some((p) => p.id === id)}
+          loading={callupsLoading}
+        />
       ) : players.length === 0 ? (
         <EmptyState />
       ) : isRange ? (

@@ -1,7 +1,23 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW } from '@/lib/types';
+
+function Pill({ id, label, active, count, onSelect }: {
+  id: string; label: string; active: boolean; count: number; onSelect: (id: string) => void;
+}) {
+  return (
+    <button
+      onClick={() => onSelect(id)}
+      className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+        active ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
+      }`}
+    >
+      {label}
+      <span className={`ml-1.5 ${active ? 'text-blue-200' : 'text-zinc-600'}`}>{count}</span>
+    </button>
+  );
+}
 
 interface GroupBarProps {
   groups: Group[];
@@ -27,30 +43,25 @@ export default function GroupBar({
     setCreating(false);
   };
 
-  const Pill = ({ id, label }: { id: string; label: string }) => {
-    const active = activeGroup === id;
-    const count = counts.get(id) ?? 0;
-    return (
-      <button
-        onClick={() => onSelect(id)}
-        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
-          active ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-700'
-        }`}
-      >
-        {label}
-        <span className={`ml-1.5 ${active ? 'text-blue-200' : 'text-zinc-600'}`}>{count}</span>
-      </button>
-    );
-  };
-
   const activeCustom = groups.find((g) => g.id === activeGroup);
 
   return (
     <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1">
-      <Pill id={ALL_PLAYERS_GROUP} label="All Players" />
+      <Pill id={ALL_PLAYERS_GROUP} label="All Players" active={activeGroup === ALL_PLAYERS_GROUP} count={counts.get(ALL_PLAYERS_GROUP) ?? 0} onSelect={onSelect} />
       {groups.map((g) => (
-        <Pill key={g.id} id={g.id} label={g.name} />
+        <Pill key={g.id} id={g.id} label={g.name} active={activeGroup === g.id} count={counts.get(g.id) ?? 0} onSelect={onSelect} />
       ))}
+
+      {/* Pre-built discovery list — recent MLB call-ups (not a group). */}
+      <button
+        onClick={() => onSelect(CALLUPS_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === CALLUPS_VIEW ? 'bg-sky-600 text-white' : 'bg-sky-500/10 text-sky-300 hover:bg-sky-500/20'
+        }`}
+        title="MLB players called up in the last 7 days"
+      >
+        🆕 Call-Ups
+      </button>
 
       {creating ? (
         <form onSubmit={submitNew} className="shrink-0">

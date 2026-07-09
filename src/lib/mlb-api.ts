@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
@@ -900,6 +900,45 @@ async function getRecentCallups(date: string, windowDays = 10): Promise<Map<numb
     // No call-up data this run; cards omit the badge.
   }
   return result;
+}
+
+// Pre-built discovery list: everyone recalled/selected to MLB in the last N days.
+export async function getCallupList(date: string, windowDays = 7): Promise<CallUp[]> {
+  const callupMap = await getRecentCallups(date, windowDays);
+  const ids = Array.from(callupMap.keys());
+  if (ids.length === 0) return [];
+
+  const [teamMap, data] = await Promise.all([
+    getTeamLookup(),
+    cachedFetch<{ people?: Array<Record<string, unknown>> }>(
+      `${MLB_API}/people?personIds=${ids.join(',')}&hydrate=currentTeam`,
+      1800_000
+    ),
+  ]);
+
+  const out: CallUp[] = [];
+  for (const p of data.people ?? []) {
+    const team = p.currentTeam as Record<string, unknown> | undefined;
+    if (!team?.id) continue;
+    const teamId = team.id as number;
+    const teamInfo = teamMap.get(teamId);
+    const sportId = teamInfo?.sportId ?? 1;
+    if (sportId !== 1) continue; // now on an MLB roster (it's an MLB call-up list)
+    const pos = p.primaryPosition as Record<string, unknown> | undefined;
+    out.push({
+      id: p.id as number,
+      fullName: formatDisplayName(p),
+      primaryPosition: (pos?.abbreviation as string) || 'Unknown',
+      currentTeam: { id: teamId, name: team.name as string },
+      sportId,
+      level: LEVEL_LABELS[sportId] || 'MLB',
+      parentOrg: teamInfo?.parentOrgName,
+      parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
+      calledUpDate: callupMap.get(p.id as number) ?? '',
+    });
+  }
+  out.sort((a, b) => b.calledUpDate.localeCompare(a.calledUpDate)); // most recent first
+  return out;
 }
 
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
