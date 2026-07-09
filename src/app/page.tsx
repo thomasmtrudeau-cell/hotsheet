@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, RangePlayerStats, RangeSortKey, CallUp } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RangePlayerStats, RangeSortKey, CallUp } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -15,7 +15,7 @@ import EmptyState from '@/components/EmptyState';
 import GroupBar from '@/components/GroupBar';
 import NotificationBell from '@/components/NotificationBell';
 import RangeView from '@/components/RangeView';
-import CallUpsList from '@/components/CallUpsList';
+import MoversList from '@/components/MoversList';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -67,6 +67,8 @@ export default function Home() {
   const [warMap, setWarMap] = useState<Record<number, number>>({}); // peak WAR, premium only
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
+  const [promotions, setPromotions] = useState<CallUp[]>([]);
+  const [promotionsLoading, setPromotionsLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -83,20 +85,29 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    if (activeGroup !== ALL_PLAYERS_GROUP && activeGroup !== CALLUPS_VIEW && !groups.some((g) => g.id === activeGroup)) {
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW;
+    if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
   }, [groups, activeGroup]);
 
-  // Fetch the pre-built call-ups list when that view is opened.
+  // Fetch the pre-built discovery lists when their view is opened.
   useEffect(() => {
-    if (activeGroup !== CALLUPS_VIEW) return;
-    setCallupsLoading(true);
-    fetch(`/api/callups?date=${getDateString(0)}`)
-      .then((r) => r.json())
-      .then((d) => setCallups(Array.isArray(d) ? d : []))
-      .catch(() => setCallups([]))
-      .finally(() => setCallupsLoading(false));
+    if (activeGroup === CALLUPS_VIEW) {
+      setCallupsLoading(true);
+      fetch(`/api/callups?date=${getDateString(0)}`)
+        .then((r) => r.json())
+        .then((d) => setCallups(Array.isArray(d) ? d : []))
+        .catch(() => setCallups([]))
+        .finally(() => setCallupsLoading(false));
+    } else if (activeGroup === PROMOTIONS_VIEW) {
+      setPromotionsLoading(true);
+      fetch(`/api/promotions?date=${getDateString(0)}`)
+        .then((r) => r.json())
+        .then((d) => setPromotions(Array.isArray(d) ? d : []))
+        .catch(() => setPromotions([]))
+        .finally(() => setPromotionsLoading(false));
+    }
   }, [activeGroup]);
 
   // Player count per group, for the GroupBar pills.
@@ -247,6 +258,8 @@ export default function Home() {
   const isRange = activeTab === 'last15' || activeTab === 'last30';
   const rangeWindow = activeTab === 'last30' ? 30 : 15;
   const isCallups = activeGroup === CALLUPS_VIEW;
+  const isPromotions = activeGroup === PROMOTIONS_VIEW;
+  const isDiscovery = isCallups || isPromotions;
 
   const currentStats: SortableStat[] =
     activeTab === 'today' ? dailyStats :
@@ -434,7 +447,7 @@ export default function Home() {
       />
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
-      {!isCallups && (
+      {!isDiscovery && (
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
           <TabNav activeTab={activeTab} onChange={setActiveTab} />
           <FilterBar
@@ -453,12 +466,14 @@ export default function Home() {
         <div className="text-xs text-zinc-600">
           {isCallups
             ? `${callups.length} recent call-up${callups.length !== 1 ? 's' : ''}`
+            : isPromotions
+            ? `${promotions.length} recent promotion${promotions.length !== 1 ? 's' : ''}`
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
         </div>
         <div className="flex items-center gap-2">
-          {groups.length > 0 && players.length > 0 && !isRange && (
+          {groups.length > 0 && players.length > 0 && !isRange && !isDiscovery && (
             <button
               onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
               className={`text-xs transition-colors cursor-pointer ${selectMode ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
@@ -493,11 +508,24 @@ export default function Home() {
           <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
         </div>
       ) : isCallups ? (
-        <CallUpsList
-          callups={callups}
+        <MoversList
+          items={callups}
           onFollow={follow}
           isFollowing={(id) => players.some((p) => p.id === id)}
           loading={callupsLoading}
+          caption="MLB call-ups in the last 7 days · tap Follow to add"
+          emptyText="No MLB call-ups in the last 7 days"
+          verb="called up"
+        />
+      ) : isPromotions ? (
+        <MoversList
+          items={promotions}
+          onFollow={follow}
+          isFollowing={(id) => players.some((p) => p.id === id)}
+          loading={promotionsLoading}
+          caption="MiLB players promoted a level in the last 3 days · tap Follow to add"
+          emptyText="No MiLB promotions in the last 3 days"
+          verb="promoted"
         />
       ) : players.length === 0 ? (
         <EmptyState />

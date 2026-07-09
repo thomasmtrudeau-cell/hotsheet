@@ -2,11 +2,14 @@
 
 import { CallUp, FollowedPlayer } from '@/lib/types';
 
-interface CallUpsListProps {
-  callups: CallUp[];
+interface MoversListProps {
+  items: CallUp[];
   onFollow: (player: FollowedPlayer) => void;
   isFollowing: (playerId: number) => boolean;
   loading: boolean;
+  caption: string;   // e.g. "MLB call-ups in the last 7 days · tap Follow to add"
+  emptyText: string; // e.g. "No MLB call-ups in the last 7 days"
+  verb: string;      // "called up" | "promoted"
 }
 
 function fmtDate(d: string): string {
@@ -14,22 +17,28 @@ function fmtDate(d: string): string {
   return m && day ? `${parseInt(m, 10)}/${parseInt(day, 10)}` : d;
 }
 
-export default function CallUpsList({ callups, onFollow, isFollowing, loading }: CallUpsListProps) {
-  if (loading && callups.length === 0) {
+function levelBadgeClass(sportId: number): string {
+  if (sportId === 1) return 'bg-blue-500/20 text-blue-400';
+  if (sportId >= 11 && sportId <= 14) return 'bg-amber-500/20 text-amber-400';
+  return 'bg-zinc-500/20 text-zinc-300';
+}
+
+export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb }: MoversListProps) {
+  if (loading && items.length === 0) {
     return (
       <div className="flex justify-center py-16">
         <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
       </div>
     );
   }
-  if (callups.length === 0) {
-    return <div className="text-center py-12 text-sm text-zinc-500">No MLB call-ups in the last 7 days</div>;
+  if (items.length === 0) {
+    return <div className="text-center py-12 text-sm text-zinc-500">{emptyText}</div>;
   }
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-zinc-500 mb-2">MLB call-ups in the last 7 days · tap Follow to add</p>
-      {callups.map((c) => {
+      <p className="text-[11px] text-zinc-500 mb-2">{caption}</p>
+      {items.map((c) => {
         const following = isFollowing(c.id);
         return (
           <div
@@ -39,7 +48,7 @@ export default function CallUpsList({ callups, onFollow, isFollowing, loading }:
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
                 <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-400">MLB</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${levelBadgeClass(c.sportId)}`}>{c.level}</span>
                 {c.war !== undefined && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR">
                     {c.war.toFixed(1)} WAR
@@ -47,7 +56,7 @@ export default function CallUpsList({ callups, onFollow, isFollowing, loading }:
                 )}
               </div>
               <div className="text-[11px] text-zinc-500 truncate">
-                {c.primaryPosition} · {c.currentTeam.name} · called up {fmtDate(c.calledUpDate)}
+                {c.primaryPosition} · {c.currentTeam.name} · {verb} {fmtDate(c.calledUpDate)}
               </div>
               {(c.priorLine || c.last30Line) && (
                 <div className="text-[11px] text-zinc-400 truncate mt-0.5">

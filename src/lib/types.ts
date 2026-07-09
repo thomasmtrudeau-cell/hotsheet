@@ -253,8 +253,9 @@ export interface GameLogEntry {
 // Special sentinel for the implicit "All Players" view (not a stored group).
 export const ALL_PLAYERS_GROUP = 'all';
 
-// Special sentinel for the pre-built MLB call-ups discovery list (not a group).
+// Special sentinels for the pre-built discovery lists (not groups).
 export const CALLUPS_VIEW = 'callups';
+export const PROMOTIONS_VIEW = 'promotions';
 
 export type ViewTab = 'today' | 'yesterday' | 'last15' | 'last30' | 'season';
 

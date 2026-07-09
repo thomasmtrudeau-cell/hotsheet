@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW } from '@/lib/types';
 
 function Pill({ id, label, active, count, onSelect }: {
   id: string; label: string; active: boolean; count: number; onSelect: (id: string) => void;
@@ -61,6 +61,15 @@ export default function GroupBar({
         title="MLB players called up in the last 7 days"
       >
         🆕 Call-Ups
+      </button>
+      <button
+        onClick={() => onSelect(PROMOTIONS_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === PROMOTIONS_VIEW ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+        }`}
+        title="MiLB players promoted a level in the last 3 days"
+      >
+        ⬆️ Promoted
       </button>
 
       {creating ? (
