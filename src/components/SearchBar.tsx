@@ -1,18 +1,23 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { SearchResult, LEVEL_LABELS, FollowedPlayer } from '@/lib/types';
+import { SearchResult, LEVEL_LABELS, FollowedPlayer, Group } from '@/lib/types';
 
 interface SearchBarProps {
-  onFollow: (player: FollowedPlayer) => void;
+  onFollow: (player: FollowedPlayer, groupIds?: string[]) => void;
   isFollowing: (playerId: number) => boolean;
+  groups: Group[];
+  activeGroupId?: string | null; // group currently being viewed, pre-checked in the picker
 }
 
-export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
+export default function SearchBar({ onFollow, isFollowing, groups, activeGroupId }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [open, setOpen] = useState(false);
+  // Which result's "add to group" picker is open, and the groups checked in it.
+  const [pickerId, setPickerId] = useState<number | null>(null);
+  const [pickerGroups, setPickerGroups] = useState<string[]>([]);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -50,7 +55,7 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
     debounceRef.current = setTimeout(() => search(value), 300);
   };
 
-  const handleFollow = (result: SearchResult) => {
+  const handleFollow = (result: SearchResult, groupIds: string[] = []) => {
     onFollow({
       id: result.id,
       fullName: result.fullName,
@@ -60,7 +65,20 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
       parentOrg: result.parentOrg,
       parentOrgAbbrev: result.parentOrgAbbrev,
       followedAt: new Date().toISOString(),
-    });
+    }, groupIds);
+    setPickerId(null);
+  };
+
+  // Open the group picker for a result, pre-checking the group in view.
+  const openPicker = (resultId: number) => {
+    setPickerId(resultId);
+    setPickerGroups(activeGroupId ? [activeGroupId] : []);
+  };
+
+  const togglePickerGroup = (groupId: string) => {
+    setPickerGroups((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
+    );
   };
 
   return (
@@ -111,17 +129,64 @@ export default function SearchBar({ onFollow, isFollowing }: SearchBarProps) {
                     </span>
                   </div>
                 </div>
-                <button
-                  onClick={() => handleFollow(r)}
-                  disabled={following}
-                  className={`ml-3 px-3 py-1 rounded text-xs font-medium transition-colors ${
-                    following
-                      ? 'bg-zinc-700 text-zinc-500 cursor-default'
-                      : 'bg-blue-600 hover:bg-blue-500 text-white cursor-pointer'
-                  }`}
-                >
-                  {following ? 'Following' : 'Follow'}
-                </button>
+                {following ? (
+                  <button
+                    disabled
+                    className="ml-3 px-3 py-1 rounded text-xs font-medium bg-zinc-700 text-zinc-500 cursor-default"
+                  >
+                    Following
+                  </button>
+                ) : groups.length === 0 ? (
+                  <button
+                    onClick={() => handleFollow(r)}
+                    className="ml-3 px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
+                  >
+                    Follow
+                  </button>
+                ) : (
+                  <div className="relative ml-3">
+                    <button
+                      onClick={() => (pickerId === r.id ? setPickerId(null) : openPicker(r.id))}
+                      className="px-3 py-1 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors flex items-center gap-1"
+                    >
+                      Follow
+                      <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                      </svg>
+                    </button>
+                    {pickerId === r.id && (
+                      <div className="absolute right-0 z-30 mt-1 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1">
+                        <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
+                          Add to groups
+                        </div>
+                        {groups.map((g) => (
+                          <button
+                            key={g.id}
+                            onClick={() => togglePickerGroup(g.id)}
+                            className="w-full flex items-center gap-2 px-3 py-1.5 text-left text-xs text-zinc-200 hover:bg-zinc-700/50 cursor-pointer"
+                          >
+                            <span className={`w-3.5 h-3.5 flex items-center justify-center rounded border ${pickerGroups.includes(g.id) ? 'bg-blue-600 border-blue-600' : 'border-zinc-600'}`}>
+                              {pickerGroups.includes(g.id) && (
+                                <svg className="w-2.5 h-2.5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                                </svg>
+                              )}
+                            </span>
+                            <span className="truncate">{g.name}</span>
+                          </button>
+                        ))}
+                        <div className="border-t border-zinc-700/60 mt-1 pt-1 px-2">
+                          <button
+                            onClick={() => handleFollow(r, pickerGroups)}
+                            className="w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
+                          >
+                            {pickerGroups.length > 0 ? `Add to ${pickerGroups.length} group${pickerGroups.length > 1 ? 's' : ''}` : 'Follow (no group)'}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             );
           })}

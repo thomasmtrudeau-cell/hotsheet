@@ -184,7 +184,7 @@ export function useFollowedPlayers() {
 
   // --- Player actions ---
 
-  const follow = useCallback(async (player: FollowedPlayer) => {
+  const follow = useCallback(async (player: FollowedPlayer, groupIds: string[] = []) => {
     const withTime = { ...player, followedAt: new Date().toISOString() };
     setPlayers((prev) => {
       if (prev.some((p) => p.id === player.id)) return prev;
@@ -193,6 +193,18 @@ export function useFollowedPlayers() {
       return updated;
     });
     await store.upsertCloudPlayer(withTime);
+    // Optionally drop the player into groups as part of adding them. The cloud
+    // player row must exist first (player_groups FKs to followed_players), which
+    // the awaited upsert above guarantees.
+    if (groupIds.length > 0) {
+      setMemberships((prev) => {
+        const next = new Map(prev);
+        next.set(player.id, groupIds);
+        store.setCachedMemberships(next);
+        return next;
+      });
+      await store.setPlayerGroups(player.id, groupIds);
+    }
   }, []);
 
   const unfollow = useCallback(async (playerId: number) => {

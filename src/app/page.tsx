@@ -295,7 +295,12 @@ export default function Home() {
 
       {/* Search */}
       <div className="mb-6">
-        <SearchBar onFollow={follow} isFollowing={(id) => players.some(p => p.id === id)} />
+        <SearchBar
+          onFollow={follow}
+          isFollowing={(id) => players.some(p => p.id === id)}
+          groups={groups}
+          activeGroupId={activeGroup === ALL_PLAYERS_GROUP ? null : activeGroup}
+        />
       </div>
 
       {/* Groups */}
