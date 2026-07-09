@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP } from '@/lib/types';
-import { rehabNotifications } from '@/lib/notifications';
+import { rehabNotifications, lineupNotifications, closerNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { createClient } from '@/lib/supabase/client';
@@ -127,8 +127,12 @@ export default function Home() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setter(data);
-        // A followed player on the IL but in today's lineup = rehab game.
-        if (isToday) ingestNotifications(rehabNotifications(data, date));
+        // Opportunity signals derived from today's lineup/boxscore.
+        if (isToday) {
+          ingestNotifications(rehabNotifications(data, date));
+          ingestNotifications(lineupNotifications(data, date));
+          ingestNotifications(closerNotifications(data, date));
+        }
       }
     } catch (e) {
       console.error('Failed to fetch daily stats:', e);

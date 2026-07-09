@@ -1,6 +1,6 @@
 import { FollowedPlayer, DailyPlayerStats, LEVEL_LABELS, isMLBSystem } from './types';
 
-export type NotificationType = 'il_off' | 'il_on' | 'promoted' | 'demoted' | 'team_change' | 'rehab';
+export type NotificationType = 'il_off' | 'il_on' | 'promoted' | 'demoted' | 'team_change' | 'rehab' | 'lineup_spot' | 'save';
 
 export interface HotNotification {
   id: string;
@@ -24,6 +24,8 @@ export const NOTIFICATION_STYLE: Record<NotificationType, { emoji: string; color
   demoted: { emoji: '⬇️', color: 'text-amber-400' },
   team_change: { emoji: '🔁', color: 'text-purple-400' },
   rehab: { emoji: '🩹', color: 'text-teal-400' },
+  lineup_spot: { emoji: '📋', color: 'text-cyan-400' },
+  save: { emoji: '🔒', color: 'text-indigo-400' },
 };
 
 // Distance from the majors: MLB highest, Single-A lowest.
@@ -124,6 +126,72 @@ export function rehabNotifications(stats: DailyPlayerStats[], date: string): Hot
         { id: s.playerId }, s.playerName, 'rehab', date,
         `Rehab game today — in action for ${s.team} (${s.level})`
       )
+    );
+}
+
+// --- Opportunity signals (derived from the daily lineup/boxscore) ---
+
+const LINEUP_KEY = 'hotsheet_last_lineup'; // { [playerId]: lastKnownBattingOrder }
+
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
+}
+
+function getLastLineup(): Record<number, number> {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(localStorage.getItem(LINEUP_KEY) || '{}');
+  } catch {
+    return {};
+  }
+}
+
+// Batting-order movement: fires when a player climbs into the top of the order
+// or jumps 3+ spots (either direction). Low-noise — small wiggles at the top
+// (1↔2) don't alert, and a player who bats the same spot never re-fires because
+// we only compare against the last KNOWN order and persist it each run.
+export function lineupNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
+  if (typeof window === 'undefined') return [];
+  const last = getLastLineup();
+  const next: Record<number, number> = { ...last };
+  const out: HotNotification[] = [];
+
+  for (const s of stats) {
+    const order = s.battingOrder;
+    if (!order || !isMLBSystem(s.sportId)) continue;
+    const prev = last[s.playerId];
+    next[s.playerId] = order;
+    if (prev === undefined || order === prev) continue;
+
+    if (order <= 2 && prev > 2) {
+      out.push(makeNotification({ id: s.playerId }, s.playerName, 'lineup_spot', `${date}:top${order}`,
+        `Batting ${ordinal(order)} today — up from ${ordinal(prev)}`));
+    } else if (prev - order >= 3) {
+      out.push(makeNotification({ id: s.playerId }, s.playerName, 'lineup_spot', `${date}:up${order}`,
+        `Moved up to ${ordinal(order)} in the order (was ${ordinal(prev)})`));
+    } else if (order - prev >= 3) {
+      out.push(makeNotification({ id: s.playerId }, s.playerName, 'lineup_spot', `${date}:down${order}`,
+        `Dropped to ${ordinal(order)} in the order (was ${ordinal(prev)})`));
+    }
+  }
+
+  try {
+    localStorage.setItem(LINEUP_KEY, JSON.stringify(next));
+  } catch {
+    // storage full / unavailable — skip persistence, alerts still returned
+  }
+  return out;
+}
+
+// Closer usage: a pitcher who recorded a save today. One per player per day.
+export function closerNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
+  return stats
+    .filter((s) => (s.saves ?? 0) > 0)
+    .map((s) =>
+      makeNotification({ id: s.playerId }, s.playerName, 'save', date,
+        `Recorded a save${(s.saves ?? 0) > 1 ? ` (${s.saves})` : ''} — ${s.team}`)
     );
 }
 
