@@ -81,10 +81,13 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
               </svg>
               {loading === 'google' ? 'Redirecting…' : 'Continue with Google'}
             </button>
+            <p className="text-xs text-emerald-400 text-center font-medium flex items-center justify-center gap-1">
+              ✓ Recommended — instant, nothing to check in your inbox
+            </p>
 
             <div className="flex items-center gap-3">
               <div className="h-px bg-zinc-800 flex-1" />
-              <span className="text-[11px] text-zinc-600 uppercase tracking-wider">or</span>
+              <span className="text-[11px] text-zinc-600 uppercase tracking-wider">or use email</span>
               <div className="h-px bg-zinc-800 flex-1" />
             </div>
 
@@ -94,18 +97,17 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
                 value={email}
                 onChange={(e) => { setEmail(e.target.value); setError(''); }}
                 placeholder="you@email.com"
-                autoFocus
-                className="w-full px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-center"
+                className="w-full px-4 py-3 bg-zinc-900 border border-zinc-800 rounded-lg text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-center"
               />
               <button
                 type="submit"
                 disabled={loading !== null}
-                className="w-full py-3 bg-blue-600 hover:bg-blue-500 text-white font-medium rounded-lg transition-colors cursor-pointer disabled:opacity-60"
+                className="w-full py-2.5 bg-zinc-800 border border-zinc-700 hover:bg-zinc-700 text-zinc-300 text-sm font-medium rounded-lg transition-colors cursor-pointer disabled:opacity-60"
               >
                 {loading === 'magic' ? 'Sending…' : 'Email me a sign-in link'}
               </button>
-              <p className="text-[11px] text-zinc-500 text-center">
-                Email links are limited and can be slow — <span className="text-zinc-400">Google sign-in is fastest &amp; most reliable</span>.
+              <p className="text-[11px] text-zinc-600 text-center">
+                Email links are rate-limited and can land in spam.
               </p>
             </form>
 
