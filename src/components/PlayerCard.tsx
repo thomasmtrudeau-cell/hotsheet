@@ -35,6 +35,7 @@ interface DailyCardProps {
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
+  war?: number; // peak WAR (premium only)
 }
 
 interface SeasonCardProps {
@@ -43,6 +44,7 @@ interface SeasonCardProps {
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
+  war?: number; // peak WAR (premium only)
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
@@ -53,6 +55,17 @@ type PlayerCardProps = DailyCardProps | SeasonCardProps;
 // so we rely on the roster-derived flag, NOT "injured + has a game today".
 function isOnRehab(stats: DailyPlayerStats): boolean {
   return Boolean(stats.onRehab);
+}
+
+function WarBadge({ war }: { war: number }) {
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300"
+      title="Peak WAR"
+    >
+      {war.toFixed(1)} WAR
+    </span>
+  );
 }
 
 function TwoStartBadge({ dates }: { dates: string[] }) {
@@ -255,7 +268,7 @@ function MatchupRow({ m }: { m: Matchup }) {
   );
 }
 
-function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl }) {
+function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; war?: number }) {
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
   const onRehab = isOnRehab(stats);
@@ -274,6 +287,7 @@ function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStat
             {stats.injury && <ILBadge label={stats.injury.label} />}
             {onRehab && <RehabBadge />}
             {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
+            {war !== undefined && <WarBadge war={war} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
@@ -361,7 +375,7 @@ function DailyCard({ stats, onUnfollow, groupControl }: { stats: DailyPlayerStat
   );
 }
 
-function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages; groupControl?: GroupControl }) {
+function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages; groupControl?: GroupControl; war?: number }) {
   const [logOpen, setLogOpen] = useState(false);
   const [levelOpen, setLevelOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
@@ -385,6 +399,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl }: { stats: Sea
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
+            {war !== undefined && <WarBadge war={war} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
@@ -501,7 +516,7 @@ function StatCell({ label, value, highlight }: { label: string; value: string; h
 
 export default function PlayerCard(props: PlayerCardProps) {
   if (props.type === 'daily') {
-    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} />;
+    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} war={props.war} />;
   }
-  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} />;
+  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} war={props.war} />;
 }

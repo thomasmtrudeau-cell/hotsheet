@@ -63,6 +63,7 @@ export default function Home() {
   const [seasonStats, setSeasonStats] = useState<SeasonPlayerStats[]>([]);
   const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
+  const [warMap, setWarMap] = useState<Record<number, number>>({}); // peak WAR, premium only
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -214,6 +215,20 @@ export default function Home() {
 
   // Auto-refresh every 5 minutes
   useAutoRefresh(fetchActiveTab, 5 * 60 * 1000, loaded && players.length > 0);
+
+  // Peak WAR (premium only). Server returns {} for non-premium / unconfigured,
+  // so non-premium users simply see no WAR.
+  useEffect(() => {
+    if (!loaded || players.length === 0) { setWarMap({}); return; }
+    fetch('/api/war', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ players }),
+    })
+      .then((r) => r.json())
+      .then((d) => setWarMap(d && typeof d === 'object' ? d : {}))
+      .catch(() => setWarMap({}));
+  }, [loaded, players]);
 
   const isRange = activeTab === 'last15' || activeTab === 'last30';
   const rangeWindow = activeTab === 'last30' ? 30 : 15;
@@ -473,6 +488,7 @@ export default function Home() {
                         stats={stat as DailyPlayerStats & SeasonPlayerStats}
                         onUnfollow={unfollow}
                         leagueAvg={leagueAvgs.get(stat.sportId)}
+                        war={warMap[stat.playerId]}
                         groupControl={{
                           groups,
                           memberOf: memberships.get(stat.playerId) ?? [],

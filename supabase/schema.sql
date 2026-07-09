@@ -38,7 +38,11 @@ language plpgsql
 security definer set search_path = public
 as $$
 begin
-  if new.tier is distinct from old.tier and auth.role() <> 'service_role' then
+  -- Block only a logged-in browser user changing their OWN tier. The SQL editor
+  -- / service role has no auth.uid() (or is service_role), so admin edits pass.
+  if new.tier is distinct from old.tier
+     and auth.uid() is not null
+     and auth.role() <> 'service_role' then
     new.tier := old.tier;  -- silently ignore self-escalation attempts
   end if;
   return new;
