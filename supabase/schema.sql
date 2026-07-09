@@ -157,6 +157,54 @@ create policy "player_groups: all own"
   with check (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
+-- war_snapshots: daily snapshot of the premium WAR sheet, for tracking WAR
+-- MOVEMENT (prospect risers). Written by the cron route (service role only),
+-- read via the war_risers() function. No public access (RLS on, no policies).
+-- ---------------------------------------------------------------------------
+create table if not exists public.war_snapshots (
+  snapshot_date date not null,
+  name_key      text not null,   -- normalized name (join key across days)
+  display_name  text not null,
+  is_pitcher    boolean not null default false,
+  level         text,
+  war           numeric not null,
+  primary key (snapshot_date, name_key, is_pitcher)
+);
+
+create index if not exists war_snapshots_key_idx on public.war_snapshots (name_key, is_pitcher, snapshot_date);
+
+alter table public.war_snapshots enable row level security;
+-- (no policies: only the service role touches this table)
+
+-- Risers: players whose WAR rose >= 1.5 over the last `window_days`, top 100.
+-- Compares the latest snapshot to the newest snapshot on/before (latest - window).
+create or replace function public.war_risers(window_days int)
+returns table(name_key text, display_name text, is_pitcher boolean, level text, war numeric, delta numeric)
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+declare
+  latest_d date;
+  past_d date;
+begin
+  select max(snapshot_date) into latest_d from public.war_snapshots;
+  if latest_d is null then return; end if;
+  select max(snapshot_date) into past_d from public.war_snapshots where snapshot_date <= latest_d - window_days;
+  if past_d is null then return; end if;
+  return query
+    select t.name_key, t.display_name, t.is_pitcher, t.level, t.war, (t.war - p.war) as delta
+    from public.war_snapshots t
+    join public.war_snapshots p
+      on p.name_key = t.name_key and p.is_pitcher = t.is_pitcher and p.snapshot_date = past_d
+    where t.snapshot_date = latest_d and (t.war - p.war) >= 1.5
+    order by (t.war - p.war) desc
+    limit 100;
+end;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- Open-signup hygiene: cap each user at 500 followed players.
 -- ---------------------------------------------------------------------------
 create or replace function public.enforce_follow_cap()

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RangePlayerStats, RangeSortKey, CallUp } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -16,6 +16,7 @@ import GroupBar from '@/components/GroupBar';
 import NotificationBell from '@/components/NotificationBell';
 import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
+import RisersView from '@/components/RisersView';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -70,6 +71,9 @@ export default function Home() {
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
+  const [risers, setRisers] = useState<Riser[]>([]);
+  const [risersWindow, setRisersWindow] = useState(7);
+  const [risersLoading, setRisersLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -86,7 +90,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -108,8 +112,15 @@ export default function Home() {
         .then((d) => setPromotions(Array.isArray(d) ? d : []))
         .catch(() => setPromotions([]))
         .finally(() => setPromotionsLoading(false));
+    } else if (activeGroup === RISERS_VIEW) {
+      setRisersLoading(true);
+      fetch(`/api/risers?window=${risersWindow}`)
+        .then((r) => r.json())
+        .then((d) => setRisers(Array.isArray(d) ? d : []))
+        .catch(() => setRisers([]))
+        .finally(() => setRisersLoading(false));
     }
-  }, [activeGroup]);
+  }, [activeGroup, risersWindow]);
 
   // Player count per group, for the GroupBar pills.
   const groupCounts = useMemo(() => {
@@ -260,7 +271,8 @@ export default function Home() {
   const rangeWindow = activeTab === 'last30' ? 30 : 15;
   const isCallups = activeGroup === CALLUPS_VIEW;
   const isPromotions = activeGroup === PROMOTIONS_VIEW;
-  const isDiscovery = isCallups || isPromotions;
+  const isRisers = activeGroup === RISERS_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers;
   // WAR only comes back populated for premium accounts, so a non-empty map = premium.
   const isPremium = Object.keys(warMap).length > 0;
 
@@ -458,6 +470,7 @@ export default function Home() {
         onCreate={addGroup}
         onRename={editGroup}
         onDelete={removeGroup}
+        isPremium={isPremium}
       />
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
@@ -482,6 +495,8 @@ export default function Home() {
             ? `${callups.length} recent call-up${callups.length !== 1 ? 's' : ''}`
             : isPromotions
             ? `${promotions.length} recent promotion${promotions.length !== 1 ? 's' : ''}`
+            : isRisers
+            ? `${risers.length} riser${risers.length !== 1 ? 's' : ''}`
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -549,6 +564,13 @@ export default function Home() {
           emptyText="No MiLB promotions in the last 7 days"
           verb="promoted"
           showWar={showWar}
+        />
+      ) : isRisers ? (
+        <RisersView
+          risers={showWar ? risers : []}
+          window={risersWindow}
+          onWindow={setRisersWindow}
+          loading={risersLoading}
         />
       ) : players.length === 0 ? (
         <EmptyState />

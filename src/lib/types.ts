@@ -257,6 +257,17 @@ export const ALL_PLAYERS_GROUP = 'all';
 // Special sentinels for the pre-built discovery lists (not groups).
 export const CALLUPS_VIEW = 'callups';
 export const PROMOTIONS_VIEW = 'promotions';
+export const RISERS_VIEW = 'risers';
+
+// A prospect riser (premium only) — peak WAR climbed >= 1.5 over the window.
+export interface Riser {
+  name_key: string;
+  display_name: string;
+  is_pitcher: boolean;
+  level: string | null;
+  war: number;
+  delta: number;
+}
 
 export type ViewTab = 'today' | 'yesterday' | 'last15' | 'last30' | 'season';
 

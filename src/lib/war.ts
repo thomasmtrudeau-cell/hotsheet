@@ -91,6 +91,41 @@ async function getWarMaps(sheetId: string): Promise<{ hitters: Map<string, numbe
   return cache;
 }
 
+export interface WarRow {
+  nameKey: string;
+  displayName: string;
+  isPitcher: boolean;
+  level?: string;
+  war: number;
+}
+
+// Parse one tab into snapshot rows (name + WAR + highest level).
+function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[] {
+  const rows = parseCsv(csv);
+  const out: WarRow[] = [];
+  if (rows.length < 2) return out;
+  const header = rows[0].map((h) => h.trim());
+  const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
+  const warIdx = header.findIndex((h) => h === 'WAR');
+  const lvlIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
+  if (nameIdx < 0 || warIdx < 0) return out;
+  for (let r = 1; r < rows.length; r++) {
+    const cells = rows[r];
+    const name = cells[nameIdx];
+    const war = parseFloat(cells[warIdx]);
+    if (name && Number.isFinite(war)) {
+      out.push({ nameKey: normalizeName(name), displayName: name, isPitcher, level: lvlIdx >= 0 ? cells[lvlIdx] : undefined, war });
+    }
+  }
+  return out;
+}
+
+// All WAR rows (both tabs) for a daily snapshot.
+export async function getWarRows(sheetId: string): Promise<WarRow[]> {
+  const [hitCsv, pitCsv] = await Promise.all([fetchCsvTab(sheetId, HIT_TAB), fetchCsvTab(sheetId, PIT_TAB)]);
+  return [...parseRows(hitCsv, 'name', false), ...parseRows(pitCsv, 'player', true)];
+}
+
 // Join WAR to the given players by normalized name, using the role-appropriate
 // sheet (pitchers → Peak Pitching, everyone else → Peak Hitting). Returns
 // playerId -> WAR.

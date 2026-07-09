@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW } from '@/lib/types';
 
 function Pill({ id, label, active, count, onSelect }: {
   id: string; label: string; active: boolean; count: number; onSelect: (id: string) => void;
@@ -27,10 +27,11 @@ interface GroupBarProps {
   onCreate: (name: string) => void;
   onRename: (groupId: string, name: string) => void;
   onDelete: (groupId: string) => void;
+  isPremium?: boolean;
 }
 
 export default function GroupBar({
-  groups, activeGroup, counts, onSelect, onCreate, onRename, onDelete,
+  groups, activeGroup, counts, onSelect, onCreate, onRename, onDelete, isPremium,
 }: GroupBarProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -71,6 +72,17 @@ export default function GroupBar({
       >
         ⬆️ Promoted
       </button>
+      {isPremium && (
+        <button
+          onClick={() => onSelect(RISERS_VIEW)}
+          className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+            activeGroup === RISERS_VIEW ? 'bg-emerald-600 text-white' : 'bg-emerald-500/10 text-emerald-300 hover:bg-emerald-500/20'
+          }`}
+          title="Prospect risers — biggest peak-WAR gains (you only)"
+        >
+          🚀 Risers
+        </button>
+      )}
 
       {creating ? (
         <form onSubmit={submitNew} className="shrink-0">
