@@ -141,26 +141,20 @@ export default function RangeView({ stats, window, sortKey, onSort, loading }: R
         </div>
       ) : (
         <div className="space-y-6">
-          {hitters.length > 0 && (
-            <section>
+          {/* Whichever group the sort key belongs to leads (sort by ERA → pitchers on top). */}
+          {(HIT_KEYS.includes(sortKey)
+            ? [{ key: 'hit', label: 'Hitters', list: hitters }, { key: 'pit', label: 'Pitchers', list: pitchers }]
+            : [{ key: 'pit', label: 'Pitchers', list: pitchers }, { key: 'hit', label: 'Hitters', list: hitters }]
+          ).filter((sec) => sec.list.length > 0).map((sec) => (
+            <section key={sec.key}>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
-                Hitters <span className="ml-1 text-zinc-600 font-normal">{hitters.length}</span>
+                {sec.label} <span className="ml-1 text-zinc-600 font-normal">{sec.list.length}</span>
               </h2>
               <div className="space-y-1.5">
-                {hitters.map((s) => <RangeRow key={s.playerId} s={s} sortKey={sortKey} />)}
+                {sec.list.map((s) => <RangeRow key={s.playerId} s={s} sortKey={sortKey} />)}
               </div>
             </section>
-          )}
-          {pitchers.length > 0 && (
-            <section>
-              <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">
-                Pitchers <span className="ml-1 text-zinc-600 font-normal">{pitchers.length}</span>
-              </h2>
-              <div className="space-y-1.5">
-                {pitchers.map((s) => <RangeRow key={s.playerId} s={s} sortKey={sortKey} />)}
-              </div>
-            </section>
-          )}
+          ))}
         </div>
       )}
     </div>

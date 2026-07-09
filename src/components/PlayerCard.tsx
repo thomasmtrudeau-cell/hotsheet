@@ -57,6 +57,21 @@ function isOnRehab(stats: DailyPlayerStats): boolean {
   return Boolean(stats.onRehab);
 }
 
+function CallUpBadge({ date }: { date: string }) {
+  const label = (() => {
+    const [, m, d] = date.split('-');
+    return m && d ? `${parseInt(m, 10)}/${parseInt(d, 10)}` : date;
+  })();
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300"
+      title={`Recently called up (${label})`}
+    >
+      CALL-UP
+    </span>
+  );
+}
+
 function WarBadge({ war }: { war: number }) {
   return (
     <span
@@ -196,21 +211,6 @@ function FGSearchLink({ playerName }: { playerName: string }) {
   );
 }
 
-function BRSearchLink({ playerName }: { playerName: string }) {
-  const url = `https://www.baseball-reference.com/search/search.fcgi?search=${encodeURIComponent(stripParen(playerName))}`;
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-zinc-600 hover:text-orange-400 transition-colors px-1 py-1 text-[10px] font-bold tracking-wider"
-      title="Search on Baseball Reference"
-    >
-      BR
-    </a>
-  );
-}
-
 function LeagueContext({ leagueAvg, isPitcher }: { leagueAvg: LeagueAverages; isPitcher: boolean }) {
   return (
     <div className="mt-2 pt-2 border-t border-zinc-700/30 flex items-center gap-3 text-[10px] text-zinc-600">
@@ -287,6 +287,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
             {stats.injury && <ILBadge label={stats.injury.label} />}
             {onRehab && <RehabBadge />}
             {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
+            {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
             {war !== undefined && <WarBadge war={war} />}
           </div>
           <div className="text-xs text-zinc-500">
@@ -304,15 +305,14 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
             />
           )}
           <FGSearchLink playerName={stats.playerName} />
-          <BRSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
           <button
             onClick={() => onUnfollow(stats.playerId)}
-            className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
+            className="ml-1 pl-1.5 border-l border-zinc-700/60 text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
             title="Unfollow"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
         </div>
@@ -427,17 +427,16 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats
             />
           )}
           <FGSearchLink playerName={stats.playerName} />
-          <BRSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
           <button
             onClick={() => onUnfollow(stats.playerId)}
-            className="text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
-          title="Unfollow"
-        >
-          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-          </svg>
-        </button>
+            className="ml-1 pl-1.5 border-l border-zinc-700/60 text-zinc-600 hover:text-red-400 transition-colors p-1 cursor-pointer"
+            title="Unfollow"
+          >
+            <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
         </div>
       </div>
 

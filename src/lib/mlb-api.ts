@@ -870,6 +870,35 @@ async function getTwoStartPitchers(date: string): Promise<Map<number, string[]>>
   return result;
 }
 
+// --- Recently called up (recall / contract selection to MLB in the last N days) ---
+
+async function getRecentCallups(date: string, windowDays = 10): Promise<Map<number, string>> {
+  const end = new Date(date + 'T00:00:00Z');
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - windowDays);
+  const startStr = start.toISOString().slice(0, 10);
+
+  const result = new Map<number, string>();
+  try {
+    const data = await cachedFetch<{ transactions?: Array<{ typeCode?: string; effectiveDate?: string; date?: string; person?: { id?: number } }> }>(
+      `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=1`,
+      3600_000 // 1 hr
+    );
+    for (const t of data.transactions ?? []) {
+      // CU = Recalled, SE = Selected (contract selection) — both are call-ups.
+      if ((t.typeCode === 'CU' || t.typeCode === 'SE') && t.person?.id) {
+        const when = (t.effectiveDate || t.date || '').slice(0, 10);
+        // Keep the most recent call-up date per player.
+        const prev = result.get(t.person.id);
+        if (!prev || when > prev) result.set(t.person.id, when);
+      }
+    }
+  } catch {
+    // No call-up data this run; cards omit the badge.
+  }
+  return result;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -910,11 +939,12 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + today's matchup + two-start weeks, alongside game data.
-  const [recentFormMap, matchupMap, twoStartMap] = await Promise.all([
+  // Rolling recent form + matchup + two-start weeks + recent call-ups, alongside game data.
+  const [recentFormMap, matchupMap, twoStartMap, callupMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
+    getRecentCallups(date),
   ]);
 
   // Build stats for each player
@@ -947,6 +977,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.recentForm = recentFormMap.get(player.id);
     stat.matchup = matchupMap.get(player.id);
     stat.twoStartDates = twoStartMap.get(player.id);
+    stat.calledUpDate = callupMap.get(player.id);
     return stat;
   });
 }

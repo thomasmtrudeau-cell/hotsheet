@@ -103,6 +103,7 @@ export interface DailyPlayerStats {
   recentForm?: RecentForm;   // rolling last-15-day line
   matchup?: Matchup;         // today's opposing starter + park (hitters only)
   twoStartDates?: string[];  // ISO dates of this SP's 2+ starts in the current fantasy week
+  calledUpDate?: string;     // ISO date of a recent recall/selection to MLB (recently called up)
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
