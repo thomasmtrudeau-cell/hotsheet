@@ -277,6 +277,28 @@ export function useFollowedPlayers() {
     await store.setPlayerGroups(playerId, groupIds);
   }, []);
 
+  // Add one group to many players at once, preserving each player's other
+  // groups (union, not replace). Used by bulk-select tagging.
+  const bulkAddToGroup = useCallback(async (playerIds: number[], groupId: string) => {
+    const newSets = new Map<number, string[]>();
+    setMemberships((prev) => {
+      const next = new Map(prev);
+      for (const pid of playerIds) {
+        const cur = next.get(pid) ?? [];
+        if (!cur.includes(groupId)) {
+          const set = [...cur, groupId];
+          next.set(pid, set);
+          newSets.set(pid, set);
+        }
+      }
+      store.setCachedMemberships(next);
+      return next;
+    });
+    await Promise.all(
+      Array.from(newSets.entries()).map(([pid, set]) => store.setPlayerGroups(pid, set))
+    );
+  }, []);
+
   // --- Notification actions ---
 
   // Lets the page feed in events generated elsewhere (e.g. rehab games
@@ -308,6 +330,7 @@ export function useFollowedPlayers() {
     editGroup,
     removeGroup,
     assignGroups,
+    bulkAddToGroup,
     ingestNotifications,
     markNotificationsRead,
     clearAllNotifications,

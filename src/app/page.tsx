@@ -44,7 +44,7 @@ const GRADE_ORDER = ['milestone', 'standout', 'good', 'routine', 'off_day', 'sch
 export default function Home() {
   const {
     user, players, groups, memberships, notifications, loaded,
-    follow, unfollow, addGroup, editGroup, removeGroup, assignGroups,
+    follow, unfollow, addGroup, editGroup, removeGroup, assignGroups, bulkAddToGroup,
     ingestNotifications, markNotificationsRead, clearAllNotifications,
   } = useFollowedPlayers();
   const authError = typeof window !== 'undefined' && new URLSearchParams(window.location.search).has('auth_error');
@@ -53,6 +53,9 @@ export default function Home() {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [positionFilter, setPositionFilter] = useState<'all' | 'hitter' | 'pitcher'>('all');
   const [nameFilter, setNameFilter] = useState('');
+  // Bulk-select mode for tagging many players into a group at once.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
 
   const [dailyStats, setDailyStats] = useState<DailyPlayerStats[]>([]);
   const [yesterdayStats, setYesterdayStats] = useState<DailyPlayerStats[]>([]);
@@ -254,6 +257,25 @@ export default function Home() {
     ].filter((sec) => sec.stats.length > 0);
   })();
 
+  const toggleSelected = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+
+  const exitSelect = () => {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  };
+
+  const handleBulkAdd = async (groupId: string) => {
+    if (selectedIds.size === 0) return;
+    await bulkAddToGroup(Array.from(selectedIds), groupId);
+    exitSelect();
+  };
+
   // Initial auth check still resolving.
   if (!user && !loaded) {
     return (
@@ -334,6 +356,14 @@ export default function Home() {
           {filteredStats.length !== currentStats.length && ` (${currentStats.length} total)`}
         </div>
         <div className="flex items-center gap-2">
+          {groups.length > 0 && players.length > 0 && (
+            <button
+              onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
+              className={`text-xs transition-colors cursor-pointer ${selectMode ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              {selectMode ? 'Cancel' : 'Select'}
+            </button>
+          )}
           {loading && (
             <div className="w-3 h-3 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
           )}
@@ -377,23 +407,72 @@ export default function Home() {
                 </span>
               </h2>
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-                {section.stats.map((stat) => (
-                  <PlayerCard
-                    key={stat.playerId}
-                    type={activeTab === 'season' ? 'season' : 'daily'}
-                    stats={stat as DailyPlayerStats & SeasonPlayerStats}
-                    onUnfollow={unfollow}
-                    leagueAvg={leagueAvgs.get(stat.sportId)}
-                    groupControl={{
-                      groups,
-                      memberOf: memberships.get(stat.playerId) ?? [],
-                      onAssignGroups: assignGroups,
-                    }}
-                  />
-                ))}
+                {section.stats.map((stat) => {
+                  const selected = selectedIds.has(stat.playerId);
+                  return (
+                    <div
+                      key={stat.playerId}
+                      className={`relative rounded-xl ${selectMode ? 'cursor-pointer' : ''} ${selected ? 'ring-2 ring-blue-500' : ''}`}
+                      onClick={selectMode ? () => toggleSelected(stat.playerId) : undefined}
+                    >
+                      <PlayerCard
+                        type={activeTab === 'season' ? 'season' : 'daily'}
+                        stats={stat as DailyPlayerStats & SeasonPlayerStats}
+                        onUnfollow={unfollow}
+                        leagueAvg={leagueAvgs.get(stat.sportId)}
+                        groupControl={{
+                          groups,
+                          memberOf: memberships.get(stat.playerId) ?? [],
+                          onAssignGroups: assignGroups,
+                        }}
+                      />
+                      {selectMode && (
+                        <>
+                          {/* Capture clicks so the card's own links/buttons don't fire while selecting. */}
+                          <div className="absolute inset-0 z-10 rounded-xl" />
+                          <span
+                            className={`absolute top-2 left-2 z-20 w-5 h-5 rounded-md flex items-center justify-center border ${selected ? 'bg-blue-600 border-blue-600' : 'bg-zinc-900/80 border-zinc-600'}`}
+                          >
+                            {selected && (
+                              <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                              </svg>
+                            )}
+                          </span>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             </section>
           ))}
+        </div>
+      )}
+
+      {/* Bulk-tag action bar */}
+      {selectMode && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-40 flex items-center gap-2 bg-zinc-900 border border-zinc-700 rounded-full shadow-2xl px-3 py-2 max-w-[95vw] overflow-x-auto">
+          <span className="text-xs text-zinc-400 whitespace-nowrap px-1">
+            {selectedIds.size} selected
+          </span>
+          <span className="text-zinc-600">·</span>
+          {groups.map((g) => (
+            <button
+              key={g.id}
+              onClick={() => handleBulkAdd(g.id)}
+              disabled={selectedIds.size === 0}
+              className="px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap bg-blue-600 hover:bg-blue-500 text-white disabled:bg-zinc-700 disabled:text-zinc-500 disabled:cursor-default cursor-pointer transition-colors"
+            >
+              + {g.name}
+            </button>
+          ))}
+          <button
+            onClick={exitSelect}
+            className="px-2.5 py-1 rounded-full text-xs text-zinc-400 hover:text-zinc-200 whitespace-nowrap cursor-pointer transition-colors"
+          >
+            Cancel
+          </button>
         </div>
       )}
     </div>
