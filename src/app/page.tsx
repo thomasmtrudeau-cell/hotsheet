@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, RangePlayerStats, RangeWindow, RangeSortKey } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, RangePlayerStats, RangeSortKey } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -61,8 +61,7 @@ export default function Home() {
   const [dailyStats, setDailyStats] = useState<DailyPlayerStats[]>([]);
   const [yesterdayStats, setYesterdayStats] = useState<DailyPlayerStats[]>([]);
   const [seasonStats, setSeasonStats] = useState<SeasonPlayerStats[]>([]);
-  const [rangeStats, setRangeStats] = useState<RangePlayerStats[]>([]);
-  const [rangeWindow, setRangeWindow] = useState<RangeWindow>(15);
+  const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -160,7 +159,7 @@ export default function Home() {
   }, []);
 
   const fetchRangeStats = useCallback(async (windowDays: number) => {
-    if (playersRef.current.length === 0) { setRangeStats([]); return; }
+    if (playersRef.current.length === 0) { setRangeData((prev) => ({ ...prev, [windowDays]: [] })); return; }
     try {
       const res = await fetch('/api/stats/range', {
         method: 'POST',
@@ -168,7 +167,7 @@ export default function Home() {
         body: JSON.stringify({ players: playersRef.current, window: windowDays, endDate: getDateString(0) }),
       });
       const data = await res.json();
-      if (Array.isArray(data)) setRangeStats(data);
+      if (Array.isArray(data)) setRangeData((prev) => ({ ...prev, [windowDays]: data }));
     } catch (e) {
       console.error('Failed to fetch range stats:', e);
     }
@@ -181,8 +180,10 @@ export default function Home() {
         await fetchDailyStats(getDateString(0), setDailyStats, true);
       } else if (activeTab === 'yesterday') {
         await fetchDailyStats(getDateString(-1), setYesterdayStats);
-      } else if (activeTab === 'range') {
-        await fetchRangeStats(rangeWindow);
+      } else if (activeTab === 'last15') {
+        await fetchRangeStats(15);
+      } else if (activeTab === 'last30') {
+        await fetchRangeStats(30);
       } else {
         await fetchSeasonStats();
       }
@@ -190,18 +191,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [activeTab, fetchDailyStats, fetchSeasonStats, fetchRangeStats, rangeWindow]);
-
-  // Re-query the range window when it changes (while on the Range tab).
-  useEffect(() => {
-    if (!loaded || players.length === 0 || activeTab !== 'range') return;
-    setLoading(true);
-    fetchRangeStats(rangeWindow).finally(() => {
-      setLastRefresh(new Date());
-      setLoading(false);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rangeWindow]);
+  }, [activeTab, fetchDailyStats, fetchSeasonStats, fetchRangeStats]);
 
   // Fetch when players change
   useEffect(() => {
@@ -225,10 +215,14 @@ export default function Home() {
   // Auto-refresh every 5 minutes
   useAutoRefresh(fetchActiveTab, 5 * 60 * 1000, loaded && players.length > 0);
 
+  const isRange = activeTab === 'last15' || activeTab === 'last30';
+  const rangeWindow = activeTab === 'last30' ? 30 : 15;
+
   const currentStats: SortableStat[] =
     activeTab === 'today' ? dailyStats :
     activeTab === 'yesterday' ? yesterdayStats :
-    seasonStats;
+    activeTab === 'season' ? seasonStats :
+    [];
 
   // Apply filters
   const filteredStats = currentStats.filter((s) => {
@@ -295,7 +289,7 @@ export default function Home() {
   })();
 
   // Range stats share the same group/level/position/name filters.
-  const filteredRange = rangeStats.filter((s) => {
+  const filteredRange = (rangeData[rangeWindow] ?? []).filter((s) => {
     if (!inActiveGroup(s.playerId)) return false;
     if (levelFilter === 'MLB' && s.sportId !== 1) return false;
     if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
@@ -402,12 +396,12 @@ export default function Home() {
       {/* Refresh indicator */}
       <div className="flex items-center justify-between mb-4">
         <div className="text-xs text-zinc-600">
-          {activeTab === 'range'
+          {isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
         </div>
         <div className="flex items-center gap-2">
-          {groups.length > 0 && players.length > 0 && activeTab !== 'range' && (
+          {groups.length > 0 && players.length > 0 && !isRange && (
             <button
               onClick={() => (selectMode ? exitSelect() : setSelectMode(true))}
               className={`text-xs transition-colors cursor-pointer ${selectMode ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-500 hover:text-zinc-300'}`}
@@ -443,11 +437,10 @@ export default function Home() {
         </div>
       ) : players.length === 0 ? (
         <EmptyState />
-      ) : activeTab === 'range' ? (
+      ) : isRange ? (
         <RangeView
           stats={filteredRange}
           window={rangeWindow}
-          onWindow={setRangeWindow}
           sortKey={rangeSort}
           onSort={setRangeSort}
           loading={loading}

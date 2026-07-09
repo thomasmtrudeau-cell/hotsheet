@@ -1,17 +1,14 @@
 'use client';
 
-import { RangePlayerStats, RangeWindow, RangeSortKey } from '@/lib/types';
+import { RangePlayerStats, RangeSortKey } from '@/lib/types';
 
 interface RangeViewProps {
   stats: RangePlayerStats[]; // already filtered by group/level/position/name
-  window: RangeWindow;
-  onWindow: (w: RangeWindow) => void;
+  window: number;            // days, set by the active tab (15 or 30)
   sortKey: RangeSortKey;
   onSort: (k: RangeSortKey) => void;
   loading: boolean;
 }
-
-const WINDOWS: RangeWindow[] = [15, 30, 60];
 
 const SORT_OPTIONS: { key: RangeSortKey; label: string; group: 'hit' | 'pit' }[] = [
   { key: 'wrcPlus', label: 'wRC+', group: 'hit' },
@@ -105,32 +102,16 @@ function RangeRow({ s, sortKey }: { s: RangePlayerStats; sortKey: RangeSortKey }
   );
 }
 
-export default function RangeView({ stats, window, onWindow, sortKey, onSort, loading }: RangeViewProps) {
+export default function RangeView({ stats, window, sortKey, onSort, loading }: RangeViewProps) {
   const hitters = sortBy(stats.filter((s) => !s.isPitcher), HIT_KEYS.includes(sortKey) ? sortKey : 'wrcPlus');
   const pitchers = sortBy(stats.filter((s) => s.isPitcher), HIT_KEYS.includes(sortKey) ? 'era' : sortKey);
 
   return (
     <div>
-      {/* Window + sort controls */}
+      {/* Sort control (window is set by the active tab) */}
       <div className="flex flex-wrap items-center gap-3 mb-4">
         <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500">Last</span>
-          <div className="flex rounded-lg overflow-hidden border border-zinc-700">
-            {WINDOWS.map((w) => (
-              <button
-                key={w}
-                onClick={() => onWindow(w)}
-                className={`px-3 py-1.5 text-sm font-medium transition-colors cursor-pointer ${
-                  window === w ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
-                }`}
-              >
-                {w}d
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-zinc-500">Sort</span>
+          <span className="text-xs text-zinc-500">Last {window} days · Sort</span>
           <select
             value={sortKey}
             onChange={(e) => onSort(e.target.value as RangeSortKey)}

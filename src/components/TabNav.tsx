@@ -10,7 +10,8 @@ interface TabNavProps {
 const tabs: { value: ViewTab; label: string }[] = [
   { value: 'today', label: 'Today' },
   { value: 'yesterday', label: 'Yesterday' },
-  { value: 'range', label: 'Range' },
+  { value: 'last15', label: '15D' },
+  { value: 'last30', label: '30D' },
   { value: 'season', label: 'Season' },
 ];
 

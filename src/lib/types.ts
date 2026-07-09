@@ -242,7 +242,7 @@ export interface GameLogEntry {
 // Special sentinel for the implicit "All Players" view (not a stored group).
 export const ALL_PLAYERS_GROUP = 'all';
 
-export type ViewTab = 'today' | 'yesterday' | 'season' | 'range';
+export type ViewTab = 'today' | 'yesterday' | 'last15' | 'last30' | 'season';
 
 export type LevelFilter = 'all' | 'MLB' | 'MiLB' | 'NPB' | 'KBO';
 
