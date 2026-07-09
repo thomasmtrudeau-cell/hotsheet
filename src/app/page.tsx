@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP } from '@/lib/types';
-import { rehabNotifications, lineupNotifications, closerNotifications } from '@/lib/notifications';
+import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
 import { createClient } from '@/lib/supabase/client';
@@ -132,6 +132,7 @@ export default function Home() {
           ingestNotifications(rehabNotifications(data, date));
           ingestNotifications(lineupNotifications(data, date));
           ingestNotifications(closerNotifications(data, date));
+          ingestNotifications(twoStartNotifications(data, date));
         }
       }
     } catch (e) {

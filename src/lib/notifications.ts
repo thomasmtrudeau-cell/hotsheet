@@ -1,6 +1,6 @@
 import { FollowedPlayer, DailyPlayerStats, LEVEL_LABELS, isMLBSystem } from './types';
 
-export type NotificationType = 'il_off' | 'il_on' | 'promoted' | 'demoted' | 'team_change' | 'rehab' | 'lineup_spot' | 'save';
+export type NotificationType = 'il_off' | 'il_on' | 'promoted' | 'demoted' | 'team_change' | 'rehab' | 'lineup_spot' | 'save' | 'two_start';
 
 export interface HotNotification {
   id: string;
@@ -26,6 +26,7 @@ export const NOTIFICATION_STYLE: Record<NotificationType, { emoji: string; color
   rehab: { emoji: '🩹', color: 'text-teal-400' },
   lineup_spot: { emoji: '📋', color: 'text-cyan-400' },
   save: { emoji: '🔒', color: 'text-indigo-400' },
+  two_start: { emoji: '🗓️', color: 'text-indigo-300' },
 };
 
 // Distance from the majors: MLB highest, Single-A lowest.
@@ -183,6 +184,25 @@ export function lineupNotifications(stats: DailyPlayerStats[], date: string): Ho
     // storage full / unavailable — skip persistence, alerts still returned
   }
   return out;
+}
+
+// Two-start week: a followed SP with 2+ starts in the current fantasy week.
+// Keyed by the week's Monday so it fires once per week per pitcher, not daily.
+export function twoStartNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
+  const d = new Date(date + 'T00:00:00Z');
+  const monday = new Date(d);
+  monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));
+  const weekKey = monday.toISOString().slice(0, 10);
+  const fmt = (s: string) => {
+    const [, m, day] = s.split('-');
+    return `${parseInt(m, 10)}/${parseInt(day, 10)}`;
+  };
+  return stats
+    .filter((s) => (s.twoStartDates?.length ?? 0) >= 2)
+    .map((s) =>
+      makeNotification({ id: s.playerId }, s.playerName, 'two_start', weekKey,
+        `Two-start week — starts ${s.twoStartDates!.map(fmt).join(' & ')}`)
+    );
 }
 
 // Closer usage: a pitcher who recorded a save today. One per player per day.
