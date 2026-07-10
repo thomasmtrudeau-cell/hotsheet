@@ -353,23 +353,15 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
       title={stats.injury?.note}
     >
       {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+      <div className="mb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap flex-1">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
             {onRehab && <RehabBadge />}
-            {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
-            {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
-            {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
-            {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
           </div>
-          <div className="text-xs text-zinc-500">
-            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 shrink-0">
           {canLog && <LogToggle open={logOpen} onClick={() => setLogOpen((o) => !o)} />}
           {groupControl && (
             <GroupTag
@@ -390,6 +382,19 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
+          </div>
+        </div>
+        {/* Full-width signal row: flows left-to-right across the whole card. */}
+        {((stats.twoStartDates && stats.twoStartDates.length >= 2) || stats.calledUpDate || stats.promotedDate || premium) && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+            {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
+            {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
+            {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
+            {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
+          </div>
+        )}
+        <div className="text-xs text-zinc-500 mt-1">
+          {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
         </div>
       </div>
 
@@ -471,30 +476,14 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { s
   return (
     <div className={`bg-zinc-800/60 border ${borderClass} rounded-xl p-4 transition-colors`} title={stats.injury?.note}>
       {/* Header */}
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+      <div className="mb-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 min-w-0 flex-wrap flex-1">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
-            {premium && <PremiumBadges metrics={premium} isPitcher={stats.isPitcher} />}
           </div>
-          <div className="text-xs text-zinc-500">
-            {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
-            {multiLevel && (
-              <>
-                {' '}&middot;{' '}
-                <button
-                  onClick={() => setLevelOpen((o) => !o)}
-                  className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
-                >
-                  {stats.levelLines!.length} levels {levelOpen ? '▴' : '▾'}
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-        <div className="flex items-center gap-0.5">
+          <div className="flex items-center gap-0.5 shrink-0">
           {canLog && <LogToggle open={logOpen} onClick={() => setLogOpen((o) => !o)} />}
           {groupControl && (
             <GroupTag
@@ -515,6 +504,26 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { s
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
             </svg>
           </button>
+          </div>
+        </div>
+        {premium && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+            <PremiumBadges metrics={premium} isPitcher={stats.isPitcher} />
+          </div>
+        )}
+        <div className="text-xs text-zinc-500 mt-1">
+          {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
+          {multiLevel && (
+            <>
+              {' '}&middot;{' '}
+              <button
+                onClick={() => setLevelOpen((o) => !o)}
+                className="text-blue-400 hover:text-blue-300 transition-colors cursor-pointer"
+              >
+                {stats.levelLines!.length} levels {levelOpen ? '▴' : '▾'}
+              </button>
+            </>
+          )}
         </div>
       </div>
 

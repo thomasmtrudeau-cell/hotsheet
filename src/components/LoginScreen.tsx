@@ -3,6 +3,23 @@
 import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
+// Turn a raw Supabase auth error into plain guidance. The email rate limit is a
+// SHARED, project-wide hourly cap (not per-user), so the fix is almost always
+// "use Google" rather than "wait" — we surface that prominently.
+function friendlyAuthError(raw: string): { text: string; pushGoogle: boolean } {
+  const m = raw.toLowerCase();
+  if (m.includes('rate limit') || m.includes('too many') || m.includes('429')) {
+    return {
+      text: 'Email sign-in links are temporarily maxed out. This is a shared hourly limit across all users — not something you did. Use “Continue with Google” above (instant, works on any device), or try email again in about an hour.',
+      pushGoogle: true,
+    };
+  }
+  if (m.includes('not allowed') || m.includes('disabled') || m.includes('provider')) {
+    return { text: 'Email sign-in isn’t available right now. Please use “Continue with Google” above.', pushGoogle: true };
+  }
+  return { text: raw || 'Sign-in failed — please try again.', pushGoogle: false };
+}
+
 export default function LoginScreen({ authError }: { authError?: boolean }) {
   const [email, setEmail] = useState('');
   const [sent, setSent] = useState(false);
@@ -57,13 +74,19 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
             <p className="text-sm text-zinc-300">Check your email</p>
             <p className="text-xs text-zinc-500">
               We sent a sign-in link to <span className="text-zinc-400">{email.trim().toLowerCase()}</span>.
-              Open it on this device to continue.
+              <strong className="text-zinc-300"> Open it on this same device and browser</strong> — a link opened
+              on a different device won’t sign this one in.
+            </p>
+            <p className="text-[11px] text-zinc-500 border-t border-zinc-800 pt-3">
+              On a different device, or no email after a minute? Go back and use{' '}
+              <span className="text-emerald-400 font-medium">Continue with Google</span> — it signs you in
+              anywhere, instantly.
             </p>
             <button
               onClick={() => { setSent(false); setEmail(''); }}
               className="text-xs text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
             >
-              Use a different email
+              ← Back to sign-in options
             </button>
           </div>
         ) : (
@@ -107,11 +130,28 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
                 {loading === 'magic' ? 'Sending…' : 'Email me a sign-in link'}
               </button>
               <p className="text-[11px] text-zinc-600 text-center">
-                Email links are rate-limited and can land in spam.
+                Heads up: email links are rate-limited (a shared hourly cap), can land in spam, and must be
+                opened on this same device. Google is more reliable.
               </p>
             </form>
 
-            {error && <p className="text-xs text-red-400 text-center">{error}</p>}
+            {error && (() => {
+              const { text, pushGoogle } = friendlyAuthError(error);
+              return (
+                <div className={`text-xs text-center rounded-lg px-3 py-2.5 ${pushGoogle ? 'bg-amber-500/10 border border-amber-500/30 text-amber-200' : 'text-red-400'}`}>
+                  {text}
+                  {pushGoogle && (
+                    <button
+                      onClick={signInWithGoogle}
+                      disabled={loading !== null}
+                      className="mt-2 block w-full py-2 bg-white hover:bg-zinc-100 text-zinc-900 font-medium rounded-md transition-colors cursor-pointer disabled:opacity-60"
+                    >
+                      {loading === 'google' ? 'Redirecting…' : 'Continue with Google instead'}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         )}
       </div>
