@@ -12,10 +12,13 @@ function LogToggle({ open, onClick }: { open: boolean; onClick: () => void }) {
   return (
     <button
       onClick={onClick}
-      className={`transition-colors p-1 cursor-pointer ${open ? 'text-blue-400' : 'text-zinc-600 hover:text-zinc-400'}`}
-      title="Recent games"
+      className={`flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide transition-colors cursor-pointer ${
+        open ? 'bg-blue-500/15 text-blue-400' : 'text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700/40'
+      }`}
+      title="Recent games + last-15 form"
     >
-      <svg className={`w-4 h-4 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      Games
+      <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
       </svg>
     </button>
@@ -250,28 +253,52 @@ function RecentFormRow({ form }: { form: RecentForm }) {
   );
 }
 
-// Today's opposing starter + park, colored by favorability to the hitter
-// (weak pitcher / hitter-friendly park = green; tough / pitcher-friendly = red).
+const TIER_META: Record<NonNullable<Matchup['ratingTier']>, { emoji: string; label: string; cls: string }> = {
+  strong: { emoji: '🔥', label: 'Strong matchup', cls: 'text-emerald-400' },
+  plus: { emoji: '🟢', label: 'Plus matchup', cls: 'text-emerald-300' },
+  neutral: { emoji: '⚪', label: 'Neutral matchup', cls: 'text-zinc-400' },
+  tough: { emoji: '🔴', label: 'Tough matchup', cls: 'text-red-400' },
+};
+
+// Matchup: a weighted tier (pitcher quality × platoon × park) you click to
+// reveal the specifics. Falls back to a park-only line when there's no starter.
 function MatchupRow({ m }: { m: Matchup }) {
+  const [open, setOpen] = useState(false);
   const hand = m.oppStarterHand ? `${m.oppStarterHand}HP ` : '';
-  const eraColor = m.oppStarterEra === undefined ? 'text-zinc-300'
-    : m.oppStarterEra >= 4.5 ? 'text-emerald-400'
-    : m.oppStarterEra <= 3.25 ? 'text-red-400' : 'text-zinc-300';
-  const pfColor = m.parkFactor === undefined ? 'text-zinc-300'
-    : m.parkFactor >= 103 ? 'text-emerald-400'
-    : m.parkFactor <= 97 ? 'text-red-400' : 'text-zinc-300';
+  const qualityEra = m.oppStarterCareerEra ?? m.oppStarterEra;
+  const platoonText = m.platoon === 'edge' ? 'platoon edge' : m.platoon === 'disadv' ? 'tough platoon' : 'even platoon';
+
+  // No rating (park-only / no announced starter) → the simple line.
+  if (!m.ratingTier) {
+    return (
+      <div className="mb-2 text-[11px] text-zinc-500">
+        {m.oppStarterName && <span>vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span></span>}
+        {m.parkFactor !== undefined && <span>{m.oppStarterName ? ' · ' : ''}Park {m.parkFactor}</span>}
+      </div>
+    );
+  }
+
+  const t = TIER_META[m.ratingTier];
   return (
-    <div className="flex items-center gap-1.5 mb-2 text-[11px] text-zinc-500 flex-wrap">
-      {m.oppStarterName && (
-        <span>
-          vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span>
-          {m.oppStarterEra !== undefined && <> · <span className={eraColor}>{m.oppStarterEra.toFixed(2)} ERA</span></>}
-        </span>
-      )}
-      {m.parkFactor !== undefined && (
-        <span title="Park factor (100 = neutral, higher = more offense)">
-          {m.oppStarterName ? '· ' : ''}<span className={pfColor}>Park {m.parkFactor}</span>
-        </span>
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 text-[11px] font-medium ${t.cls} cursor-pointer hover:opacity-80`}
+        title="Weighted by opposing-pitcher quality (career), handedness, and park — click for details"
+      >
+        <span>{t.emoji}</span>
+        <span>{t.label}</span>
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="mt-1 text-[11px] text-zinc-500 flex flex-wrap gap-x-1.5">
+          {m.oppStarterName && <span>vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span></span>}
+          {qualityEra !== undefined && <span>· {qualityEra.toFixed(2)} ERA{m.oppStarterCareerEra !== undefined ? ' (career)' : ''}</span>}
+          {m.parkFactor !== undefined && <span>· Park {m.parkFactor}</span>}
+          <span>· {platoonText}</span>
+        </div>
       )}
     </div>
   );

@@ -243,6 +243,10 @@ export async function hydrateFollowedPlayers(
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
       injury: injuryMap.get(p.id),
       onRehab: isOnRehabAssignment(details),
+      batSide: (() => {
+        const code = (details?.batSide as { code?: string } | undefined)?.code;
+        return code === 'L' || code === 'R' || code === 'S' ? code : undefined;
+      })(),
     };
   });
 }
@@ -701,12 +705,41 @@ async function getRecentForm(players: FollowedPlayer[], date: string): Promise<M
 
 // --- Matchup (today's opposing starter + park), hitters only ---
 
+// --- Matchup rating weights ---
+// Quality from the pitcher's CAREER ERA (biggest sample). Higher ERA = easier
+// for the hitter. Platoon: opposite hand (or switch) = edge. Park: hitter-friendly = plus.
+function ratePitcherQuality(era?: number): number {
+  if (era === undefined) return 0;
+  if (era >= 5.0) return 2;
+  if (era >= 4.25) return 1;
+  if (era >= 3.5) return 0;
+  if (era >= 3.0) return -1;
+  return -2;
+}
+function ratePlatoon(bat?: string, pitch?: string): { score: number; label: 'edge' | 'even' | 'disadv' } {
+  if (!bat || !pitch) return { score: 0, label: 'even' };
+  if (bat === 'S' || bat !== pitch) return { score: 1, label: 'edge' };
+  return { score: -1, label: 'disadv' };
+}
+function ratePark(pf?: number): number {
+  if (pf === undefined) return 0;
+  if (pf >= 104) return 1;
+  if (pf <= 96) return -1;
+  return 0;
+}
+function matchupTier(score: number): 'strong' | 'plus' | 'neutral' | 'tough' {
+  if (score >= 3) return 'strong';
+  if (score >= 1) return 'plus';
+  if (score <= -2) return 'tough';
+  return 'neutral';
+}
+
 async function getMatchups(
   players: FollowedPlayer[],
   teamGames: Map<number, ScheduleGame[]>
 ): Promise<Map<number, Matchup>> {
   const season = new Date().getFullYear();
-  const raw = new Map<number, { oppId?: number; venue?: string }>();
+  const raw = new Map<number, { oppId?: number; venue?: string; bat?: 'L' | 'R' | 'S' }>();
   const pitcherIds = new Set<number>();
 
   for (const p of players) {
@@ -720,26 +753,34 @@ async function getMatchups(
     if (!game) continue;
     const isHome = game.teams.home.team.id === p.currentTeam.id;
     const opp = isHome ? game.teams.away.probablePitcher : game.teams.home.probablePitcher;
-    raw.set(p.id, { oppId: opp?.id, venue: game.venue?.name });
+    raw.set(p.id, { oppId: opp?.id, venue: game.venue?.name, bat: p.batSide });
     if (opp?.id) pitcherIds.add(opp.id);
   }
 
-  // One batched call for every opposing starter's hand + season ERA.
-  const pInfo = new Map<number, { name: string; hand?: 'L' | 'R'; era?: number }>();
+  // One batched call for opposing starters' hand + season ERA + CAREER ERA.
+  const pInfo = new Map<number, { name: string; hand?: 'L' | 'R'; era?: number; careerEra?: number }>();
   if (pitcherIds.size > 0) {
     try {
       const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
-        `${MLB_API}/people?personIds=${Array.from(pitcherIds).join(',')}&hydrate=stats(group=pitching,type=season,season=${season})`,
+        `${MLB_API}/people?personIds=${Array.from(pitcherIds).join(',')}&hydrate=stats(group=pitching,type=[season,career],season=${season})`,
         1800_000
       );
       for (const person of data.people ?? []) {
         const hand = (person.pitchHand as { code?: string } | undefined)?.code;
-        const stats = person.stats as Array<{ splits?: Array<{ stat?: { era?: string } }> }> | undefined;
-        const eraStr = stats?.[0]?.splits?.[0]?.stat?.era;
+        const stats = person.stats as Array<{ type?: { displayName?: string }; splits?: Array<{ stat?: { era?: string } }> }> | undefined;
+        let era: number | undefined;
+        let careerEra: number | undefined;
+        for (const s of stats ?? []) {
+          const eraStr = s.splits?.[0]?.stat?.era;
+          if (eraStr === undefined) continue;
+          if (s.type?.displayName === 'career') careerEra = parseFloat(eraStr);
+          else era = parseFloat(eraStr);
+        }
         pInfo.set(person.id as number, {
           name: person.fullName as string,
           hand: hand === 'L' || hand === 'R' ? hand : undefined,
-          era: eraStr !== undefined ? parseFloat(eraStr) : undefined,
+          era,
+          careerEra,
         });
       }
     } catch {
@@ -748,15 +789,23 @@ async function getMatchups(
   }
 
   const result = new Map<number, Matchup>();
-  raw.forEach(({ oppId, venue }, playerId) => {
+  raw.forEach(({ oppId, venue, bat }, playerId) => {
     const info = oppId ? pInfo.get(oppId) : undefined;
     const parkFactor = parkFactorFor(venue);
     if (!info && parkFactor === undefined) return; // nothing useful
+    const platoon = ratePlatoon(bat, info?.hand);
+    // Quality weight uses career ERA (bigger sample), season as fallback.
+    const qualityEra = info?.careerEra ?? info?.era;
+    const score = ratePitcherQuality(qualityEra) + platoon.score + ratePark(parkFactor);
     result.set(playerId, {
       oppStarterName: info?.name ?? '',
       oppStarterHand: info?.hand,
       oppStarterEra: info?.era,
+      oppStarterCareerEra: info?.careerEra,
       parkFactor,
+      platoon: platoon.label,
+      // Only rate when we actually have a starter (park-only isn't a "matchup").
+      ratingTier: info ? matchupTier(score) : undefined,
     });
   });
   return result;

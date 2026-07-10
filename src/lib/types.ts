@@ -41,8 +41,12 @@ export interface RecentForm {
 export interface Matchup {
   oppStarterName: string;
   oppStarterHand?: 'L' | 'R';
-  oppStarterEra?: number;  // season ERA (number, not a tier)
-  parkFactor?: number;     // runs park factor, 100 = neutral (>100 hitter-friendly)
+  oppStarterEra?: number;       // season ERA
+  oppStarterCareerEra?: number; // career ERA (bigger sample — drives the quality weight)
+  parkFactor?: number;          // runs park factor, 100 = neutral (>100 hitter-friendly)
+  platoon?: 'edge' | 'even' | 'disadv'; // batter hand vs pitcher hand
+  // Overall matchup tier for the hitter, weighted from pitcher quality + platoon + park.
+  ratingTier?: 'strong' | 'plus' | 'neutral' | 'tough';
 }
 
 export interface InjuryStatus {
@@ -65,6 +69,7 @@ export interface FollowedPlayer {
   followedAt: string;
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
+  batSide?: 'L' | 'R' | 'S'; // for platoon weighting in the matchup rating
 }
 
 // A recent MLB call-up (browsable discovery list; followable like a search hit).
