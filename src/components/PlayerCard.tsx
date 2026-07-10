@@ -84,6 +84,19 @@ function CallUpBadge({ date }: { date: string }) {
   );
 }
 
+function PromotedBadge({ date }: { date: string }) {
+  const [, m, d] = date.split('-');
+  const label = m && d ? `${parseInt(m, 10)}/${parseInt(d, 10)}` : date;
+  return (
+    <span
+      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300"
+      title={`Recently promoted a level (${label})`}
+    >
+      PROMOTED
+    </span>
+  );
+}
+
 function WarBadge({ war }: { war: number }) {
   return (
     <span
@@ -340,6 +353,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
             {onRehab && <RehabBadge />}
             {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
             {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
+            {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
             {war !== undefined && <WarBadge war={war} />}
           </div>
           <div className="text-xs text-zinc-500">

@@ -120,6 +120,7 @@ export interface DailyPlayerStats {
   matchup?: Matchup;         // today's opposing starter + park (hitters only)
   twoStartDates?: string[];  // ISO dates of this SP's 2+ starts in the current fantasy week
   calledUpDate?: string;     // ISO date of a recent recall/selection to MLB (recently called up)
+  promotedDate?: string;     // ISO date of a recent MiLB level-up (recently promoted)
   nextStart?: { date: string; opponent: string }; // pitcher's next announced start (MLB + MiLB)
   // Batting (no RBI/R per user request)
   hits?: number;

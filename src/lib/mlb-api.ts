@@ -926,7 +926,7 @@ async function getTwoStartPitchers(date: string): Promise<Map<number, string[]>>
 
 // --- Recently called up (recall / contract selection to MLB in the last N days) ---
 
-async function getRecentCallups(date: string, windowDays = 10): Promise<Map<number, string>> {
+async function getRecentCallups(date: string, windowDays = 7): Promise<Map<number, string>> {
   const end = new Date(date + 'T00:00:00Z');
   const start = new Date(end);
   start.setUTCDate(end.getUTCDate() - windowDays);
@@ -949,6 +949,37 @@ async function getRecentCallups(date: string, windowDays = 10): Promise<Map<numb
     }
   } catch {
     // No call-up data this run; cards omit the badge.
+  }
+  return result;
+}
+
+// Recently promoted a level within the minors (last N days) — for the card badge.
+async function getRecentPromotions(date: string, windowDays = 7): Promise<Map<number, string>> {
+  const end = new Date(date + 'T00:00:00Z');
+  const start = new Date(end);
+  start.setUTCDate(end.getUTCDate() - windowDays);
+  const startStr = start.toISOString().slice(0, 10);
+
+  const result = new Map<number, string>();
+  try {
+    const teamMap = await getTeamLookup();
+    const data = await cachedFetch<{ transactions?: Array<{ effectiveDate?: string; date?: string; description?: string; person?: { id?: number }; fromTeam?: { id?: number }; toTeam?: { id?: number } }> }>(
+      `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=11,12,13,14`,
+      3600_000
+    );
+    for (const t of data.transactions ?? []) {
+      if ((t.description || '').toLowerCase().includes('rehab')) continue;
+      const ft = t.fromTeam?.id, tt = t.toTeam?.id, pid = t.person?.id;
+      if (!ft || !tt || !pid) continue;
+      const fs = teamMap.get(ft)?.sportId, ts = teamMap.get(tt)?.sportId;
+      if (!fs || !ts || ts < 11 || ts > 14) continue;
+      if ((LEVEL_RANK_UP[ts] ?? 0) <= (LEVEL_RANK_UP[fs] ?? 0)) continue; // must move up
+      const when = (t.effectiveDate || t.date || '').slice(0, 10);
+      const prev = result.get(pid);
+      if (!prev || when > prev) result.set(pid, when);
+    }
+  } catch {
+    // No promotion data this run; cards omit the badge.
   }
   return result;
 }
@@ -1226,12 +1257,13 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + matchup + two-start + call-ups + next starts, alongside game data.
-  const [recentFormMap, matchupMap, twoStartMap, callupMap, nextStartMap] = await Promise.all([
+  // Rolling recent form + matchup + two-start + call-ups + promotions + next starts.
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
     getRecentCallups(date),
+    getRecentPromotions(date),
     getNextStarts(players, date),
   ]);
 
@@ -1266,6 +1298,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.matchup = matchupMap.get(player.id);
     stat.twoStartDates = twoStartMap.get(player.id);
     stat.calledUpDate = callupMap.get(player.id);
+    stat.promotedDate = promotionMap.get(player.id);
     stat.nextStart = nextStartMap.get(player.id);
     return stat;
   });
