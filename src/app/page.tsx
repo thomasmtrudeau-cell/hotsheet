@@ -492,7 +492,6 @@ export default function Home() {
           onFollow={follow}
           isFollowing={(id) => players.some(p => p.id === id)}
           groups={groups}
-          activeGroupId={activeGroup === ALL_PLAYERS_GROUP ? null : activeGroup}
         />
       </div>
 
