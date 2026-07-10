@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -30,6 +30,19 @@ function getDateString(offset: number = 0): string {
 }
 
 type SortableStat = DailyPlayerStats | SeasonPlayerStats;
+
+// Lightweight name key for matching sheet/discovery names to followed players
+// (mirrors war.ts normalizeName; kept local so the client bundle stays lean).
+function normalizeCardName(raw: string): string {
+  return raw
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .toLowerCase()
+    .replace(/['’`.]/g, '')
+    .replace(/\s+(jr|sr|ii|iii|iv|v)\b/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
 
 function statusTier(status: string): number {
   switch (status) {
@@ -65,8 +78,8 @@ export default function Home() {
   const [seasonStats, setSeasonStats] = useState<SeasonPlayerStats[]>([]);
   const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
-  const [warMap, setWarMap] = useState<Record<number, number>>({}); // peak WAR, premium only
-  const [showWar, setShowWar] = useState(true); // premium toggle (for clean screenshots)
+  const [premiumMap, setPremiumMap] = useState<Record<number, PremiumMetrics>>({}); // WAR + peak wRC+ / ERA-20TBF, premium only
+  const [showPremium, setShowPremium] = useState(true); // premium toggle (for clean screenshots)
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
@@ -253,18 +266,18 @@ export default function Home() {
   // Auto-refresh every 5 minutes
   useAutoRefresh(fetchActiveTab, 5 * 60 * 1000, loaded && players.length > 0);
 
-  // Peak WAR (premium only). Server returns {} for non-premium / unconfigured,
-  // so non-premium users simply see no WAR.
+  // Premium metrics (premium only): peak WAR + peak wRC+ / ERA-20TBF. Server
+  // returns {} for non-premium / unconfigured, so non-premium users see none.
   useEffect(() => {
-    if (!loaded || players.length === 0) { setWarMap({}); return; }
+    if (!loaded || players.length === 0) { setPremiumMap({}); return; }
     fetch('/api/war', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ players }),
     })
       .then((r) => r.json())
-      .then((d) => setWarMap(d && typeof d === 'object' ? d : {}))
-      .catch(() => setWarMap({}));
+      .then((d) => setPremiumMap(d && typeof d === 'object' ? d : {}))
+      .catch(() => setPremiumMap({}));
   }, [loaded, players]);
 
   const isRange = activeTab === 'last15' || activeTab === 'last30';
@@ -273,8 +286,20 @@ export default function Home() {
   const isPromotions = activeGroup === PROMOTIONS_VIEW;
   const isRisers = activeGroup === RISERS_VIEW;
   const isDiscovery = isCallups || isPromotions || isRisers;
-  // WAR only comes back populated for premium accounts, so a non-empty map = premium.
-  const isPremium = Object.keys(warMap).length > 0;
+  // Premium metrics only come back populated for premium accounts, so a
+  // non-empty map = premium.
+  const isPremium = Object.keys(premiumMap).length > 0;
+
+  // Name-based "already in your list" check for discovery lists that carry no
+  // player id (risers come from the WAR sheet by name only).
+  const followedNameSet = useMemo(
+    () => new Set(players.map((p) => normalizeCardName(p.fullName))),
+    [players]
+  );
+  const isFollowingName = useCallback(
+    (name: string) => followedNameSet.has(normalizeCardName(name)),
+    [followedNameSet]
+  );
 
   const currentStats: SortableStat[] =
     activeTab === 'today' ? dailyStats :
@@ -425,13 +450,13 @@ export default function Home() {
         <div className="flex items-center gap-3">
           {isPremium && (
             <button
-              onClick={() => setShowWar((v) => !v)}
+              onClick={() => setShowPremium((v) => !v)}
               className={`text-[11px] px-2 py-1 rounded-full border transition-colors cursor-pointer ${
-                showWar ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
+                showPremium ? 'border-amber-500/40 text-amber-300 bg-amber-500/10' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'
               }`}
-              title="Show/hide WAR (only you can see this toggle)"
+              title="Show/hide premium metrics — WAR, peak wRC+, ERA/20 TBF (only you can see this toggle)"
             >
-              WAR {showWar ? 'on' : 'off'}
+              Premium {showPremium ? 'on' : 'off'}
             </button>
           )}
           <NotificationBell
@@ -470,7 +495,6 @@ export default function Home() {
         onCreate={addGroup}
         onRename={editGroup}
         onDelete={removeGroup}
-        isPremium={isPremium}
       />
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
@@ -552,7 +576,7 @@ export default function Home() {
           caption="MLB call-ups in the last 7 days · tap Follow to add"
           emptyText="No MLB call-ups in the last 7 days"
           verb="called up"
-          showWar={showWar}
+          showWar={showPremium}
         />
       ) : isPromotions ? (
         <MoversList
@@ -563,14 +587,16 @@ export default function Home() {
           caption="MiLB players promoted a level in the last 7 days · tap Follow to add"
           emptyText="No MiLB promotions in the last 7 days"
           verb="promoted"
-          showWar={showWar}
+          showWar={showPremium}
         />
       ) : isRisers ? (
         <RisersView
-          risers={showWar ? risers : []}
+          risers={showPremium ? risers : []}
           window={risersWindow}
           onWindow={setRisersWindow}
           loading={risersLoading}
+          isPremium={isPremium}
+          isFollowing={(name) => isFollowingName(name)}
         />
       ) : players.length === 0 ? (
         <EmptyState />
@@ -610,7 +636,7 @@ export default function Home() {
                         stats={stat as DailyPlayerStats & SeasonPlayerStats}
                         onUnfollow={unfollow}
                         leagueAvg={leagueAvgs.get(stat.sportId)}
-                        war={showWar ? warMap[stat.playerId] : undefined}
+                        premium={showPremium ? premiumMap[stat.playerId] : undefined}
                         groupControl={{
                           groups,
                           memberOf: memberships.get(stat.playerId) ?? [],

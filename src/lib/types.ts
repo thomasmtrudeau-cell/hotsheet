@@ -49,6 +49,13 @@ export interface Matchup {
   ratingTier?: 'strong' | 'plus' | 'neutral' | 'tough';
 }
 
+// Premium (ScoutTheStatline) metrics joined from the sheet — premium accounts only.
+export interface PremiumMetrics {
+  war?: number;         // peak WAR
+  peakWrcPlus?: number; // hitters — peak wRC+
+  era20?: number;       // pitchers — ERA per 20 TBF/game
+}
+
 export interface InjuryStatus {
   code: string; // e.g. "D10", "D60", "ILF"
   label: string; // e.g. "10-Day IL"

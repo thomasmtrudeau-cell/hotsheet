@@ -1,17 +1,23 @@
 'use client';
 
 import { Riser } from '@/lib/types';
+import PremiumTeaser from './PremiumTeaser';
 
 interface RisersViewProps {
   risers: Riser[];
   window: number;
   onWindow: (w: number) => void;
   loading: boolean;
+  isPremium: boolean;                         // non-premium sees the teaser instead
+  isFollowing: (name: string) => boolean;     // "in your list" indicator (name match)
 }
 
 const WINDOWS = [7, 14, 30];
 
-export default function RisersView({ risers, window, onWindow, loading }: RisersViewProps) {
+export default function RisersView({ risers, window, onWindow, loading, isPremium, isFollowing }: RisersViewProps) {
+  // Regular users get the premium preview, not the (empty) board.
+  if (!isPremium) return <PremiumTeaser />;
+
   return (
     <div>
       <div className="flex flex-wrap items-center gap-3 mb-4">
@@ -58,6 +64,9 @@ export default function RisersView({ risers, window, onWindow, loading }: Risers
                     <span className="text-sm font-medium text-zinc-100 truncate">{r.display_name}</span>
                     {r.level && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400">{r.level}</span>}
                     <span className="text-[10px] text-zinc-500">{r.is_pitcher ? 'P' : 'H'}</span>
+                    {isFollowing(r.display_name) && (
+                      <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300" title="Already in your list">★ In your list</span>
+                    )}
                   </div>
                 </div>
               </div>

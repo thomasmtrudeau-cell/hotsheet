@@ -178,6 +178,8 @@ alter table public.war_snapshots enable row level security;
 
 -- Risers: players whose WAR rose >= 1.5 over the last `window_days`, top 100.
 -- Compares the latest snapshot to the newest snapshot on/before (latest - window).
+-- Until `window_days` of history has accrued, falls back to the OLDEST snapshot
+-- we have (so the view shows the delta between whatever two updates exist).
 create or replace function public.war_risers(window_days int)
 returns table(name_key text, display_name text, is_pitcher boolean, level text, war numeric, delta numeric)
 language plpgsql
@@ -192,6 +194,11 @@ begin
   select max(snapshot_date) into latest_d from public.war_snapshots;
   if latest_d is null then return; end if;
   select max(snapshot_date) into past_d from public.war_snapshots where snapshot_date <= latest_d - window_days;
+  -- Not enough history yet for the exact window: use the earliest snapshot we
+  -- have (any date strictly before latest). Returns nothing until 2 dates exist.
+  if past_d is null then
+    select min(snapshot_date) into past_d from public.war_snapshots where snapshot_date < latest_d;
+  end if;
   if past_d is null then return; end if;
   return query
     select t.name_key, t.display_name, t.is_pitcher, t.level, t.war, (t.war - p.war) as delta

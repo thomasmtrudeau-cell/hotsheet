@@ -1,4 +1,4 @@
-import { FollowedPlayer } from './types';
+import { FollowedPlayer, PremiumMetrics } from './types';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
@@ -46,29 +46,49 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
-// Build normalizedName -> WAR from one tab's CSV. `nameHeader` locates the name
-// column; the WAR column is the first header that trims to exactly "WAR".
-function parseTab(csv: string, nameHeader: string): Map<string, number> {
+// Build normalizedName -> premium metrics from one tab's CSV. `nameHeader`
+// locates the name column. WAR is the header that trims to exactly "WAR". The
+// role-specific extra metric is peak wRC+ (hitting, header "wRC+") or ERA/20 TBF
+// (pitching, header "era 20 tbf/g") — matched exactly so the many "current
+// year"/"no reg" variants in the sheet are never picked up by mistake.
+function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
   const rows = parseCsv(csv);
-  const out = new Map<string, number>();
+  const out = new Map<string, PremiumMetrics>();
   if (rows.length < 2) return out;
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
   const warIdx = header.findIndex((h) => h === 'WAR');
-  if (nameIdx < 0 || warIdx < 0) return out;
+  const extraIdx = isPitcher
+    ? header.findIndex((h) => h === 'era 20 tbf/g')
+    : header.findIndex((h) => h === 'wRC+');
+  if (nameIdx < 0) return out;
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
     const name = cells[nameIdx];
-    const war = parseFloat(cells[warIdx]);
-    if (name && Number.isFinite(war)) out.set(normalizeName(name), war);
+    if (!name) continue;
+    const m: PremiumMetrics = {};
+    if (warIdx >= 0) {
+      const war = parseFloat(cells[warIdx]);
+      if (Number.isFinite(war)) m.war = war;
+    }
+    if (extraIdx >= 0) {
+      const v = parseFloat(cells[extraIdx]);
+      if (Number.isFinite(v)) {
+        if (isPitcher) m.era20 = v;
+        else m.peakWrcPlus = Math.round(v);
+      }
+    }
+    if (m.war !== undefined || m.era20 !== undefined || m.peakWrcPlus !== undefined) {
+      out.set(normalizeName(name), m);
+    }
   }
   return out;
 }
 
 // 1-hour in-memory cache of the parsed sheet, keyed by sheet id. Hitting and
 // pitching are kept SEPARATE — some names appear in both (position players who
-// pitched), so we must pick WAR by the player's actual role, not merge.
-let cache: { sheetId: string; at: number; hitters: Map<string, number>; pitchers: Map<string, number> } | null = null;
+// pitched), so we must pick metrics by the player's actual role, not merge.
+let cache: { sheetId: string; at: number; hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> } | null = null;
 const TTL = 3600_000;
 
 async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
@@ -78,15 +98,15 @@ async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
   return res.text();
 }
 
-async function getWarMaps(sheetId: string): Promise<{ hitters: Map<string, number>; pitchers: Map<string, number> }> {
+async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> }> {
   const now = Date.now();
   if (cache && cache.sheetId === sheetId && now - cache.at < TTL) return cache;
   const [hitCsv, pitCsv] = await Promise.all([
     fetchCsvTab(sheetId, HIT_TAB),
     fetchCsvTab(sheetId, PIT_TAB),
   ]);
-  const hitters = parseTab(hitCsv, 'name');
-  const pitchers = parseTab(pitCsv, 'player');
+  const hitters = parseTab(hitCsv, 'name', false);
+  const pitchers = parseTab(pitCsv, 'player', true);
   cache = { sheetId, at: now, hitters, pitchers };
   return cache;
 }
@@ -126,22 +146,37 @@ export async function getWarRows(sheetId: string): Promise<WarRow[]> {
   return [...parseRows(hitCsv, 'name', false), ...parseRows(pitCsv, 'player', true)];
 }
 
-// Join WAR to the given players by normalized name, using the role-appropriate
-// sheet (pitchers → Peak Pitching, everyone else → Peak Hitting). Returns
-// playerId -> WAR.
+// Join premium metrics to the given players by normalized name, using the
+// role-appropriate sheet (pitchers → Peak Pitching, everyone else → Peak
+// Hitting). Hitters carry WAR + peak wRC+; pitchers carry WAR + ERA/20 TBF.
+// Returns playerId -> PremiumMetrics.
+export async function fetchPremiumMap(
+  players: FollowedPlayer[],
+  sheetId: string
+): Promise<Record<number, PremiumMetrics>> {
+  const { hitters, pitchers } = await getPremiumMaps(sheetId);
+  const result: Record<number, PremiumMetrics> = {};
+  const misses: string[] = [];
+  for (const p of players) {
+    const key = normalizeName(p.fullName);
+    const m = p.primaryPosition === 'P' ? pitchers.get(key) : hitters.get(key);
+    if (m) result[p.id] = m;
+    else misses.push(p.fullName);
+  }
+  if (misses.length > 0) console.warn(`Premium: no sheet match for ${misses.length}:`, misses.slice(0, 20));
+  return result;
+}
+
+// WAR-only join (playerId -> WAR), used to sort the call-up / promotion
+// discovery lists. Kept separate so those routes don't ship the richer metrics.
 export async function fetchWarMap(
   players: FollowedPlayer[],
   sheetId: string
 ): Promise<Record<number, number>> {
-  const { hitters, pitchers } = await getWarMaps(sheetId);
+  const map = await fetchPremiumMap(players, sheetId);
   const result: Record<number, number> = {};
-  const misses: string[] = [];
-  for (const p of players) {
-    const key = normalizeName(p.fullName);
-    const war = p.primaryPosition === 'P' ? pitchers.get(key) : hitters.get(key);
-    if (war !== undefined) result[p.id] = war;
-    else misses.push(p.fullName);
+  for (const [id, m] of Object.entries(map)) {
+    if (m.war !== undefined) result[Number(id)] = m.war;
   }
-  if (misses.length > 0) console.warn(`WAR: no sheet match for ${misses.length}:`, misses.slice(0, 20));
   return result;
 }

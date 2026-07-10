@@ -61,6 +61,9 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                 )}
                 <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${levelBadgeClass(c.sportId)}`}>{c.level}</span>
+                {following && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300" title="Already in your list">★ In your list</span>
+                )}
                 {showWar && c.war !== undefined && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR">
                     {c.war.toFixed(1)} WAR

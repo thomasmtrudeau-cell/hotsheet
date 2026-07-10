@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { fetchWarMap } from '@/lib/war';
+import { fetchPremiumMap } from '@/lib/war';
 import { FollowedPlayer } from '@/lib/types';
 
-// Peak WAR for a player set — PREMIUM ONLY. Returns {} (not an error) for
-// signed-out users, non-premium users, or when no WAR sheet is configured, so
-// the client simply shows no WAR in those cases.
+// Premium metrics for a player set — PREMIUM ONLY (peak WAR, plus peak wRC+ for
+// hitters / ERA-per-20-TBF for pitchers). Returns {} (not an error) for
+// signed-out users, non-premium users, or when no sheet is configured, so the
+// client simply shows no premium stats in those cases. WAR and the other
+// metrics NEVER reach a non-premium payload.
 export async function POST(request: NextRequest) {
   try {
     const sheetId = process.env.WAR_SHEET_ID;
@@ -26,10 +28,10 @@ export async function POST(request: NextRequest) {
     const { players } = body as { players: FollowedPlayer[] };
     if (!Array.isArray(players)) return NextResponse.json({});
 
-    const map = await fetchWarMap(players, sheetId);
+    const map = await fetchPremiumMap(players, sheetId);
     return NextResponse.json(map);
   } catch (error) {
-    console.error('WAR route error:', error);
+    console.error('Premium route error:', error);
     return NextResponse.json({});
   }
 }

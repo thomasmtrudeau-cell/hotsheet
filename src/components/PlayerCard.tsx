@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup } from '@/lib/types';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup, PremiumMetrics } from '@/lib/types';
 import GradeBadge from './GradeBadge';
 import GroupTag from './GroupTag';
 import GameLog from './GameLog';
@@ -38,7 +38,7 @@ interface DailyCardProps {
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
-  war?: number; // peak WAR (premium only)
+  premium?: PremiumMetrics; // WAR + peak wRC+ / ERA-20TBF (premium only)
 }
 
 interface SeasonCardProps {
@@ -47,7 +47,7 @@ interface SeasonCardProps {
   onUnfollow: (playerId: number) => void;
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
-  war?: number; // peak WAR (premium only)
+  premium?: PremiumMetrics; // WAR + peak wRC+ / ERA-20TBF (premium only)
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
@@ -97,14 +97,23 @@ function PromotedBadge({ date }: { date: string }) {
   );
 }
 
-function WarBadge({ war }: { war: number }) {
+// Premium metric chips (peak WAR + the role-appropriate second metric). Shown
+// ONLY to premium accounts with the Premium toggle on — never teased to regular
+// users on cards. Pitchers show ERA/20 TBF; everyone else shows peak wRC+.
+function PremiumBadges({ metrics, isPitcher }: { metrics: PremiumMetrics; isPitcher: boolean }) {
+  const chip = 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300';
   return (
-    <span
-      className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300"
-      title="Peak WAR"
-    >
-      {war.toFixed(1)} WAR
-    </span>
+    <>
+      {metrics.war !== undefined && (
+        <span className={chip} title="Peak WAR (ScoutTheStatline)">{metrics.war.toFixed(1)} WAR</span>
+      )}
+      {!isPitcher && metrics.peakWrcPlus !== undefined && (
+        <span className={chip} title="Peak wRC+ (ScoutTheStatline)">{metrics.peakWrcPlus} wRC+</span>
+      )}
+      {isPitcher && metrics.era20 !== undefined && (
+        <span className={chip} title="ERA per 20 TBF/game (ScoutTheStatline)">{metrics.era20.toFixed(2)} ERA/20</span>
+      )}
+    </>
   );
 }
 
@@ -330,7 +339,7 @@ function NextStartRow({ next }: { next: { date: string; opponent: string } }) {
   );
 }
 
-function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; war?: number }) {
+function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; premium?: PremiumMetrics }) {
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
   const onRehab = isOnRehab(stats);
@@ -354,7 +363,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
             {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
             {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
             {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
-            {war !== undefined && <WarBadge war={war} />}
+            {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
@@ -444,7 +453,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
   );
 }
 
-function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages; groupControl?: GroupControl; war?: number }) {
+function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { stats: SeasonPlayerStats; onUnfollow: (id: number) => void; leagueAvg?: LeagueAverages; groupControl?: GroupControl; premium?: PremiumMetrics }) {
   const [logOpen, setLogOpen] = useState(false);
   const [levelOpen, setLevelOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
@@ -468,7 +477,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, war }: { stats
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
             <LevelBadge sportId={stats.sportId} />
             {stats.injury && <ILBadge label={stats.injury.label} />}
-            {war !== undefined && <WarBadge war={war} />}
+            {premium && <PremiumBadges metrics={premium} isPitcher={stats.isPitcher} />}
           </div>
           <div className="text-xs text-zinc-500">
             {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} /> &middot; {stats.gamesPlayed} G
@@ -584,7 +593,7 @@ function StatCell({ label, value, highlight }: { label: string; value: string; h
 
 export default function PlayerCard(props: PlayerCardProps) {
   if (props.type === 'daily') {
-    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} war={props.war} />;
+    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} premium={props.premium} />;
   }
-  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} war={props.war} />;
+  return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} premium={props.premium} />;
 }
