@@ -100,6 +100,7 @@ export interface DailyPlayerStats {
   playerId: number;
   playerName: string;
   team: string;
+  teamId?: number; // current team id (for the team-aware game log)
   level: string;
   sportId: number;
   position: string;
@@ -253,7 +254,9 @@ export interface GameLogEntry {
   date: string;      // YYYY-MM-DD
   opponent: string;  // e.g. "vs Dodgers" / "@ Giants"
   level?: string;    // sport-level label (shows level changes during rehab/promotions)
-  statLine: string;  // formatted batting or pitching line
+  statLine: string;  // formatted batting or pitching line ("DNP" when not in the lineup)
+  gamePk?: number;   // for merging the player's log against the team's schedule
+  dnp?: boolean;     // player's team played but they didn't appear
 }
 
 // Special sentinel for the implicit "All Players" view (not a stored group).

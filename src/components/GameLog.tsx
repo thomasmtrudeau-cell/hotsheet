@@ -7,6 +7,7 @@ interface GameLogProps {
   playerId: number;
   sportId: number;
   isPitcher: boolean;
+  teamId?: number; // when set, shows the team's last 15 games with DNP markers
 }
 
 function shortDate(iso: string): string {
@@ -16,16 +17,18 @@ function shortDate(iso: string): string {
   return `${parseInt(m[2], 10)}/${parseInt(m[3], 10)}`;
 }
 
-// Lazily fetches the last ~10 games for a player when the card is expanded.
-export default function GameLog({ playerId, sportId, isPitcher }: GameLogProps) {
+// Lazily fetches the recent game log when the card is expanded.
+export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLogProps) {
   const [entries, setEntries] = useState<GameLogEntry[] | null>(null);
   const [supported, setSupported] = useState(true);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Mounts fresh each time the card is expanded, so initial loading=true
+    // already covers the spinner (no synchronous setState needed here).
     let active = true;
-    setLoading(true);
-    fetch(`/api/stats/gamelog?playerId=${playerId}&sportId=${sportId}&pitcher=${isPitcher ? 1 : 0}`)
+    const teamParam = teamId ? `&teamId=${teamId}` : '';
+    fetch(`/api/stats/gamelog?playerId=${playerId}&sportId=${sportId}&pitcher=${isPitcher ? 1 : 0}${teamParam}`)
       .then((r) => r.json())
       .then((d) => {
         if (!active) return;
@@ -35,7 +38,7 @@ export default function GameLog({ playerId, sportId, isPitcher }: GameLogProps) 
       .catch(() => active && setEntries([]))
       .finally(() => active && setLoading(false));
     return () => { active = false; };
-  }, [playerId, sportId, isPitcher]);
+  }, [playerId, sportId, isPitcher, teamId]);
 
   if (loading) {
     return (
@@ -61,16 +64,20 @@ export default function GameLog({ playerId, sportId, isPitcher }: GameLogProps) 
     );
   }
 
+  const hasDnp = entries.some((e) => e.dnp);
+  const played = entries.filter((e) => !e.dnp).length;
+  const header = hasDnp ? `Played ${played} of last ${entries.length} team games` : `Last ${entries.length} games`;
+
   return (
     <div className="mt-3 pt-3 border-t border-zinc-700/30">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">Last {entries.length} games</div>
+      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">{header}</div>
       <div className="space-y-1">
         {entries.map((e, i) => (
-          <div key={`${e.date}-${i}`} className="flex items-baseline gap-2 text-xs">
+          <div key={`${e.date}-${i}`} className={`flex items-baseline gap-2 text-xs ${e.dnp ? 'opacity-45' : ''}`}>
             <span className="text-zinc-500 font-mono w-9 shrink-0">{shortDate(e.date)}</span>
             <span className="text-zinc-400 w-20 shrink-0 truncate">{e.opponent}</span>
-            <span className="text-zinc-200 font-mono truncate">{e.statLine}</span>
-            {e.level && e.level !== 'MLB' && (
+            <span className={`truncate ${e.dnp ? 'text-zinc-500 italic' : 'text-zinc-200 font-mono'}`}>{e.statLine}</span>
+            {!e.dnp && e.level && e.level !== 'MLB' && (
               <span className="ml-auto text-[10px] text-amber-400/80 shrink-0">{e.level}</span>
             )}
           </div>

@@ -452,6 +452,7 @@ function buildDailyStats(
     playerId: player.id,
     playerName: player.fullName,
     team: player.currentTeam.name,
+    teamId: player.currentTeam.id,
     level,
     sportId: player.sportId,
     position: player.primaryPosition,
@@ -1716,6 +1717,7 @@ interface GameLogSplit {
   team?: { id: number; name: string };
   opponent?: { id: number; name: string };
   sport?: { id: number };
+  game?: { gamePk?: number };
   stat?: Record<string, unknown>;
 }
 
@@ -1785,6 +1787,60 @@ export async function getGameLog(
       opponent: `${prefix} ${opponent}`,
       level: split.sport?.id ? LEVEL_LABELS[split.sport.id] : undefined,
       statLine,
+      gamePk: split.game?.gamePk,
     };
+  });
+}
+
+// Team-aware game log: the team's last `limit` games with the player's line,
+// or "DNP" when they didn't appear — so playing frequency is visible. Trimmed
+// to the player's first appearance in the window (so a recent arrival doesn't
+// show false benchings for games before they joined).
+export async function getTeamGameLog(
+  playerId: number,
+  isPitcher: boolean,
+  teamId: number,
+  sportId: number,
+  limit = 15
+): Promise<GameLogEntry[]> {
+  // The player's played games this season, keyed by gamePk.
+  const played = await getGameLog(playerId, isPitcher, sportId, undefined, 400);
+  const playedByPk = new Map<number, GameLogEntry>();
+  for (const e of played) if (e.gamePk) playedByPk.set(e.gamePk, e);
+
+  // The team's recent Final games.
+  const end = new Date();
+  const start = new Date();
+  start.setDate(start.getDate() - 32); // ~15 games ≈ 3 weeks; pad to be safe
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  let teamGames: Array<{ gamePk: number; date: string; opponent: string }> = [];
+  try {
+    const data = await cachedFetch<{ dates?: Array<{ date: string; games: ScheduleGame[] }> }>(
+      `${MLB_API}/schedule?sportId=${sportId}&teamId=${teamId}&startDate=${fmt(start)}&endDate=${fmt(end)}&hydrate=team`,
+      300_000
+    );
+    for (const dt of data.dates ?? []) {
+      for (const g of dt.games ?? []) {
+        if (getGameStatus(g) !== 'Final') continue;
+        const isHome = g.teams.home.team.id === teamId;
+        const oppName = isHome ? g.teams.away.team.name : g.teams.home.team.name;
+        teamGames.push({ gamePk: g.gamePk, date: dt.date, opponent: `${isHome ? 'vs' : '@'} ${shortTeamName(oppName)}` });
+      }
+    }
+  } catch {
+    return played.slice(0, limit); // schedule failed — fall back to played-only
+  }
+
+  teamGames.sort((a, b) => a.date.localeCompare(b.date)); // chronological
+  teamGames = teamGames.slice(-limit); // last N team games
+  const firstPlayedIdx = teamGames.findIndex((g) => playedByPk.has(g.gamePk));
+  if (firstPlayedIdx === -1) return played.slice(0, limit); // not on this team in the window
+  teamGames = teamGames.slice(firstPlayedIdx); // drop pre-arrival games
+
+  return teamGames.reverse().map((g): GameLogEntry => {
+    const e = playedByPk.get(g.gamePk);
+    return e
+      ? { ...e, opponent: g.opponent }
+      : { date: g.date, opponent: g.opponent, statLine: 'DNP', dnp: true };
   });
 }

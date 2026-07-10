@@ -18,6 +18,14 @@ function fmtDate(d: string): string {
   return m && day ? `${parseInt(m, 10)}/${parseInt(day, 10)}` : d;
 }
 
+// Fresh mover: called up / promoted today or yesterday (~last 48h).
+function isFresh(dateStr: string): boolean {
+  if (!dateStr) return false;
+  const d = new Date(dateStr + 'T00:00:00');
+  const days = (Date.now() - d.getTime()) / 86_400_000;
+  return days >= 0 && days <= 1.5;
+}
+
 function levelBadgeClass(sportId: number): string {
   if (sportId === 1) return 'bg-blue-500/20 text-blue-400';
   if (sportId >= 11 && sportId <= 14) return 'bg-amber-500/20 text-amber-400';
@@ -48,6 +56,9 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
           >
             <div className="min-w-0">
               <div className="flex items-center gap-1.5 flex-wrap">
+                {isFresh(c.calledUpDate) && (
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/25 text-red-300 animate-pulse">NEW</span>
+                )}
                 <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${levelBadgeClass(c.sportId)}`}>{c.level}</span>
                 {showWar && c.war !== undefined && (

@@ -423,7 +423,7 @@ function DailyCard({ stats, onUnfollow, groupControl, war }: { stats: DailyPlaye
       {logOpen && canLog && (
         <>
           {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
-          <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} />
+          <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} teamId={stats.teamId} />
         </>
       )}
     </div>
