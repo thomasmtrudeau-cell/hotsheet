@@ -28,6 +28,9 @@ export default function Tip({ id, children, className = '' }: {
   useEffect(() => {
     if (SESSION_DISMISSED.has(id)) return;
     if (localStorage.getItem(permKey(id)) === '1') return;
+    // Post-hydration sync with localStorage (a client-only source); initial
+    // render is hidden on both server and client, so there's no mismatch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setVisible(true);
   }, [id]);
 
