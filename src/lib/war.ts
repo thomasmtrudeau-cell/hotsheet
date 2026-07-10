@@ -51,12 +51,22 @@ export function parseCsv(text: string): string[][] {
 // role-specific extra metric is peak wRC+ (hitting, header "wRC+") or ERA/20 TBF
 // (pitching, header "era 20 tbf/g") — matched exactly so the many "current
 // year"/"no reg" variants in the sheet are never picked up by mistake.
+// A row's id is "stale" when it keeps the old minor-league id (prefixed "sa")
+// after a promotion. The sheet occasionally has BOTH the stale row and the
+// correct numeric-id row for the same player (name-change cases like Lee,
+// Antonacci, Ingle). Per the sheet owner, the non-"sa" id is the correct one.
+function isStaleId(id: string): boolean {
+  return /^\s*sa/i.test(id);
+}
+
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
   const rows = parseCsv(csv);
   const out = new Map<string, PremiumMetrics>();
+  const keptStale = new Map<string, boolean>(); // did the kept row for this name use an "sa" id?
   if (rows.length < 2) return out;
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
+  const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
   const warIdx = header.findIndex((h) => h === 'WAR');
   const extraIdx = isPitcher
     ? header.findIndex((h) => h === 'era 20 tbf/g')
@@ -78,9 +88,14 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         else m.peakWrcPlus = Math.round(v);
       }
     }
-    if (m.war !== undefined || m.era20 !== undefined || m.peakWrcPlus !== undefined) {
-      out.set(normalizeName(name), m);
-    }
+    if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
+    const key = normalizeName(name);
+    const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
+    // On a duplicate name, only overwrite when the kept row was the stale (sa)
+    // dup and this one is the correct (non-sa) row.
+    if (out.has(key) && !(keptStale.get(key) && !stale)) continue;
+    out.set(key, m);
+    keptStale.set(key, stale);
   }
   return out;
 }
@@ -122,25 +137,32 @@ export interface WarRow {
   war: number;
 }
 
-// Parse one tab into snapshot rows (name + WAR + highest level).
+// Parse one tab into snapshot rows (name + WAR + highest level), deduped by name
+// preferring the correct (non-"sa") id — same rule as the display join — so the
+// daily snapshot never stores the stale dup's WAR.
 function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[] {
   const rows = parseCsv(csv);
-  const out: WarRow[] = [];
-  if (rows.length < 2) return out;
+  const byKey = new Map<string, WarRow>();
+  const keptStale = new Map<string, boolean>();
+  if (rows.length < 2) return [];
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
+  const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
   const warIdx = header.findIndex((h) => h === 'WAR');
   const lvlIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
-  if (nameIdx < 0 || warIdx < 0) return out;
+  if (nameIdx < 0 || warIdx < 0) return [];
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
     const name = cells[nameIdx];
     const war = parseFloat(cells[warIdx]);
-    if (name && Number.isFinite(war)) {
-      out.push({ nameKey: normalizeName(name), displayName: name, isPitcher, level: lvlIdx >= 0 ? cells[lvlIdx] : undefined, war });
-    }
+    if (!name || !Number.isFinite(war)) continue;
+    const key = normalizeName(name);
+    const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
+    if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
+    byKey.set(key, { nameKey: key, displayName: name, isPitcher, level: lvlIdx >= 0 ? cells[lvlIdx] : undefined, war });
+    keptStale.set(key, stale);
   }
-  return out;
+  return [...byKey.values()];
 }
 
 // All WAR rows (both tabs) for a daily snapshot.
