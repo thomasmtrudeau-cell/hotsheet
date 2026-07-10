@@ -111,23 +111,44 @@ export function diffPlayer(prev: FollowedPlayer, next: FollowedPlayer): HotNotif
   return out;
 }
 
-// A player on an official rehab assignment (MLB roster status "RA") with a game
-// today — the early signal before formal activation. This is the roster-derived
-// flag, NOT "on the IL + has a minor-league game" (that also matches an ordinary
-// injured minor-leaguer, who is not rehabbing).
+// Is a rehabbing player CONFIRMED to actually take the field today? A team
+// having a game isn't enough — a rehab pitcher may be on the affiliate's roster
+// while heading to the majors (Grayson Rodriguez), and a rehab hitter may sit.
+// So we require a real confirmation: pitchers must be the announced probable
+// (or have already pitched); hitters must be in the posted lineup (or have
+// already batted). No confirmation → no notification.
+function rehabInActionConfirmed(s: DailyPlayerStats): boolean {
+  const isPitcher = s.position === 'P';
+  if (s.gameStatus === 'Live' || s.gameStatus === 'Final') {
+    // Trust the boxscore: did they actually appear?
+    return isPitcher ? s.inningsPitched !== undefined : s.atBats !== undefined;
+  }
+  if (s.gameStatus === 'Scheduled') {
+    if (isPitcher) return s.lineupStatus === 'probable_pitcher';
+    return (
+      s.lineupStatus === 'starting' ||
+      s.battingOrder !== undefined ||
+      (s.startingPosition !== undefined && s.startingPosition !== '')
+    );
+  }
+  return false;
+}
+
+// A player on an official rehab assignment (MLB roster status "RA") who is
+// CONFIRMED in today's game — the early signal before formal activation. This
+// is the roster-derived flag (NOT "on the IL + has a minor-league game", which
+// also matches an ordinary injured minor-leaguer), gated on real lineup/probable
+// confirmation so it never fires for a rehab guy who isn't actually playing.
 export function rehabNotifications(stats: DailyPlayerStats[], date: string): HotNotification[] {
   return stats
-    .filter(
-      (s) =>
-        s.onRehab &&
-        (s.gameStatus === 'Scheduled' || s.gameStatus === 'Live' || s.gameStatus === 'Final')
-    )
-    .map((s) =>
-      makeNotification(
-        { id: s.playerId }, s.playerName, 'rehab', date,
-        `Rehab game today — in action for ${s.team} (${s.level})`
-      )
-    );
+    .filter((s) => s.onRehab && rehabInActionConfirmed(s))
+    .map((s) => {
+      const scheduled = s.gameStatus === 'Scheduled';
+      const msg = s.position === 'P'
+        ? `Rehab start today — ${scheduled ? 'probable' : 'pitching'} for ${s.team} (${s.level})`
+        : `Rehab game today — in the lineup for ${s.team} (${s.level})`;
+      return makeNotification({ id: s.playerId }, s.playerName, 'rehab', date, msg);
+    });
 }
 
 // --- Opportunity signals (derived from the daily lineup/boxscore) ---
