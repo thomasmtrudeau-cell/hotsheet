@@ -24,14 +24,25 @@ export async function GET(request: NextRequest) {
       .toISOString()
       .slice(0, 10);
 
-    const records = rows.map((r) => ({
-      snapshot_date: today,
-      name_key: r.nameKey,
-      display_name: r.displayName,
-      is_pitcher: r.isPitcher,
-      level: r.level ?? null,
-      war: r.war,
-    }));
+    // Dedupe by the PK (name_key + is_pitcher): the sheet can have two rows that
+    // normalize to the same name; keep the higher WAR so the upsert doesn't hit
+    // the same row twice in one command.
+    const byKey = new Map<string, { snapshot_date: string; name_key: string; display_name: string; is_pitcher: boolean; level: string | null; war: number }>();
+    for (const r of rows) {
+      const k = `${r.nameKey}|${r.isPitcher}`;
+      const existing = byKey.get(k);
+      if (!existing || r.war > existing.war) {
+        byKey.set(k, {
+          snapshot_date: today,
+          name_key: r.nameKey,
+          display_name: r.displayName,
+          is_pitcher: r.isPitcher,
+          level: r.level ?? null,
+          war: r.war,
+        });
+      }
+    }
+    const records = Array.from(byKey.values());
 
     const sb = createServiceClient();
     // Upsert in chunks (today's rows replace themselves if the cron re-runs).
