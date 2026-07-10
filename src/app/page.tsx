@@ -587,6 +587,7 @@ export default function Home() {
           emptyText="No MLB call-ups in the last 7 days"
           verb="called up"
           showWar={showPremium}
+          isPremium={isPremium}
         />
       ) : isPromotions ? (
         <MoversList
@@ -598,6 +599,7 @@ export default function Home() {
           emptyText="No MiLB promotions in the last 7 days"
           verb="promoted"
           showWar={showPremium}
+          isPremium={isPremium}
         />
       ) : isRisers ? (
         <RisersView

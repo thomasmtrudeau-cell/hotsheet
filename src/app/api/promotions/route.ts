@@ -19,7 +19,9 @@ export async function GET(request: NextRequest) {
         premium = profile?.tier === 'premium';
       }
     }
-    const out = premium ? list : list.map((c) => ({ ...c, war: undefined }));
+    // Strip ALL premium numbers for non-premium (WAR + peak wRC+ + ERA/20); the
+    // WAR-derived order stays. Real values never reach a non-premium payload.
+    const out = premium ? list : list.map((c) => ({ ...c, war: undefined, peakWrcPlus: undefined, era20: undefined }));
     return NextResponse.json(out);
   } catch (error) {
     console.error('Promotions route error:', error);

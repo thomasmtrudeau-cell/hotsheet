@@ -1,6 +1,6 @@
 import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
-import { fetchWarMap } from './war';
+import { fetchPremiumMap } from './war';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
 const ALL_SPORT_IDS = [1, 11, 12, 13, 14];
@@ -1029,13 +1029,16 @@ async function enrichMover(cu: CallUp, fromSid: number, season: number, endDate:
 async function warSortMovers(out: CallUp[], warSheetId?: string): Promise<CallUp[]> {
   if (warSheetId) {
     try {
-      const warMap = await fetchWarMap(
+      const premiumMap = await fetchPremiumMap(
         out.map((c) => ({ id: c.id, fullName: c.fullName, primaryPosition: c.primaryPosition, currentTeam: c.currentTeam, sportId: c.sportId, followedAt: '' } as FollowedPlayer)),
         warSheetId
       );
-      for (const c of out) c.war = warMap[c.id];
+      for (const c of out) {
+        const m = premiumMap[c.id];
+        if (m) { c.war = m.war; c.peakWrcPlus = m.peakWrcPlus; c.era20 = m.era20; }
+      }
     } catch {
-      // WAR unavailable — fall back to date order.
+      // Premium metrics unavailable — fall back to date order.
     }
   }
   out.sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity) || b.calledUpDate.localeCompare(a.calledUpDate));

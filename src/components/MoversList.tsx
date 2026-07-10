@@ -10,7 +10,8 @@ interface MoversListProps {
   caption: string;   // e.g. "MLB call-ups in the last 7 days · tap Follow to add"
   emptyText: string; // e.g. "No MLB call-ups in the last 7 days"
   verb: string;      // "called up" | "promoted"
-  showWar?: boolean; // honor the premium WAR toggle (default true)
+  showWar?: boolean; // honor the premium metrics toggle (default true)
+  isPremium?: boolean; // premium sees real numbers; everyone else a locked chip
 }
 
 function fmtDate(d: string): string {
@@ -32,7 +33,7 @@ function levelBadgeClass(sportId: number): string {
   return 'bg-zinc-500/20 text-zinc-300';
 }
 
-export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true }: MoversListProps) {
+export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true, isPremium = false }: MoversListProps) {
   if (loading && items.length === 0) {
     return (
       <div className="flex justify-center py-16">
@@ -64,9 +65,32 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                 {following && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300" title="Already in your list">★ In your list</span>
                 )}
-                {showWar && c.war !== undefined && (
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR">
-                    {c.war.toFixed(1)} WAR
+                {isPremium ? (
+                  showWar && (
+                    <>
+                      {c.war !== undefined && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR (ScoutTheStatline)">
+                          {c.war.toFixed(1)} WAR
+                        </span>
+                      )}
+                      {!c.isPitcher && c.peakWrcPlus !== undefined && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak wRC+ (ScoutTheStatline)">
+                          {c.peakWrcPlus} wRC+
+                        </span>
+                      )}
+                      {c.isPitcher && c.era20 !== undefined && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="ERA per 20 TBF/game (ScoutTheStatline)">
+                          {c.era20.toFixed(2)} ERA/20
+                        </span>
+                      )}
+                    </>
+                  )
+                ) : (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/25 text-amber-300/70"
+                    title="Premium: WAR, peak wRC+ & ERA/20 TBF from ScoutTheStatline. Tap ✨ Premium to learn more."
+                  >
+                    🔒 WAR · wRC+ · ERA/20
                   </span>
                 )}
               </div>
