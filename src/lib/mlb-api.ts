@@ -759,8 +759,11 @@ async function getRecentForm(players: FollowedPlayer[], date: string): Promise<M
 // --- Matchup (today's opposing starter + park), hitters only ---
 
 // --- Matchup rating weights ---
-// Quality from the pitcher's CAREER ERA (biggest sample). Higher ERA = easier
-// for the hitter. Platoon: opposite hand (or switch) = edge. Park: hitter-friendly = plus.
+// Weights follow the sabermetric magnitudes: pitcher quality (career ERA, the
+// biggest sample) and platoon (batter hand vs pitcher hand) are CO-EQUAL levers
+// (±2 each) — platoon is a guaranteed ~20-28 wOBA-point swing you know pre-game.
+// Park is normally a smaller ±1, but the extreme parks (Coors-type) rival the
+// others, so they get ±2.
 function ratePitcherQuality(era?: number): number {
   if (era === undefined) return 0;
   if (era >= 5.0) return 2;
@@ -771,19 +774,22 @@ function ratePitcherQuality(era?: number): number {
 }
 function ratePlatoon(bat?: string, pitch?: string): { score: number; label: 'edge' | 'even' | 'disadv' } {
   if (!bat || !pitch) return { score: 0, label: 'even' };
-  if (bat === 'S' || bat !== pitch) return { score: 1, label: 'edge' };
-  return { score: -1, label: 'disadv' };
+  if (bat === 'S' || bat !== pitch) return { score: 2, label: 'edge' };
+  return { score: -2, label: 'disadv' };
 }
 function ratePark(pf?: number): number {
   if (pf === undefined) return 0;
+  if (pf >= 110) return 2;   // Coors-type extreme
   if (pf >= 104) return 1;
+  if (pf <= 90) return -2;   // extreme pitcher park
   if (pf <= 96) return -1;
   return 0;
 }
+// Score ranges -6..+6 (three ±2 levers). Mild pro-hitter lean preserved.
 function matchupTier(score: number): 'strong' | 'plus' | 'neutral' | 'tough' {
-  if (score >= 3) return 'strong';
-  if (score >= 1) return 'plus';
-  if (score <= -2) return 'tough';
+  if (score >= 4) return 'strong';
+  if (score >= 2) return 'plus';
+  if (score <= -3) return 'tough';
   return 'neutral';
 }
 

@@ -70,9 +70,25 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
     ? `Played ${played} of last ${entries.length} team games`
     : `Last ${entries.length} games`) + ' · current level';
 
+  // Playing-time role from start rate (hitters only; needs the team-aware log).
+  let role: { label: string; cls: string } | null = null;
+  if (hasDnp && !isPitcher && entries.length >= 5) {
+    const rate = played / entries.length;
+    if (rate >= 0.8) role = { label: 'Everyday', cls: 'bg-green-500/20 text-green-400' };
+    else if (rate >= 0.45) role = { label: 'Part-time', cls: 'bg-amber-500/20 text-amber-400' };
+    else role = { label: 'Spot starter', cls: 'bg-zinc-600/40 text-zinc-300' };
+  }
+
   return (
     <div className="mt-3 pt-3 border-t border-zinc-700/30">
-      <div className="text-[10px] uppercase tracking-wider text-zinc-500 mb-1.5">{header}</div>
+      <div className="flex items-center gap-2 mb-1.5">
+        <span className="text-[10px] uppercase tracking-wider text-zinc-500">{header}</span>
+        {role && (
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${role.cls}`} title="Start rate over the team's recent games">
+            {role.label}
+          </span>
+        )}
+      </div>
       <div className="space-y-1">
         {entries.map((e, i) => (
           <div key={`${e.date}-${i}`} className={`flex items-baseline gap-2 text-xs ${e.dnp ? 'opacity-45' : ''}`}>
