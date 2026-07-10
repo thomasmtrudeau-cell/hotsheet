@@ -18,7 +18,25 @@ import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
 import PremiumTeaser from '@/components/PremiumTeaser';
-import Tip from '@/components/Tip';
+import { TipRotator } from '@/components/Tip';
+
+// Where the Feedback button points. Swap to a Google Form URL anytime — it just
+// needs to be a plain link. Default opens a pre-addressed email.
+const FEEDBACK_URL = 'mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20feedback&body=What%27s%20working%2C%20what%27s%20not%2C%20or%20an%20idea%3A%0A%0A';
+
+// Rotating first-run tips — one shows at a time, cycling per visit.
+const TIPS: { id: string; node: React.ReactNode }[] = [
+  { id: 'tip-feedback', node: <>Got an idea or found a bug? Hit <strong>Feedback</strong> (top right) — we read everything and ship fast.</> },
+  { id: 'tip-tag', node: <>Tap the <strong>🏷 tag</strong> on any card to move a player between your lists.</> },
+  { id: 'tip-lineups', node: <>When MLB posts lineups, cards show <strong>STARTING</strong> (with batting order) or <strong>NOT STARTING</strong> — so you know who&apos;s actually in before first pitch.</> },
+  { id: 'tip-follow', node: <>Search any player and hit <strong>Follow</strong> — use the <strong>▾</strong> to drop them straight into a list.</> },
+  { id: 'tip-matchup', node: <>Tap a <strong>matchup</strong> chip (Plus / Tough) for the pitcher-quality + platoon + park breakdown.</> },
+  { id: 'tip-games', node: <>Open <strong>Games ▾</strong> for a player&apos;s last 15 — and whether he&apos;s an <strong>Everyday</strong>, <strong>Platoon</strong>, or <strong>Spot</strong> starter.</> },
+  { id: 'tip-movers', node: <><strong>Call-Ups</strong> &amp; <strong>Promoted</strong> show who just moved up in the last 7 days, sorted by upside.</> },
+  { id: 'tip-bell', node: <>The <strong>🔔 bell</strong> (top right) flags your players&apos; call-ups, promotions, IL moves and lineup changes.</> },
+  { id: 'tip-lists', node: <>Make custom lists with <strong>+ New list</strong>; rename or delete them under <strong>⚙ Manage lists</strong>.</> },
+  { id: 'tip-intl', node: <>NPB &amp; KBO show <strong>season stats</strong> (not live game-by-game).</> },
+];
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -451,6 +469,13 @@ export default function Home() {
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
         <div className="flex items-center gap-3">
+          <a
+            href={FEEDBACK_URL}
+            className="text-[11px] px-2 py-1 rounded-full border border-blue-500/40 text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 transition-colors cursor-pointer"
+            title="Send feedback, ideas, or bug reports"
+          >
+            💬 Feedback
+          </a>
           {isPremium ? (
             <button
               onClick={() => setShowPremium((v) => !v)}
@@ -496,10 +521,7 @@ export default function Home() {
         />
       </div>
 
-      <Tip id="getting-started" className="mb-3">
-        Search a player and hit <strong>Follow</strong> — use the <strong>▾</strong> to drop them into a list.
-        Already following someone? Each card&apos;s <strong>🏷 tag</strong> button moves them between lists.
-      </Tip>
+      <TipRotator tips={TIPS} className="mb-3" />
 
       {/* Groups */}
       <GroupBar
@@ -511,10 +533,6 @@ export default function Home() {
         onRename={editGroup}
         onDelete={removeGroup}
       />
-
-      <Tip id="lists-bar" className="mb-4">
-        These are your <strong>lists</strong>. Make new ones with <strong>+ New list</strong>, or rename and delete them under <strong>⚙ Manage lists</strong>.
-      </Tip>
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
       {!isDiscovery && (
@@ -635,10 +653,6 @@ export default function Home() {
         </div>
       ) : (
         <div className="space-y-6">
-          <Tip id="card-reading">
-            Tap a <strong>matchup</strong> chip (Plus / Tough) to see why — it blends the pitcher&apos;s quality,
-            the platoon (your hitter&apos;s side vs the pitcher&apos;s hand), and the ballpark. <strong>Games ▾</strong> opens the last 15.
-          </Tip>
           {sections.map((section) => (
             <section key={section.key}>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">

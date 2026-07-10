@@ -18,6 +18,72 @@ export function resetAllTips() {
   SESSION_DISMISSED.clear();
 }
 
+// Rotating "did you know" bar: shows ONE tip at a time from a pool, cycling a
+// different one each visit. ✕ hides the bar for this session; "Next" advances to
+// another tip now; "Don't show again" permanently retires the current tip.
+export function TipRotator({ tips, className = '' }: {
+  tips: { id: string; node: React.ReactNode }[];
+  className?: string;
+}) {
+  const [state, setState] = useState<{ mounted: boolean; dismissed: Set<string>; cursor: number }>(
+    { mounted: false, dismissed: new Set(), cursor: 0 }
+  );
+  const [sessionHidden, setSessionHidden] = useState(false);
+
+  useEffect(() => {
+    const perm = new Set<string>();
+    for (const t of tips) if (localStorage.getItem(permKey(t.id)) === '1') perm.add(t.id);
+    const rot = parseInt(localStorage.getItem('hotsheet_tip_rot') || '0', 10) || 0;
+    localStorage.setItem('hotsheet_tip_rot', String(rot + 1));
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setState({ mounted: true, dismissed: perm, cursor: rot });
+  }, [tips]);
+
+  if (!state.mounted || sessionHidden) return null;
+  const available = tips.filter((t) => !state.dismissed.has(t.id));
+  if (available.length === 0) return null;
+  const current = available[state.cursor % available.length];
+
+  const dontShow = () => setState((s) => {
+    localStorage.setItem(permKey(current.id), '1');
+    const dismissed = new Set(s.dismissed); dismissed.add(current.id);
+    return { ...s, dismissed };
+  });
+
+  return (
+    <div className={`flex items-start gap-2 px-3 py-2 rounded-lg bg-blue-500/10 border border-blue-500/25 text-[12px] text-blue-100/90 ${className}`}>
+      <span className="shrink-0 mt-px">💡</span>
+      <div className="flex-1 leading-snug">{current.node}</div>
+      <div className="flex items-center gap-2 shrink-0">
+        {available.length > 1 && (
+          <button
+            onClick={() => setState((s) => ({ ...s, cursor: s.cursor + 1 }))}
+            className="text-[10px] text-blue-300/70 hover:text-blue-200 cursor-pointer whitespace-nowrap"
+            title="Show another tip"
+          >
+            Next ›
+          </button>
+        )}
+        <button
+          onClick={dontShow}
+          className="text-[10px] text-blue-300/70 hover:text-blue-200 underline underline-offset-2 cursor-pointer whitespace-nowrap"
+          title="Never show this tip again"
+        >
+          Don&apos;t show again
+        </button>
+        <button
+          onClick={() => setSessionHidden(true)}
+          className="text-blue-300/70 hover:text-blue-100 cursor-pointer leading-none"
+          title="Hide tips for now"
+          aria-label="Hide tips for now"
+        >
+          ✕
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function Tip({ id, children, className = '' }: {
   id: string;
   children: React.ReactNode;
