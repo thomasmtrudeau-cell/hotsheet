@@ -19,6 +19,39 @@ function Pill({ id, label, active, count, onSelect }: {
   );
 }
 
+// One editable row in the Manage-lists panel: rename inline (Enter / blur saves)
+// and delete, for every list at once — no need to select each first.
+function ManageRow({ group, count, onRename, onDelete }: {
+  group: Group; count: number; onRename: (id: string, name: string) => void; onDelete: (id: string) => void;
+}) {
+  const [name, setName] = useState(group.name);
+  const save = () => {
+    const n = name.trim();
+    if (n && n !== group.name) onRename(group.id, n);
+    else if (!n) setName(group.name); // never allow a blank name
+  };
+  return (
+    <div className="flex items-center gap-2">
+      <input
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+        className="flex-1 min-w-0 px-2.5 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+        aria-label={`Rename ${group.name}`}
+      />
+      <span className="text-[11px] text-zinc-500 w-8 text-right shrink-0">{count}</span>
+      <button
+        onClick={() => { if (window.confirm(`Delete "${group.name}"? The players stay in All Players.`)) onDelete(group.id); }}
+        className="shrink-0 px-2 py-1.5 rounded-lg text-[11px] text-zinc-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer transition-colors"
+        title="Delete this list"
+      >
+        🗑
+      </button>
+    </div>
+  );
+}
+
 interface GroupBarProps {
   groups: Group[];
   activeGroup: string;
@@ -34,6 +67,7 @@ export default function GroupBar({
 }: GroupBarProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
+  const [managing, setManaging] = useState(false);
 
   const submitNew = (e: React.FormEvent) => {
     e.preventDefault();
@@ -42,8 +76,6 @@ export default function GroupBar({
     setNewName('');
     setCreating(false);
   };
-
-  const activeCustom = groups.find((g) => g.id === activeGroup);
 
   return (
     <div className="flex items-center gap-2 mb-5 overflow-x-auto pb-1">
@@ -89,40 +121,80 @@ export default function GroupBar({
             value={newName}
             onChange={(e) => setNewName(e.target.value)}
             onBlur={() => { if (!newName.trim()) setCreating(false); }}
-            placeholder="Group name"
+            placeholder="Name your list…"
             className="px-3 py-1.5 w-28 bg-zinc-800 border border-zinc-700 rounded-full text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
           />
         </form>
       ) : (
         <button
           onClick={() => setCreating(true)}
-          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium text-zinc-500 hover:text-zinc-300 border border-dashed border-zinc-700 hover:border-zinc-600 transition-colors cursor-pointer"
+          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-semibold text-blue-300 bg-blue-500/10 border border-blue-500/30 hover:bg-blue-500/20 transition-colors cursor-pointer"
+          title="Create a new named list"
         >
-          + New group
+          + New list
         </button>
       )}
 
-      {activeCustom && (
-        <div className="shrink-0 flex items-center gap-2 ml-1">
-          <button
-            onClick={() => {
-              const name = window.prompt('Rename group', activeCustom.name);
-              if (name && name.trim()) onRename(activeCustom.id, name.trim());
-            }}
-            className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+      {groups.length > 0 && (
+        <button
+          onClick={() => setManaging(true)}
+          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium text-zinc-400 bg-zinc-800/60 border border-zinc-700 hover:text-zinc-100 hover:bg-zinc-700 transition-colors cursor-pointer"
+          title="Rename or delete your lists"
+        >
+          ⚙ Manage lists
+        </button>
+      )}
+
+      {managing && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setManaging(false)}
+        >
+          <div
+            className="w-full max-w-sm bg-zinc-900 border border-zinc-700 rounded-xl p-4 max-h-[80vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
           >
-            Rename
-          </button>
-          <button
-            onClick={() => {
-              if (window.confirm(`Delete the "${activeCustom.name}" group? Players stay in All Players.`)) {
-                onDelete(activeCustom.id);
-              }
-            }}
-            className="text-[11px] text-zinc-600 hover:text-red-400 transition-colors cursor-pointer"
-          >
-            Delete
-          </button>
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-sm font-semibold text-zinc-100">Manage lists</h3>
+              <button
+                onClick={() => setManaging(false)}
+                className="text-zinc-500 hover:text-zinc-200 transition-colors cursor-pointer text-sm px-1"
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[11px] text-zinc-500 mb-3">Edit a name inline (Enter to save) or delete. Deleting keeps the players in All&nbsp;Players.</p>
+
+            {groups.length === 0 ? (
+              <p className="text-xs text-zinc-500 py-4 text-center">No lists yet — create one below.</p>
+            ) : (
+              <div className="space-y-2 mb-3">
+                {groups.map((g) => (
+                  <ManageRow key={g.id} group={g} count={counts.get(g.id) ?? 0} onRename={onRename} onDelete={onDelete} />
+                ))}
+              </div>
+            )}
+
+            <form
+              onSubmit={(e) => { e.preventDefault(); const n = newName.trim(); if (n) { onCreate(n); setNewName(''); } }}
+              className="flex gap-2 pt-3 border-t border-zinc-800"
+            >
+              <input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder="New list name…"
+                className="flex-1 min-w-0 px-3 py-1.5 bg-zinc-800 border border-zinc-700 rounded-lg text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+              />
+              <button
+                type="submit"
+                disabled={!newName.trim()}
+                className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
+              >
+                Add list
+              </button>
+            </form>
+          </div>
         </div>
       )}
     </div>

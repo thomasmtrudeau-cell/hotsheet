@@ -107,6 +107,11 @@ export default function LoginScreen({ authError }: { authError?: boolean }) {
             <p className="text-xs text-emerald-400 text-center font-medium flex items-center justify-center gap-1">
               ✓ Recommended — instant, nothing to check in your inbox
             </p>
+            <p className="text-[11px] text-zinc-500 text-center leading-snug">
+              Google may say you&apos;re continuing to a long, random-looking address
+              (ends in <span className="text-zinc-400">.supabase.co</span>). That&apos;s just our secure
+              sign-in service — it&apos;s legit, go ahead and continue.
+            </p>
 
             <div className="flex items-center gap-3">
               <div className="h-px bg-zinc-800 flex-1" />

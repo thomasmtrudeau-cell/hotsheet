@@ -157,7 +157,7 @@ export default function SearchBar({ onFollow, isFollowing, groups, activeGroupId
                     {pickerId === r.id && (
                       <div className="absolute right-0 z-30 mt-1 w-44 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl py-1">
                         <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500">
-                          Add to groups
+                          Add to lists
                         </div>
                         {groups.map((g) => (
                           <button
@@ -180,7 +180,7 @@ export default function SearchBar({ onFollow, isFollowing, groups, activeGroupId
                             onClick={() => handleFollow(r, pickerGroups)}
                             className="w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
                           >
-                            {pickerGroups.length > 0 ? `Add to ${pickerGroups.length} group${pickerGroups.length > 1 ? 's' : ''}` : 'Follow (no group)'}
+                            {pickerGroups.length > 0 ? `Add to ${pickerGroups.length} list${pickerGroups.length > 1 ? 's' : ''}` : 'Follow (no list)'}
                           </button>
                         </div>
                       </div>

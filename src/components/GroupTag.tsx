@@ -40,7 +40,7 @@ export default function GroupTag({ playerId, groups, memberOf, onChange }: Group
       <button
         onClick={() => setOpen((o) => !o)}
         className={`transition-colors p-1 cursor-pointer ${count > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-600 hover:text-zinc-400'}`}
-        title="Add to groups"
+        title="Add to lists"
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5a1.99 1.99 0 011.41.59l7 7a2 2 0 010 2.82l-5 5a2 2 0 01-2.82 0l-7-7A2 2 0 014 7V4a1 1 0 011-1z" />
@@ -48,7 +48,7 @@ export default function GroupTag({ playerId, groups, memberOf, onChange }: Group
       </button>
       {open && (
         <div className="absolute right-0 z-20 mt-1 w-44 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl py-1">
-          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500">Groups</div>
+          <div className="px-3 py-1.5 text-[10px] uppercase tracking-wider text-zinc-500">Lists</div>
           {groups.map((g) => (
             <button
               key={g.id}

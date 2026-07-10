@@ -7,6 +7,11 @@ import { createClient } from './supabase/client';
 const PLAYERS_KEY = 'hotsheet_followed_players';
 const GROUPS_KEY = 'hotsheet_groups';
 const MEMBERSHIPS_KEY = 'hotsheet_player_groups';
+// Which signed-in user the local cache above currently belongs to. localStorage
+// is shared across every account on a device, so we tag the cache and wipe it
+// when a different account signs in — otherwise one user's list could seed or
+// be shown to another.
+const CACHE_OWNER_KEY = 'hotsheet_cache_owner';
 // Legacy keys from the old name-login + Vercel Blob era (one-time import).
 const LEGACY_USER_KEY = 'hotsheet_username';
 const LEGACY_IMPORTED_KEY = 'hotsheet_blob_imported';
@@ -29,6 +34,30 @@ function read<T>(key: string, fallback: T): T {
 
 function write(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+// --- Cross-account cache hygiene ---
+
+// Wipe the per-device local cache (players/groups/memberships). Cloud is the
+// source of truth, so this only drops the offline copy.
+export function clearLocalCache(): void {
+  if (typeof window === 'undefined') return;
+  localStorage.removeItem(PLAYERS_KEY);
+  localStorage.removeItem(GROUPS_KEY);
+  localStorage.removeItem(MEMBERSHIPS_KEY);
+}
+
+// If the cached data belongs to a different account than the one now signed in
+// (or to no one yet), wipe it and claim it for the current user. Prevents one
+// account's list from leaking into another on a shared browser.
+export async function reconcileCacheOwner(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const userId = await currentUserId();
+  if (!userId) return;
+  if (localStorage.getItem(CACHE_OWNER_KEY) !== userId) {
+    clearLocalCache();
+    localStorage.setItem(CACHE_OWNER_KEY, userId);
+  }
 }
 
 // --- Local cache ---

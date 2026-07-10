@@ -66,29 +66,35 @@ export function useFollowedPlayers() {
   // Load everything for the signed-in user, migrating any pre-account
   // localStorage data (players, groups, memberships) up on first login.
   const loadAll = useCallback(async () => {
+    // localStorage is shared across every account on a device. Wipe the cache
+    // if it belongs to a different user before reading anything from it, so no
+    // account can inherit (or be shown) another account's list.
+    await store.reconcileCacheOwner();
+
     // Snapshot pre-account local data BEFORE any cloud fetch. The fetch helpers
     // overwrite the localStorage cache with the (possibly empty) cloud copy, so
     // reading the cache *after* fetching would wipe the very data we migrate.
-    const localPlayers0 = store.getCachedPlayers();
     const localGroups0 = store.getCachedGroups();
     const localMemberships0 = store.getCachedMemberships();
 
     let cloudPlayers = await store.fetchCloudPlayers();
     if (cloudPlayers.length === 0) {
-      // First login: adopt whatever this browser already had.
-      let local = localPlayers0;
-      if (local.length === 0) {
-        local = (await store.importLegacyPlayersOnce()) ?? [];
-      }
-      if (local.length > 0) {
-        await store.bulkUpsertCloudPlayers(local);
-        cloudPlayers = local;
+      // First login for THIS account. Only import genuine pre-auth legacy data
+      // (a one-time, globally-guarded blob import) — NEVER this browser's live
+      // cache, which belongs to whichever account last used the device.
+      const legacy = (await store.importLegacyPlayersOnce()) ?? [];
+      if (legacy.length > 0) {
+        await store.bulkUpsertCloudPlayers(legacy);
+        cloudPlayers = legacy;
       }
     }
 
     let cloudGroups = await store.fetchGroups();
     if (cloudGroups.length === 0) {
-      if (localGroups0.length > 0) {
+      // Only adopt local groups when they accompany a genuine legacy import
+      // (i.e. this account actually took on legacy players just now). Otherwise
+      // a brand-new account starts with fresh default lists.
+      if (cloudPlayers.length > 0 && localGroups0.length > 0) {
         await store.bulkInsertGroups(localGroups0);
         cloudGroups = localGroups0;
       } else {
@@ -169,6 +175,7 @@ export function useFollowedPlayers() {
         }
       } else {
         loadedForUserId = null;
+        store.clearLocalCache(); // don't leave one user's list on the device for the next
         setPlayers([]);
         setGroups([]);
         setMemberships(new Map());

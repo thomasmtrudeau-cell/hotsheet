@@ -17,6 +17,7 @@ import NotificationBell from '@/components/NotificationBell';
 import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
+import PremiumTeaser from '@/components/PremiumTeaser';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -80,6 +81,7 @@ export default function Home() {
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [premiumMap, setPremiumMap] = useState<Record<number, PremiumMetrics>>({}); // WAR + peak wRC+ / ERA-20TBF, premium only
   const [showPremium, setShowPremium] = useState(true); // premium toggle (for clean screenshots)
+  const [showPremiumInfo, setShowPremiumInfo] = useState(false); // teaser modal for non-premium users
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
@@ -448,7 +450,7 @@ export default function Home() {
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
         <div className="flex items-center gap-3">
-          {isPremium && (
+          {isPremium ? (
             <button
               onClick={() => setShowPremium((v) => !v)}
               className={`text-[11px] px-2 py-1 rounded-full border transition-colors cursor-pointer ${
@@ -457,6 +459,14 @@ export default function Home() {
               title="Show/hide premium metrics — WAR, peak wRC+, ERA/20 TBF (only you can see this toggle)"
             >
               Premium {showPremium ? 'on' : 'off'}
+            </button>
+          ) : (
+            <button
+              onClick={() => setShowPremiumInfo(true)}
+              className="text-[11px] px-2 py-1 rounded-full border border-amber-500/40 text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 transition-colors cursor-pointer"
+              title="See what premium unlocks across the app"
+            >
+              ✨ Premium
             </button>
           )}
           <NotificationBell
@@ -690,6 +700,28 @@ export default function Home() {
           >
             Cancel
           </button>
+        </div>
+      )}
+
+      {/* Premium preview — reachable app-wide from the header ✨ Premium button. */}
+      {showPremiumInfo && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setShowPremiumInfo(false)}
+        >
+          <div
+            className="relative w-full max-w-lg bg-zinc-900 border border-zinc-700 rounded-xl max-h-[85vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setShowPremiumInfo(false)}
+              className="absolute top-3 right-3 z-10 text-zinc-500 hover:text-zinc-200 text-sm cursor-pointer"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+            <PremiumTeaser />
+          </div>
         </div>
       )}
     </div>
