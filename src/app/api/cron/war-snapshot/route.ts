@@ -8,7 +8,11 @@ export const maxDuration = 60;
 // Triggered by Vercel cron (sends Authorization: Bearer <CRON_SECRET>).
 export async function GET(request: NextRequest) {
   if (process.env.CRON_SECRET) {
-    if (request.headers.get('authorization') !== `Bearer ${process.env.CRON_SECRET}`) {
+    // Accept the secret via the Authorization header (Vercel cron) OR a ?secret=
+    // query param (external schedulers like cron-job.org, no header config needed).
+    const viaHeader = request.headers.get('authorization') === `Bearer ${process.env.CRON_SECRET}`;
+    const viaQuery = request.nextUrl.searchParams.get('secret') === process.env.CRON_SECRET;
+    if (!viaHeader && !viaQuery) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
   }
