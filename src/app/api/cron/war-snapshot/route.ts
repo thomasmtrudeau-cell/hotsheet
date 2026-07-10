@@ -23,21 +23,18 @@ export async function GET(request: NextRequest) {
     const rows = await getWarRows(sheetId);
     if (rows.length === 0) return NextResponse.json({ skipped: 'no rows' });
 
-    // ET date so snapshots align with the app's "today".
-    const today = new Date(new Date().toLocaleString('en-US', { timeZone: 'America/New_York' }))
-      .toISOString()
-      .slice(0, 10);
+    // One timestamp for the whole run — every row in this capture shares it, so
+    // captures are distinct points even when several happen in a day.
+    const capturedAt = new Date().toISOString();
 
-    // Dedupe by the PK (name_key + is_pitcher): the sheet can have two rows that
-    // normalize to the same name; keep the higher WAR so the upsert doesn't hit
-    // the same row twice in one command.
-    const byKey = new Map<string, { snapshot_date: string; name_key: string; display_name: string; is_pitcher: boolean; level: string | null; war: number }>();
+    // getWarRows already dedupes per (name_key, is_pitcher) preferring the
+    // correct (non-"sa") row; this guard just protects the upsert's PK.
+    const byKey = new Map<string, { captured_at: string; name_key: string; display_name: string; is_pitcher: boolean; level: string | null; war: number }>();
     for (const r of rows) {
       const k = `${r.nameKey}|${r.isPitcher}`;
-      const existing = byKey.get(k);
-      if (!existing || r.war > existing.war) {
+      if (!byKey.has(k)) {
         byKey.set(k, {
-          snapshot_date: today,
+          captured_at: capturedAt,
           name_key: r.nameKey,
           display_name: r.displayName,
           is_pitcher: r.isPitcher,
@@ -49,20 +46,18 @@ export async function GET(request: NextRequest) {
     const records = Array.from(byKey.values());
 
     const sb = createServiceClient();
-    // Upsert in chunks (today's rows replace themselves if the cron re-runs).
     for (let i = 0; i < records.length; i += 500) {
       const { error } = await sb
         .from('war_snapshots')
-        .upsert(records.slice(i, i + 500), { onConflict: 'snapshot_date,name_key,is_pitcher' });
+        .upsert(records.slice(i, i + 500), { onConflict: 'captured_at,name_key,is_pitcher' });
       if (error) throw error;
     }
 
-    // Prune snapshots older than 35 days (30-day window + slack).
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 35);
-    await sb.from('war_snapshots').delete().lt('snapshot_date', cutoff.toISOString().slice(0, 10));
+    // Prune captures older than 35 days (30-day window + slack).
+    const cutoff = new Date(Date.now() - 35 * 86_400_000).toISOString();
+    await sb.from('war_snapshots').delete().lt('captured_at', cutoff);
 
-    return NextResponse.json({ date: today, inserted: records.length });
+    return NextResponse.json({ capturedAt, inserted: records.length });
   } catch (error) {
     console.error('war-snapshot error:', error);
     const detail = error instanceof Error ? error.message

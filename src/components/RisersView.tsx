@@ -46,7 +46,7 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
         <div className="text-center py-12 text-sm text-zinc-500">
           No risers yet for this window.
           <div className="text-[11px] text-zinc-600 mt-1">
-            This list builds from daily WAR snapshots — the {window}-day view needs ~{window} days of history to populate.
+            Risers build from WAR snapshots taken a few times a day — this fills in once there are two captures with a change between them.
           </div>
         </div>
       ) : (

@@ -157,29 +157,33 @@ create policy "player_groups: all own"
   with check (auth.uid() = user_id);
 
 -- ---------------------------------------------------------------------------
--- war_snapshots: daily snapshot of the premium WAR sheet, for tracking WAR
--- MOVEMENT (prospect risers). Written by the cron route (service role only),
--- read via the war_risers() function. No public access (RLS on, no policies).
+-- war_snapshots: timestamped captures of the premium WAR sheet, for tracking
+-- WAR MOVEMENT (prospect risers). Keyed by captured_at (not calendar date) so
+-- MULTIPLE captures per day are preserved — that's what lets risers compare an
+-- earlier sheet state to a later one even within a single day. Written by the
+-- cron route (service role only), read via war_risers(). RLS on, no policies.
+-- NOTE: an older build keyed this table by snapshot_date; migrating requires a
+-- one-time drop (see supabase/migrations/) since the primary key changes.
 -- ---------------------------------------------------------------------------
 create table if not exists public.war_snapshots (
-  snapshot_date date not null,
-  name_key      text not null,   -- normalized name (join key across days)
+  captured_at   timestamptz not null,   -- one value per cron run
+  name_key      text not null,          -- normalized name (join key across captures)
   display_name  text not null,
   is_pitcher    boolean not null default false,
   level         text,
   war           numeric not null,
-  primary key (snapshot_date, name_key, is_pitcher)
+  primary key (captured_at, name_key, is_pitcher)
 );
 
-create index if not exists war_snapshots_key_idx on public.war_snapshots (name_key, is_pitcher, snapshot_date);
+create index if not exists war_snapshots_key_idx on public.war_snapshots (name_key, is_pitcher, captured_at);
 
 alter table public.war_snapshots enable row level security;
 -- (no policies: only the service role touches this table)
 
 -- Risers: players whose peak WAR climbed over the last `window_days`, top 100.
--- Compares the latest snapshot to the newest snapshot on/before (latest - window).
--- Until `window_days` of history has accrued, falls back to the OLDEST snapshot
--- we have (so the view shows the delta between whatever two updates exist).
+-- Compares the latest capture to the newest capture on/before (latest - window).
+-- Until `window_days` of history has accrued, falls back to the OLDEST capture
+-- we have — so with just two captures a few hours apart it still shows movement.
 -- Threshold is a small positive move (0.1) — real projection updates produce
 -- gains well under the old 1.5 bar, especially over short early windows.
 create or replace function public.war_risers(window_days int)
@@ -190,24 +194,25 @@ security definer
 set search_path = public
 as $$
 declare
-  latest_d date;
-  past_d date;
+  latest_at timestamptz;
+  past_at timestamptz;
 begin
-  select max(snapshot_date) into latest_d from public.war_snapshots;
-  if latest_d is null then return; end if;
-  select max(snapshot_date) into past_d from public.war_snapshots where snapshot_date <= latest_d - window_days;
-  -- Not enough history yet for the exact window: use the earliest snapshot we
-  -- have (any date strictly before latest). Returns nothing until 2 dates exist.
-  if past_d is null then
-    select min(snapshot_date) into past_d from public.war_snapshots where snapshot_date < latest_d;
+  select max(captured_at) into latest_at from public.war_snapshots;
+  if latest_at is null then return; end if;
+  select max(captured_at) into past_at from public.war_snapshots
+    where captured_at <= latest_at - (window_days || ' days')::interval;
+  -- Not enough history yet for the exact window: use the earliest capture we
+  -- have (any capture strictly before latest). Needs 2 captures to show anything.
+  if past_at is null then
+    select min(captured_at) into past_at from public.war_snapshots where captured_at < latest_at;
   end if;
-  if past_d is null then return; end if;
+  if past_at is null then return; end if;
   return query
     select t.name_key, t.display_name, t.is_pitcher, t.level, t.war, (t.war - p.war) as delta
     from public.war_snapshots t
     join public.war_snapshots p
-      on p.name_key = t.name_key and p.is_pitcher = t.is_pitcher and p.snapshot_date = past_d
-    where t.snapshot_date = latest_d and (t.war - p.war) >= 0.1
+      on p.name_key = t.name_key and p.is_pitcher = t.is_pitcher and p.captured_at = past_at
+    where t.captured_at = latest_at and (t.war - p.war) >= 0.1
     order by (t.war - p.war) desc
     limit 100;
 end;
