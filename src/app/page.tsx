@@ -18,6 +18,7 @@ import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
 import PremiumTeaser from '@/components/PremiumTeaser';
+import Tip from '@/components/Tip';
 
 function getDateString(offset: number = 0): string {
   const d = new Date();
@@ -487,13 +488,18 @@ export default function Home() {
       </div>
 
       {/* Search */}
-      <div className="mb-6">
+      <div className="mb-3">
         <SearchBar
           onFollow={follow}
           isFollowing={(id) => players.some(p => p.id === id)}
           groups={groups}
         />
       </div>
+
+      <Tip id="getting-started" className="mb-3">
+        Search a player and hit <strong>Follow</strong> — use the <strong>▾</strong> to drop them into a list.
+        Already following someone? Each card&apos;s <strong>🏷 tag</strong> button moves them between lists.
+      </Tip>
 
       {/* Groups */}
       <GroupBar
@@ -505,6 +511,10 @@ export default function Home() {
         onRename={editGroup}
         onDelete={removeGroup}
       />
+
+      <Tip id="lists-bar" className="mb-4">
+        These are your <strong>lists</strong>. Make new ones with <strong>+ New list</strong>, or rename and delete them under <strong>⚙ Manage lists</strong>.
+      </Tip>
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
       {!isDiscovery && (
@@ -625,6 +635,10 @@ export default function Home() {
         </div>
       ) : (
         <div className="space-y-6">
+          <Tip id="card-reading">
+            Tap a <strong>matchup</strong> chip (Plus / Tough) to see why — it blends the pitcher&apos;s quality,
+            the platoon (your hitter&apos;s side vs the pitcher&apos;s hand), and the ballpark. <strong>Games ▾</strong> opens the last 15.
+          </Tip>
           {sections.map((section) => (
             <section key={section.key}>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500 mb-2">

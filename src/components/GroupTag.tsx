@@ -39,7 +39,7 @@ export default function GroupTag({ playerId, groups, memberOf, onChange }: Group
     <div className="relative" ref={ref}>
       <button
         onClick={() => setOpen((o) => !o)}
-        className={`transition-colors p-1 cursor-pointer ${count > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-zinc-600 hover:text-zinc-400'}`}
+        className={`transition-colors p-1 cursor-pointer ${count > 0 ? 'text-blue-400 hover:text-blue-300' : 'text-amber-400/80 hover:text-amber-300'}`}
         title="Add to lists"
       >
         <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
