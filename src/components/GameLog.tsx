@@ -66,7 +66,9 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
 
   const hasDnp = entries.some((e) => e.dnp);
   const played = entries.filter((e) => !e.dnp).length;
-  const header = hasDnp ? `Played ${played} of last ${entries.length} team games` : `Last ${entries.length} games`;
+  const header = (hasDnp
+    ? `Played ${played} of last ${entries.length} team games`
+    : `Last ${entries.length} games`) + ' · current level';
 
   return (
     <div className="mt-3 pt-3 border-t border-zinc-700/30">
