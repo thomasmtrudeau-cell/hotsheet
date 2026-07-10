@@ -133,6 +133,24 @@ function TwoStartBadge({ dates }: { dates: string[] }) {
   );
 }
 
+const PLAYING_TIME_META: Record<string, { label: string; cls: string; title: string }> = {
+  everyday: { label: 'Everyday', cls: 'bg-green-500/20 text-green-400', title: 'Starts nearly every game' },
+  'platoon-vsL': { label: 'Platoon vs LHP', cls: 'bg-purple-500/20 text-purple-300', title: 'Starts mainly against left-handed pitchers' },
+  'platoon-vsR': { label: 'Platoon vs RHP', cls: 'bg-purple-500/20 text-purple-300', title: 'Starts mainly against right-handed pitchers' },
+  'part-time': { label: 'Part-time', cls: 'bg-amber-500/20 text-amber-400', title: 'Starts roughly half the time' },
+  spot: { label: 'Spot', cls: 'bg-zinc-600/40 text-zinc-300', title: 'Starts occasionally' },
+};
+
+function PlayingTimeBadge({ role }: { role: string }) {
+  const m = PLAYING_TIME_META[role];
+  if (!m) return null;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${m.cls}`} title={m.title}>
+      {m.label}
+    </span>
+  );
+}
+
 function RehabBadge() {
   return (
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
@@ -385,11 +403,12 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
           </div>
         </div>
         {/* Full-width signal row: flows left-to-right across the whole card. */}
-        {((stats.twoStartDates && stats.twoStartDates.length >= 2) || stats.calledUpDate || stats.promotedDate || premium) && (
+        {((stats.twoStartDates && stats.twoStartDates.length >= 2) || stats.calledUpDate || stats.promotedDate || stats.playingTime || premium) && (
           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
             {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
             {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
+            {stats.playingTime && <PlayingTimeBadge role={stats.playingTime} />}
             {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
           </div>
         )}
