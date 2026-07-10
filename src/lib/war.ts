@@ -85,15 +85,18 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   return out;
 }
 
-// 1-hour in-memory cache of the parsed sheet, keyed by sheet id. Hitting and
+// Short in-memory cache of the parsed sheet, keyed by sheet id. Kept brief so
+// edits to the Google Sheet surface on the site within ~a minute. Hitting and
 // pitching are kept SEPARATE — some names appear in both (position players who
 // pitched), so we must pick metrics by the player's actual role, not merge.
 let cache: { sheetId: string; at: number; hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> } | null = null;
-const TTL = 3600_000;
+const TTL = 60_000; // 1 minute
 
 async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}`;
-  const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' } });
+  // Cache-bust Google's CDN and bypass Next's fetch cache so we always read the
+  // latest published sheet, not a stale copy.
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}&_cb=${Date.now()}`;
+  const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
   if (!res.ok) throw new Error(`WAR sheet fetch ${res.status}`);
   return res.text();
 }

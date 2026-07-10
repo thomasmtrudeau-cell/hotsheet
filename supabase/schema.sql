@@ -176,10 +176,12 @@ create index if not exists war_snapshots_key_idx on public.war_snapshots (name_k
 alter table public.war_snapshots enable row level security;
 -- (no policies: only the service role touches this table)
 
--- Risers: players whose WAR rose >= 1.5 over the last `window_days`, top 100.
+-- Risers: players whose peak WAR climbed over the last `window_days`, top 100.
 -- Compares the latest snapshot to the newest snapshot on/before (latest - window).
 -- Until `window_days` of history has accrued, falls back to the OLDEST snapshot
 -- we have (so the view shows the delta between whatever two updates exist).
+-- Threshold is a small positive move (0.1) — real projection updates produce
+-- gains well under the old 1.5 bar, especially over short early windows.
 create or replace function public.war_risers(window_days int)
 returns table(name_key text, display_name text, is_pitcher boolean, level text, war numeric, delta numeric)
 language plpgsql
@@ -205,7 +207,7 @@ begin
     from public.war_snapshots t
     join public.war_snapshots p
       on p.name_key = t.name_key and p.is_pitcher = t.is_pitcher and p.snapshot_date = past_d
-    where t.snapshot_date = latest_d and (t.war - p.war) >= 1.5
+    where t.snapshot_date = latest_d and (t.war - p.war) >= 0.1
     order by (t.war - p.war) desc
     limit 100;
 end;

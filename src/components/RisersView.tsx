@@ -35,7 +35,7 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-zinc-600">peak WAR up ≥ 1.5</span>
+        <span className="text-[11px] text-zinc-600">biggest peak-WAR gains</span>
       </div>
 
       {loading && risers.length === 0 ? (
