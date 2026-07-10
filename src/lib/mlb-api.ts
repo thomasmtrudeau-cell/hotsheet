@@ -66,20 +66,72 @@ function estimateWrcPlus(woba: number, lgWoba?: number, lgRunsPerPA?: number): n
   return Math.round((((woba - lgWoba) / WOBA_SCALE + lgRunsPerPA) / lgRunsPerPA) * 100);
 }
 
-// Simple in-memory cache for server-side API routes
+// Simple in-memory cache for server-side API routes. Expired entries are kept
+// (not deleted) so they can be served as a fallback when the API is down.
 const cache = new Map<string, { data: unknown; expires: number }>();
 const CACHE_TTL = 60_000; // 1 minute
+const FETCH_TIMEOUT = 8_000; // abort a single attempt after 8s
+const FETCH_ATTEMPTS = 3;
+
+// Fetch with a per-attempt timeout and exponential back-off. Retries transient
+// failures (network error, timeout, 5xx, 429); returns 4xx to the caller as-is.
+async function fetchWithRetry(url: string): Promise<Response> {
+  let lastErr: unknown;
+  for (let i = 0; i < FETCH_ATTEMPTS; i++) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT);
+    try {
+      const res = await fetch(url, { cache: 'no-store', signal: ctrl.signal });
+      clearTimeout(timer);
+      if (res.ok || (res.status < 500 && res.status !== 429)) return res;
+      lastErr = new Error(`MLB API ${res.status}`);
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e;
+    }
+    if (i < FETCH_ATTEMPTS - 1) {
+      await new Promise((r) => setTimeout(r, 300 * (i + 1) * (i + 1))); // 300ms, 1.2s
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error(String(lastErr));
+}
 
 async function cachedFetch<T>(url: string, ttl = CACHE_TTL): Promise<T> {
   const now = Date.now();
   const cached = cache.get(url);
   if (cached && cached.expires > now) return cached.data as T;
 
-  const res = await fetch(url, { cache: 'no-store' });
-  if (!res.ok) throw new Error(`MLB API error: ${res.status} ${url}`);
-  const data = await res.json();
-  cache.set(url, { data, expires: now + ttl });
-  return data;
+  try {
+    const res = await fetchWithRetry(url);
+    if (!res.ok) throw new Error(`MLB API error: ${res.status} ${url}`);
+    const data = await res.json();
+    cache.set(url, { data, expires: now + ttl });
+    return data;
+  } catch (err) {
+    // Stale-on-error: a fresh fetch failed, but a prior copy beats a blank card.
+    if (cached) {
+      console.warn(`MLB API fetch failed, serving stale cache: ${url}`);
+      return cached.data as T;
+    }
+    throw err;
+  }
+}
+
+// Result-level memoizer for expensive multi-call computations (shared by every
+// user, e.g. the call-up / promotion lists). Same stale-on-error behavior.
+const computeCache = new Map<string, { data: unknown; expires: number }>();
+async function cachedCompute<T>(key: string, ttl: number, fn: () => Promise<T>): Promise<T> {
+  const now = Date.now();
+  const c = computeCache.get(key);
+  if (c && c.expires > now) return c.data as T;
+  try {
+    const data = await fn();
+    computeCache.set(key, { data, expires: now + ttl });
+    return data;
+  } catch (err) {
+    if (c) return c.data as T;
+    throw err;
+  }
 }
 
 // --- Team Lookup (for sport level + parent org) ---
@@ -1049,7 +1101,14 @@ async function warSortMovers(out: CallUp[], warSheetId?: string): Promise<CallUp
 // prior-level season line + a last-30 figure and sorted by peak WAR (upside)
 // when a WAR sheet is configured. The WAR *number* is stripped for non-premium
 // by the route, but the WAR-derived ORDER stays for everyone.
+// Cached ~10 min: this list is identical for every user, so we compute it once
+// rather than re-running the whole MLB fan-out on each request.
 export async function getCallupList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
+  return cachedCompute(`callups:${date}:${windowDays}:${warSheetId ?? ''}`, 600_000,
+    () => buildCallupList(date, windowDays, warSheetId));
+}
+
+async function buildCallupList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
   const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
   const end = new Date(date + 'T00:00:00Z');
   const start = new Date(end);
@@ -1117,8 +1176,13 @@ export async function getCallupList(date: string, windowDays = 7, warSheetId?: s
 
 // Pre-built discovery list: MiLB players who moved UP a level in the last N days
 // (genuine promotions — excludes rehab moves and lateral/down moves). Same
-// enrichment + WAR sort as call-ups.
+// enrichment + WAR sort as call-ups. Cached ~10 min (identical for every user).
 export async function getPromotionsList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
+  return cachedCompute(`promotions:${date}:${windowDays}:${warSheetId ?? ''}`, 600_000,
+    () => buildPromotionsList(date, windowDays, warSheetId));
+}
+
+async function buildPromotionsList(date: string, windowDays = 7, warSheetId?: string): Promise<CallUp[]> {
   const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
   const end = new Date(date + 'T00:00:00Z');
   const start = new Date(end);
