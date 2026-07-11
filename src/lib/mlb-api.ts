@@ -1929,6 +1929,27 @@ function num(v: unknown): number | undefined {
   return isFinite(n) ? n : undefined;
 }
 
+// date -> fielding position(s) played, from the fielding game log. A game the
+// hitter played but has NO fielding entry for = he was the DH (or a pinch-hitter).
+async function getFieldingPositionsByDate(playerId: number, sportId?: number, season?: number): Promise<Map<string, string[]>> {
+  const year = season ?? new Date().getFullYear();
+  const sportParam = sportId ? `&sportId=${sportId}` : '';
+  const url = `${MLB_API}/people/${playerId}/stats?stats=gameLog&group=fielding&season=${year}${sportParam}`;
+  const map = new Map<string, string[]>();
+  try {
+    const data = await cachedFetch<{ stats?: Array<{ splits?: Array<{ date?: string; position?: { abbreviation?: string } }> }> }>(url, 5 * 60_000);
+    for (const sp of data?.stats?.[0]?.splits ?? []) {
+      const date = sp.date;
+      const pos = sp.position?.abbreviation;
+      if (!date || !pos) continue;
+      const arr = map.get(date) ?? [];
+      if (!arr.includes(pos)) arr.push(pos);
+      map.set(date, arr);
+    }
+  } catch { /* no positions available */ }
+  return map;
+}
+
 // Recent per-game log for an MLB/MiLB player. `sportId` filters to a level;
 // pass undefined to let the API return the player's games across levels.
 export async function getGameLog(
@@ -1951,11 +1972,21 @@ export async function getGameLog(
     return [];
   }
 
+  // Hitters: pull the per-game fielding position (DH inferred when they hit but
+  // didn't take the field) so multi-position eligibility is visible.
+  const posByDate = isPitcher ? null : await getFieldingPositionsByDate(playerId, sportId, year);
+
   // Splits are chronological; take the most recent `limit`, newest first.
   return splits.slice(-limit).reverse().map((split): GameLogEntry => {
     const s = split.stat ?? {};
     const opponent = split.opponent?.name ? shortTeamName(split.opponent.name) : '—';
     const prefix = split.isHome ? 'vs' : '@';
+    const date = split.date ?? '';
+    let position: string | undefined;
+    if (!isPitcher) {
+      const fielded = posByDate?.get(date);
+      position = fielded && fielded.length > 0 ? fielded.join('/') : 'DH';
+    }
 
     const statLine = isPitcher
       ? formatPitchingLine({
@@ -1977,11 +2008,12 @@ export async function getGameLog(
         });
 
     return {
-      date: split.date ?? '',
+      date,
       opponent: `${prefix} ${opponent}`,
       level: split.sport?.id ? LEVEL_LABELS[split.sport.id] : undefined,
       statLine,
       gamePk: split.game?.gamePk,
+      position,
     };
   });
 }

@@ -333,11 +333,17 @@ function MatchupRow({ m }: { m: Matchup }) {
         </svg>
       </button>
       {open && (
-        <div className="mt-1 text-[11px] text-zinc-500 flex flex-wrap gap-x-1.5">
-          {m.oppStarterName && <span>vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span></span>}
-          {qualityEra !== undefined && <span>· {qualityEra.toFixed(2)} ERA{m.oppStarterCareerEra !== undefined ? ' (career)' : ''}</span>}
-          {m.parkFactor !== undefined && <span>· Park {m.parkFactor}</span>}
-          <span>· {platoonText}</span>
+        <div className="mt-1 space-y-0.5 text-[11px] text-zinc-500">
+          <div className="flex flex-wrap gap-x-1.5">
+            <span className="text-zinc-400">Why:</span>
+            {m.oppStarterName && <span>vs {hand}<span className="text-zinc-300">{m.oppStarterName}</span></span>}
+            {qualityEra !== undefined && <span>· {qualityEra.toFixed(2)} ERA{m.oppStarterCareerEra !== undefined ? ' (career)' : ''}</span>}
+            {m.parkFactor !== undefined && <span>· Park {m.parkFactor}</span>}
+            <span>· {platoonText}</span>
+          </div>
+          <div className="text-zinc-600">
+            <span className="text-zinc-500">How:</span> platoon &amp; pitcher quality (weighted equally) + park. A pre-game projection — it disappears once the game starts.
+          </div>
         </div>
       )}
     </div>

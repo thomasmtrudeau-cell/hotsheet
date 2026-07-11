@@ -79,13 +79,25 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
     else role = { label: 'Spot starter', cls: 'bg-zinc-600/40 text-zinc-300' };
   }
 
+  // Multi-position eligibility: distinct positions across played games (a
+  // catcher who also logs DH/1B is more valuable).
+  const distinctPos = Array.from(
+    new Set(entries.filter((e) => !e.dnp && e.position).flatMap((e) => e.position!.split('/')))
+  );
+  const showPositions = !isPitcher && distinctPos.length > 0;
+
   return (
     <div className="mt-3 pt-3 border-t border-zinc-700/30">
-      <div className="flex items-center gap-2 mb-1.5">
+      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
         <span className="text-[10px] uppercase tracking-wider text-zinc-500">{header}</span>
         {role && (
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${role.cls}`} title="Start rate over the team's recent games">
             {role.label}
+          </span>
+        )}
+        {showPositions && distinctPos.length >= 2 && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300" title="Positions played in this window">
+            Plays {distinctPos.join('/')}
           </span>
         )}
       </div>
@@ -94,6 +106,9 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
           <div key={`${e.date}-${i}`} className={`flex items-baseline gap-2 text-xs ${e.dnp ? 'opacity-45' : ''}`}>
             <span className="text-zinc-500 font-mono w-9 shrink-0">{shortDate(e.date)}</span>
             <span className="text-zinc-400 w-20 shrink-0 truncate">{e.opponent}</span>
+            {showPositions && (
+              <span className="text-zinc-500 w-10 shrink-0 text-[11px]">{e.dnp ? '' : e.position}</span>
+            )}
             <span className={`truncate ${e.dnp ? 'text-zinc-500 italic' : 'text-zinc-200 font-mono'}`}>{e.statLine}</span>
             {!e.dnp && e.level && e.level !== 'MLB' && (
               <span className="ml-auto text-[10px] text-amber-400/80 shrink-0">{e.level}</span>

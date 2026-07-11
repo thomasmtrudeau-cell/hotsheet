@@ -271,6 +271,7 @@ export interface GameLogEntry {
   statLine: string;  // formatted batting or pitching line ("DNP" when not in the lineup)
   gamePk?: number;   // for merging the player's log against the team's schedule
   dnp?: boolean;     // player's team played but they didn't appear
+  position?: string; // position(s) played that game, e.g. "C", "DH", "1B/DH" (hitters)
 }
 
 // Special sentinel for the implicit "All Players" view (not a stored group).
