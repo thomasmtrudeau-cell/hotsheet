@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp, PlayingTimeRole } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 import { fetchPremiumMap } from './war';
 
@@ -1290,90 +1290,6 @@ async function getNextStarts(players: FollowedPlayer[], date: string): Promise<M
   return result;
 }
 
-// Team id -> games played this season (from standings), cached ~6h.
-let standingsCache: { season: number; at: number; map: Map<number, number> } | null = null;
-async function getTeamGamesPlayed(season: number): Promise<Map<number, number>> {
-  const now = Date.now();
-  if (standingsCache && standingsCache.season === season && now - standingsCache.at < 6 * 3600_000) {
-    return standingsCache.map;
-  }
-  const map = new Map<number, number>();
-  try {
-    const data = await cachedFetch<{ records?: Array<{ teamRecords?: Array<{ team?: { id?: number }; gamesPlayed?: number; wins?: number; losses?: number }> }> }>(
-      `${MLB_API}/standings?leagueId=103,104&season=${season}`, 6 * 3600_000
-    );
-    for (const rec of data.records ?? []) {
-      for (const tr of rec.teamRecords ?? []) {
-        if (tr.team?.id) map.set(tr.team.id, tr.gamesPlayed ?? ((tr.wins ?? 0) + (tr.losses ?? 0)));
-      }
-    }
-  } catch { /* leave empty — everyday/part-time simply won't compute */ }
-  standingsCache = { season, at: now, map };
-  return map;
-}
-
-// Playing-time role for MLB hitters: how often they start (season games vs the
-// team's games) and whether usage is platoon-skewed (PA vs LHP vs RHP). One
-// batched people call + one cached standings call. MLB hitters only — the
-// lineup/platoon concept and data quality are cleanest there.
-async function getPlayingTimeRoles(players: FollowedPlayer[], season: number): Promise<Map<number, PlayingTimeRole>> {
-  const out = new Map<number, PlayingTimeRole>();
-  const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P');
-  if (hitters.length === 0) return out;
-
-  const teamGames = await getTeamGamesPlayed(season);
-  const teamById = new Map(hitters.map((p) => [p.id, p.currentTeam.id]));
-  let people: Array<Record<string, unknown>> = [];
-  try {
-    const data = await cachedFetch<{ people?: Array<Record<string, unknown>> }>(
-      `${MLB_API}/people?personIds=${hitters.map((p) => p.id).join(',')}&hydrate=stats(group=hitting,type=[season,statSplits],sitCodes=[vl,vr],season=${season})`,
-      1800_000
-    );
-    people = data.people ?? [];
-  } catch {
-    return out;
-  }
-
-  for (const person of people) {
-    const pid = person.id as number;
-    let seasonGames: number | undefined;
-    let paL = 0, paR = 0, seenL = false, seenR = false;
-    for (const s of (person.stats as Array<Record<string, unknown>>) ?? []) {
-      const type = (s.type as { displayName?: string } | undefined)?.displayName;
-      for (const sp of (s.splits as Array<Record<string, unknown>>) ?? []) {
-        const stat = sp.stat as Record<string, unknown>;
-        const code = (sp.split as { code?: string } | undefined)?.code;
-        if (type === 'season') seasonGames = stat.gamesPlayed as number | undefined;
-        else if (type === 'statSplits') {
-          if (code === 'vl') { paL = (stat.plateAppearances as number) ?? 0; seenL = true; }
-          else if (code === 'vr') { paR = (stat.plateAppearances as number) ?? 0; seenR = true; }
-        }
-      }
-    }
-    const totalPA = paL + paR;
-    const tg = teamById.get(pid);
-    const teamG = tg ? teamGames.get(tg) : undefined;
-    const startShare = teamG && seasonGames !== undefined ? Math.min(1, seasonGames / teamG) : undefined;
-
-    // Platoon: usage skewed away from the league's ~29% vs-LHP baseline.
-    let platoon: PlayingTimeRole | null = null;
-    if (seenL && seenR && totalPA >= 40) {
-      const shareL = paL / totalPA;
-      if (shareL >= 0.45) platoon = 'platoon-vsL';      // starts mainly vs LHP (sits vs RHP)
-      else if (shareL <= 0.13) platoon = 'platoon-vsR'; // starts mainly vs RHP (sits vs LHP)
-    }
-
-    let role: PlayingTimeRole | undefined;
-    if (platoon && (startShare === undefined || startShare < 0.82)) {
-      role = platoon; // platoon usage only matters if he's not essentially everyday
-    } else if (startShare !== undefined) {
-      role = startShare >= 0.82 ? 'everyday' : startShare >= 0.5 ? 'part-time' : 'spot';
-    }
-    if (role) out.set(pid, role);
-  }
-  return out;
-}
-
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -1414,17 +1330,14 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + matchup + two-start + call-ups + promotions + next
-  // starts + playing-time role (MLB hitters).
-  const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
-  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, playingTimeMap] = await Promise.all([
+  // Rolling recent form + matchup + two-start + call-ups + promotions + next starts.
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
     getRecentCallups(date),
     getRecentPromotions(date),
     getNextStarts(players, date),
-    getPlayingTimeRoles(players, season),
   ]);
 
   // Build stats for each player
@@ -1460,7 +1373,6 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.calledUpDate = callupMap.get(player.id);
     stat.promotedDate = promotionMap.get(player.id);
     stat.nextStart = nextStartMap.get(player.id);
-    stat.playingTime = playingTimeMap.get(player.id);
     return stat;
   });
 }

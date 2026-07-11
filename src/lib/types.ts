@@ -56,9 +56,6 @@ export interface PremiumMetrics {
   era20?: number;       // pitchers — ERA per 20 TBF/game
 }
 
-// Playing-time role for a hitter, derived from season games + vs-LHP/RHP usage.
-export type PlayingTimeRole = 'everyday' | 'platoon-vsL' | 'platoon-vsR' | 'part-time' | 'spot';
-
 export interface InjuryStatus {
   code: string; // e.g. "D10", "D60", "ILF"
   label: string; // e.g. "10-Day IL"
@@ -133,7 +130,6 @@ export interface DailyPlayerStats {
   twoStartDates?: string[];  // ISO dates of this SP's 2+ starts in the current fantasy week
   calledUpDate?: string;     // ISO date of a recent recall/selection to MLB (recently called up)
   promotedDate?: string;     // ISO date of a recent MiLB level-up (recently promoted)
-  playingTime?: PlayingTimeRole; // MLB hitters: everyday / platoon / part-time / spot
   nextStart?: { date: string; opponent: string }; // pitcher's next announced start (MLB + MiLB)
   // Batting (no RBI/R per user request)
   hits?: number;

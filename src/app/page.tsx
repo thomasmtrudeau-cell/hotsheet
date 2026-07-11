@@ -463,12 +463,12 @@ export default function Home() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-6">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-100 mb-1">Hot Sheet</h1>
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
           <a
             href={FEEDBACK_URL}
             className="text-[11px] px-2 py-1 rounded-full border border-blue-500/40 text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 transition-colors cursor-pointer"
@@ -501,7 +501,7 @@ export default function Home() {
             onClear={clearAllNotifications}
           />
           <div className="flex flex-col items-end">
-            <span className="text-xs text-zinc-500">{user.email}</span>
+            <span className="text-xs text-zinc-500 hidden sm:block max-w-[180px] truncate">{user.email}</span>
             <button
               onClick={handleLogout}
               className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"

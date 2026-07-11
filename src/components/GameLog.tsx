@@ -70,13 +70,15 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
     ? `Played ${played} of last ${entries.length} team games`
     : `Last ${entries.length} games`) + ' · current level';
 
-  // Playing-time role from start rate (hitters only; needs the team-aware log).
+  // Playing-time role from start rate over the team's recent games (hitters only,
+  // needs a decent window). Only assert confident cases — the ambiguous middle is
+  // often injury, not a bench role, so we leave it to the raw "Played X of Y"
+  // count rather than mislabel a regular as "part-time".
   let role: { label: string; cls: string } | null = null;
-  if (hasDnp && !isPitcher && entries.length >= 5) {
+  if (hasDnp && !isPitcher && entries.length >= 10) {
     const rate = played / entries.length;
     if (rate >= 0.8) role = { label: 'Everyday', cls: 'bg-green-500/20 text-green-400' };
-    else if (rate >= 0.45) role = { label: 'Part-time', cls: 'bg-amber-500/20 text-amber-400' };
-    else role = { label: 'Spot starter', cls: 'bg-zinc-600/40 text-zinc-300' };
+    else if (rate <= 0.35) role = { label: 'Limited role', cls: 'bg-zinc-600/40 text-zinc-300' };
   }
 
   // Multi-position eligibility: distinct positions across played games (a
