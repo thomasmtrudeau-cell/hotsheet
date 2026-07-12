@@ -24,7 +24,7 @@ function parseNames(raw: string): string[] {
 
 function levelClass(sportId: number): string {
   if (sportId === 1) return 'bg-blue-500/20 text-blue-400';
-  if (sportId >= 11 && sportId <= 14) return 'bg-amber-500/20 text-amber-400';
+  if ((sportId >= 11 && sportId <= 14) || sportId === 16) return 'bg-amber-500/20 text-amber-400';
   if (sportId === 100) return 'bg-red-500/20 text-red-400';
   if (sportId === 101) return 'bg-purple-500/20 text-purple-400';
   return 'bg-zinc-500/20 text-zinc-300';

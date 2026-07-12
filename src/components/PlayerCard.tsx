@@ -63,7 +63,7 @@ function isOnRehab(stats: DailyPlayerStats): boolean {
 // Subtle level tint on the card border so MLB vs MiLB (vs NPB/KBO) reads at a glance.
 function levelBorderClass(sportId: number): string {
   if (sportId === 1) return 'border-blue-500/25 hover:border-blue-500/40';
-  if (sportId >= 11 && sportId <= 14) return 'border-amber-500/25 hover:border-amber-500/40';
+  if ((sportId >= 11 && sportId <= 14) || sportId === 16) return 'border-amber-500/25 hover:border-amber-500/40';
   if (sportId === 100) return 'border-rose-500/25 hover:border-rose-500/40';
   if (sportId === 101) return 'border-purple-500/25 hover:border-purple-500/40';
   return 'border-zinc-700/50 hover:border-zinc-600/50';

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -334,7 +334,7 @@ export default function Home() {
   const filteredStats = currentStats.filter((s) => {
     if (!inActiveGroup(s.playerId)) return false;
     if (levelFilter === 'MLB' && s.sportId !== 1) return false;
-    if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
+    if (levelFilter === 'MiLB' && !isMiLB(s.sportId)) return false;
     if (levelFilter === 'NPB' && s.sportId !== 100) return false;
     if (levelFilter === 'KBO' && s.sportId !== 101) return false;
     if (positionFilter === 'pitcher' && s.position !== 'P') return false;
@@ -404,7 +404,7 @@ export default function Home() {
       const g = (s as DailyPlayerStats).gameStatus;
       const inAction = g === 'Scheduled' || g === 'Live' || g === 'Final';
       if (!inAction) { notPlaying.push(s); continue; }
-      if (s.sportId >= 11 && s.sportId <= 14) playingMiLB.push(s);
+      if (isMiLB(s.sportId)) playingMiLB.push(s);
       else playingMLB.push(s);
     }
     // Within a bucket, cluster hitters before pitchers (keeping the sort order).
@@ -421,7 +421,7 @@ export default function Home() {
   const filteredRange = (rangeData[rangeWindow] ?? []).filter((s) => {
     if (!inActiveGroup(s.playerId)) return false;
     if (levelFilter === 'MLB' && s.sportId !== 1) return false;
-    if (levelFilter === 'MiLB' && !(s.sportId >= 11 && s.sportId <= 14)) return false;
+    if (levelFilter === 'MiLB' && !isMiLB(s.sportId)) return false;
     if (levelFilter === 'NPB' && s.sportId !== 100) return false;
     if (levelFilter === 'KBO' && s.sportId !== 101) return false;
     if (positionFilter === 'pitcher' && s.position !== 'P') return false;

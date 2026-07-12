@@ -1,10 +1,12 @@
-// Sport IDs — MLB Stats API uses 1-14, we use 100+ for international
+// Sport IDs — MLB Stats API uses 1-16, we use 100+ for international.
+// 16 = Rookie/Complex (ACL, FCL, DSL). Note: there is no sportId 15.
 export const SPORT_IDS = {
   MLB: 1,
   AAA: 11,
   AA: 12,
   HIGH_A: 13,
   A: 14,
+  ROOKIE: 16,
   NPB: 100,
   KBO: 101,
 } as const;
@@ -17,16 +19,17 @@ export const LEVEL_LABELS: Record<number, string> = {
   12: 'AA',
   13: 'High-A',
   14: 'A',
+  16: 'Rk',
   100: 'NPB',
   101: 'KBO',
 };
 
 export function isMLBSystem(sportId: number): boolean {
-  return sportId >= 1 && sportId <= 14;
+  return (sportId >= 1 && sportId <= 14) || sportId === 16;
 }
 
 export function isMiLB(sportId: number): boolean {
-  return sportId >= 11 && sportId <= 14;
+  return (sportId >= 11 && sportId <= 14) || sportId === 16;
 }
 
 // Rolling last-15-day performance, for a "hot/cold" read on each card.

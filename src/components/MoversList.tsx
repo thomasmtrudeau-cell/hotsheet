@@ -29,7 +29,7 @@ function isFresh(dateStr: string): boolean {
 
 function levelBadgeClass(sportId: number): string {
   if (sportId === 1) return 'bg-blue-500/20 text-blue-400';
-  if (sportId >= 11 && sportId <= 14) return 'bg-amber-500/20 text-amber-400';
+  if ((sportId >= 11 && sportId <= 14) || sportId === 16) return 'bg-amber-500/20 text-amber-400';
   return 'bg-zinc-500/20 text-zinc-300';
 }
 

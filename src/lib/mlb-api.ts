@@ -3,7 +3,7 @@ import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parse
 import { fetchPremiumMap } from './war';
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
-const ALL_SPORT_IDS = [1, 11, 12, 13, 14];
+const ALL_SPORT_IDS = [1, 11, 12, 13, 14, 16]; // 16 = Rookie/Complex (ACL, FCL, DSL)
 
 // Approximate multi-year runs park factors (100 = neutral, >100 hitter-friendly).
 // Keyed by venue-name substring so renames/variants still match. MLB parks only;
@@ -1022,7 +1022,7 @@ async function getRecentPromotions(date: string, windowDays = 7): Promise<Map<nu
   try {
     const teamMap = await getTeamLookup();
     const data = await cachedFetch<{ transactions?: Array<{ effectiveDate?: string; date?: string; description?: string; person?: { id?: number }; fromTeam?: { id?: number }; toTeam?: { id?: number } }> }>(
-      `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=11,12,13,14`,
+      `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=11,12,13,14,16`,
       3600_000
     );
     for (const t of data.transactions ?? []) {
@@ -1055,7 +1055,7 @@ async function wrcPlusFromStat(st: DateRangeStat, sportId: number, season: numbe
 }
 
 // Level rank for detecting a genuine promotion (higher = more advanced).
-const LEVEL_RANK_UP: Record<number, number> = { 1: 5, 11: 4, 12: 3, 13: 2, 14: 1 };
+const LEVEL_RANK_UP: Record<number, number> = { 1: 5, 11: 4, 12: 3, 13: 2, 14: 1, 16: 0 };
 
 // Attach the prior-level season line + a last-30 figure (shared by call-ups + promotions).
 async function enrichMover(cu: CallUp, fromSid: number, season: number, endDate: string, l30Str: string): Promise<void> {
@@ -1197,7 +1197,7 @@ async function buildPromotionsList(date: string, windowDays = 7, warSheetId?: st
 
   const teamMap = await getTeamLookup();
   const txData = await cachedFetch<{ transactions?: Array<{ effectiveDate?: string; date?: string; description?: string; person?: { id?: number }; fromTeam?: { id?: number }; toTeam?: { id?: number } }> }>(
-    `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=11,12,13,14`,
+    `${MLB_API}/transactions?startDate=${startStr}&endDate=${date}&sportId=11,12,13,14,16`,
     3600_000
   );
   const info = new Map<number, { date: string; fromSid: number; toTeamId: number; toSid: number }>();
@@ -1487,7 +1487,7 @@ function aggregateDoubleheader(games: DailyPlayerStats[], upcomingCount: number)
 interface HitAgg { sid: number; g: number; ab: number; h: number; hr: number; sb: number; bb: number; ibb: number; k: number; pa: number; d: number; t: number; hbp: number; sf: number; tb: number }
 interface PitAgg { sid: number; g: number; er: number; ip: number; k: number; bb: number; w: number; l: number; sv: number; h: number }
 
-const LEVEL_RANK: Record<number, number> = { 1: 0, 11: 1, 12: 2, 13: 3, 14: 4 };
+const LEVEL_RANK: Record<number, number> = { 1: 0, 11: 1, 12: 2, 13: 3, 14: 4, 16: 5 };
 
 function buildHitterLine(a: HitAgg, lg: LeagueAverages | null, saberStat?: Record<string, unknown>): SeasonLevelLine {
   const avg = a.ab > 0 ? (a.h / a.ab).toFixed(3) : '.000';
