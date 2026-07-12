@@ -425,8 +425,8 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
         {/* Time is shown once, in the grade row ("Game at …") for scheduled games. */}
       </div>
 
-      {/* Matchup (hitters, upcoming/live game) */}
-      {stats.matchup && (stats.gameStatus === 'Scheduled' || stats.gameStatus === 'Live') && (
+      {/* Matchup — a PRE-game projection only; it's moot once the game starts. */}
+      {stats.matchup && stats.gameStatus === 'Scheduled' && (
         <MatchupRow m={stats.matchup} />
       )}
 
@@ -440,17 +440,24 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
         </div>
       )}
 
-      {/* Lineup status + Grade */}
-      <div className="flex items-center gap-2">
-        <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
-        {stats.gameStatus === 'Scheduled' && isMLBSystem(stats.sportId) && (
-          <LineupBadge
-            status={stats.lineupStatus ?? 'tbd'}
-            startingPosition={stats.startingPosition}
-            battingOrder={stats.battingOrder}
-          />
-        )}
-      </div>
+      {/* Status row. Scheduled games show a compact time + lineup (no redundant
+          "Scheduled" pill); played games show the performance grade. */}
+      {stats.gameStatus === 'Scheduled' ? (
+        <div className="flex items-center gap-2 text-xs text-zinc-400">
+          {stats.gameTime && <span>🕒 {stats.gameTime}</span>}
+          {isMLBSystem(stats.sportId) && (
+            <LineupBadge
+              status={stats.lineupStatus ?? 'tbd'}
+              startingPosition={stats.startingPosition}
+              battingOrder={stats.battingOrder}
+            />
+          )}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
+        </div>
+      )}
 
       {/* Recent form + game log — revealed together via the chevron (keeps the
           default card lean; expand to see the L15 line + last 15 games). */}

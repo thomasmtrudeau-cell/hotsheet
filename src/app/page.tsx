@@ -26,14 +26,14 @@ const FEEDBACK_URL = 'mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20feed
 
 // Rotating first-run tips — one shows at a time, cycling per visit.
 const TIPS: { id: string; node: React.ReactNode }[] = [
-  { id: 'tip-feedback', node: <>Got an idea or found a bug? Hit <strong>Feedback</strong> (top right) — we read everything and ship fast.</> },
+  { id: 'tip-feedback', node: <>Got an idea or found a bug? Tap <strong>💬 Feedback</strong> up top — we read everything and ship fast.</> },
   { id: 'tip-tag', node: <>Tap the <strong>🏷 tag</strong> on any card to move a player between your lists.</> },
   { id: 'tip-lineups', node: <>When MLB posts lineups, cards show <strong>STARTING</strong> (with batting order) or <strong>NOT STARTING</strong> — so you know who&apos;s actually in before first pitch.</> },
   { id: 'tip-follow', node: <>Search any player and hit <strong>Follow</strong> — use the <strong>▾</strong> to drop them straight into a list.</> },
   { id: 'tip-matchup', node: <>Tap a <strong>matchup</strong> chip (Plus / Tough) for the pitcher-quality + platoon + park breakdown.</> },
   { id: 'tip-games', node: <>Open <strong>Games ▾</strong> for a player&apos;s last 15 — and whether he&apos;s an <strong>Everyday</strong>, <strong>Platoon</strong>, or <strong>Spot</strong> starter.</> },
   { id: 'tip-movers', node: <><strong>Call-Ups</strong> &amp; <strong>Promoted</strong> show who just moved up in the last 7 days, sorted by upside.</> },
-  { id: 'tip-bell', node: <>The <strong>🔔 bell</strong> (top right) flags your players&apos; call-ups, promotions, IL moves and lineup changes.</> },
+  { id: 'tip-bell', node: <>The <strong>🔔 bell</strong> flags your players&apos; call-ups, promotions, IL moves and lineup changes.</> },
   { id: 'tip-lists', node: <>Make custom lists with <strong>+ New list</strong>; rename or delete them under <strong>⚙ Manage lists</strong>.</> },
   { id: 'tip-intl', node: <>NPB &amp; KBO show <strong>season stats</strong> (not live game-by-game).</> },
 ];
