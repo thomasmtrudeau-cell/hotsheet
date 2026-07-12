@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -19,6 +19,7 @@ import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
 import PremiumTeaser from '@/components/PremiumTeaser';
 import RosterImport from '@/components/RosterImport';
+import ProjectionsView from '@/components/ProjectionsView';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -119,6 +120,8 @@ export default function Home() {
   const [risers, setRisers] = useState<Riser[]>([]);
   const [risersWindow, setRisersWindow] = useState(7);
   const [risersLoading, setRisersLoading] = useState(false);
+  const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[] }>({ pitchers: [], hitters: [] });
+  const [oopsyLoading, setOopsyLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -135,7 +138,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -164,6 +167,13 @@ export default function Home() {
         .then((d) => setRisers(Array.isArray(d) ? d : []))
         .catch(() => setRisers([]))
         .finally(() => setRisersLoading(false));
+    } else if (activeGroup === PROJECTIONS_VIEW) {
+      setOopsyLoading(true);
+      fetch('/api/oopsy')
+        .then((r) => r.json())
+        .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [] }))
+        .catch(() => setOopsy({ pitchers: [], hitters: [] }))
+        .finally(() => setOopsyLoading(false));
     }
   }, [activeGroup, risersWindow]);
 
@@ -317,7 +327,8 @@ export default function Home() {
   const isCallups = activeGroup === CALLUPS_VIEW;
   const isPromotions = activeGroup === PROMOTIONS_VIEW;
   const isRisers = activeGroup === RISERS_VIEW;
-  const isDiscovery = isCallups || isPromotions || isRisers;
+  const isProjections = activeGroup === PROJECTIONS_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers || isProjections;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = Object.keys(premiumMap).length > 0;
@@ -577,6 +588,8 @@ export default function Home() {
             ? `${promotions.length} recent promotion${promotions.length !== 1 ? 's' : ''}`
             : isRisers
             ? `${risers.length} riser${risers.length !== 1 ? 's' : ''}`
+            : isProjections
+            ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections`
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -653,6 +666,14 @@ export default function Home() {
           window={risersWindow}
           onWindow={setRisersWindow}
           loading={risersLoading}
+          isPremium={isPremium}
+          isFollowing={(name) => isFollowingName(name)}
+        />
+      ) : isProjections ? (
+        <ProjectionsView
+          pitchers={showPremium ? oopsy.pitchers : []}
+          hitters={showPremium ? oopsy.hitters : []}
+          loading={oopsyLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}
         />

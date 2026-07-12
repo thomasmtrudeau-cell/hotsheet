@@ -280,6 +280,28 @@ export const ALL_PLAYERS_GROUP = 'all';
 export const CALLUPS_VIEW = 'callups';
 export const PROMOTIONS_VIEW = 'promotions';
 export const RISERS_VIEW = 'risers';
+export const PROJECTIONS_VIEW = 'projections';
+
+// OOPSY weekly projections (premium). Read from a separate published sheet.
+export interface OopsyPitcher {
+  nameKey: string;
+  player: string;
+  day: string;      // Fri / Sat / Sun (start day this week)
+  era: number;      // projected ERA for the start
+  opponent: string;
+  park: string;
+  team: string;
+  rank: number;     // 1 = best projected start this week
+}
+export interface OopsyHitter {
+  nameKey: string;
+  player: string;
+  projGames?: number;
+  projPA?: number;
+  wrcPlus?: number;   // "1 is average" scale (not the 100 scale)
+  fantasyZ?: number;  // fantasy value z-score (0 is average)
+  rank: number;       // 1 = top weekly hitter
+}
 
 // A prospect riser (premium only) — peak WAR climbed >= 1.5 over the window.
 export interface Riser {

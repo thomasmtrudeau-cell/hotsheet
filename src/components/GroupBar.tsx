@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW } from '@/lib/types';
 
 function Pill({ id, label, active, count, onSelect }: {
   id: string; label: string; active: boolean; count: number; onSelect: (id: string) => void;
@@ -113,6 +113,15 @@ export default function GroupBar({
         title="Prospect risers — biggest peak-WAR gains (premium)"
       >
         🚀 Risers
+      </button>
+      <button
+        onClick={() => onSelect(PROJECTIONS_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === PROJECTIONS_VIEW ? 'bg-indigo-600 text-white' : 'bg-indigo-500/10 text-indigo-300 hover:bg-indigo-500/20'
+        }`}
+        title="OOPSY weekly projections (premium)"
+      >
+        📈 Projections
       </button>
 
       {creating ? (
