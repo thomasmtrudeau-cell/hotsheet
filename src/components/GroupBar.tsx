@@ -60,10 +60,11 @@ interface GroupBarProps {
   onCreate: (name: string) => void;
   onRename: (groupId: string, name: string) => void;
   onDelete: (groupId: string) => void;
+  onImport?: () => void;
 }
 
 export default function GroupBar({
-  groups, activeGroup, counts, onSelect, onCreate, onRename, onDelete,
+  groups, activeGroup, counts, onSelect, onCreate, onRename, onDelete, onImport,
 }: GroupBarProps) {
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -135,6 +136,15 @@ export default function GroupBar({
         </button>
       )}
 
+      {onImport && (
+        <button
+          onClick={onImport}
+          className="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium text-zinc-400 bg-zinc-800/60 border border-zinc-700 hover:text-zinc-100 hover:bg-zinc-700 transition-colors cursor-pointer"
+          title="Import a fantasy roster (CBS, Fantrax, ESPN, Yahoo)"
+        >
+          ⬇ Import roster
+        </button>
+      )}
       {groups.length > 0 && (
         <button
           onClick={() => setManaging(true)}

@@ -18,6 +18,7 @@ import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
 import PremiumTeaser from '@/components/PremiumTeaser';
+import RosterImport from '@/components/RosterImport';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -101,6 +102,7 @@ export default function Home() {
   const [premiumMap, setPremiumMap] = useState<Record<number, PremiumMetrics>>({}); // WAR + peak wRC+ / ERA-20TBF, premium only
   const [showPremium, setShowPremium] = useState(true); // premium toggle (for clean screenshots)
   const [showPremiumInfo, setShowPremiumInfo] = useState(false); // teaser modal for non-premium users
+  const [showImport, setShowImport] = useState(false); // roster import modal
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
@@ -532,6 +534,7 @@ export default function Home() {
         onCreate={addGroup}
         onRename={editGroup}
         onDelete={removeGroup}
+        onImport={() => setShowImport(true)}
       />
 
       {/* Controls — hidden in the Call-Ups view (they don't apply there) */}
@@ -753,6 +756,14 @@ export default function Home() {
           </div>
         </div>
       )}
+
+      <RosterImport
+        open={showImport}
+        onClose={() => setShowImport(false)}
+        groups={groups}
+        onFollow={follow}
+        onCreateList={addGroup}
+      />
     </div>
   );
 }
