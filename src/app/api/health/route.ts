@@ -41,10 +41,12 @@ export async function GET() {
       .select('captured_at')
       .order('captured_at', { ascending: false })
       .limit(1);
+    // Getting ANY response (even a query error) means Supabase is reachable — a
+    // schema/query error is a degraded snapshot warning, not an app outage.
+    supabaseOk = true;
     if (error) {
       snapshotDetail = error.message;
     } else {
-      supabaseOk = true;
       const latest = data?.[0]?.captured_at as string | undefined;
       if (latest) {
         const ageH = (Date.now() - new Date(latest).getTime()) / 3_600_000;
@@ -53,6 +55,7 @@ export async function GET() {
       }
     }
   } catch (e) {
+    supabaseOk = false; // a thrown error = genuine connection failure
     snapshotDetail = e instanceof Error ? e.message : String(e);
   }
   checks.supabase = { ok: supabaseOk };
