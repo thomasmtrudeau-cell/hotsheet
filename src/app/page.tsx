@@ -78,6 +78,15 @@ function statusTier(status: string): number {
 
 const GRADE_ORDER = ['milestone', 'standout', 'good', 'routine', 'off_day', 'scheduled', 'no_game'];
 
+// For upcoming (Scheduled) games: rank the best spots to the top — strong/plus
+// matchups and today's starting pitchers first, tough matchups last.
+const MATCHUP_RANK: Record<string, number> = { strong: 0, plus: 1, neutral: 3, tough: 4 };
+function scheduledRank(s: DailyPlayerStats): number {
+  if (s.matchup?.ratingTier) return MATCHUP_RANK[s.matchup.ratingTier] ?? 3;
+  if (s.lineupStatus === 'probable_pitcher') return 2; // a pitcher starting today
+  return 3;
+}
+
 export default function Home() {
   const {
     user, players, groups, memberships, notifications, loaded,
@@ -352,13 +361,20 @@ export default function Home() {
       const aDnpPitcher = ad.position === 'P' && ad.statLine === 'DNP';
       const bDnpPitcher = bd.position === 'P' && bd.statLine === 'DNP';
       if (aDnpPitcher !== bDnpPitcher) return aDnpPitcher ? 1 : -1;
-      // Sort by status tier (Live first), then by game start time, then grade
+      // Status tier first (Live → Final → Scheduled). Within a status, surface
+      // VALUE, not just the game clock:
       const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
       if (statusDiff !== 0) return statusDiff;
-      const aTime = ad.gameStartTime ?? Infinity;
-      const bTime = bd.gameStartTime ?? Infinity;
-      if (aTime !== bTime) return aTime - bTime;
-      return GRADE_ORDER.indexOf(ad.performanceGrade) - GRADE_ORDER.indexOf(bd.performanceGrade);
+      if (ad.gameStatus === 'Scheduled') {
+        // Upcoming: best matchups + today's starters first, then soonest.
+        const rankDiff = scheduledRank(ad) - scheduledRank(bd);
+        if (rankDiff !== 0) return rankDiff;
+      } else {
+        // Live/Final: best performance first (the whole point of a hot sheet).
+        const gradeDiff = GRADE_ORDER.indexOf(ad.performanceGrade) - GRADE_ORDER.indexOf(bd.performanceGrade);
+        if (gradeDiff !== 0) return gradeDiff;
+      }
+      return (ad.gameStartTime ?? Infinity) - (bd.gameStartTime ?? Infinity);
     }
     const aS = a as SeasonPlayerStats;
     const bS = b as SeasonPlayerStats;
