@@ -84,10 +84,10 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                         </span>
                       )}
                       {!c.isPitcher && c.speed && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300" title="Elite projected stolen-base rate">⚡ Speed</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.speed === 'double-plus' ? 'bg-sky-500/30 text-sky-200' : 'bg-sky-500/20 text-sky-300'}`} title={`${c.speed === 'double-plus' ? 'Double-plus' : 'Plus'} projected speed`}>⚡ Speed{c.speed === 'double-plus' ? '++' : '+'}</span>
                       )}
                       {!c.isPitcher && c.power && (
-                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300" title="Elite projected home-run power">💪 Power</span>
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.power === 'double-plus' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-500/20 text-rose-300'}`} title={`${c.power === 'double-plus' ? 'Double-plus' : 'Plus'} projected power`}>💪 Power{c.power === 'double-plus' ? '++' : '+'}</span>
                       )}
                     </>
                   )

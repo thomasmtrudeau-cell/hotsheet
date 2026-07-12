@@ -94,8 +94,10 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         else m.peakWrcPlus = Math.round(v);
       }
     }
-    if (sbIdx >= 0) { const v = parseFloat(cells[sbIdx]); if (Number.isFinite(v) && v >= 30) m.speed = true; }
-    if (hrIdx >= 0) { const v = parseFloat(cells[hrIdx]); if (Number.isFinite(v) && v >= 24) m.power = true; }
+    // Tool grades from peak projections (percentile-calibrated): plus ≈ top ~12%,
+    // double-plus ≈ top ~3-4%.
+    if (sbIdx >= 0) { const v = parseFloat(cells[sbIdx]); if (Number.isFinite(v)) m.speed = v >= 34 ? 'double-plus' : v >= 24 ? 'plus' : undefined; }
+    if (hrIdx >= 0) { const v = parseFloat(cells[hrIdx]); if (Number.isFinite(v)) m.power = v >= 30 ? 'double-plus' : v >= 22 ? 'plus' : undefined; }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;

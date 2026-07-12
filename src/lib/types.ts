@@ -53,12 +53,15 @@ export interface Matchup {
 }
 
 // Premium (ScoutTheStatline) metrics joined from the sheet — premium accounts only.
+// Scouting-style tool grade for standout projected tools.
+export type ToolGrade = 'plus' | 'double-plus';
+
 export interface PremiumMetrics {
   war?: number;         // peak WAR
   peakWrcPlus?: number; // hitters — peak wRC+
   era20?: number;       // pitchers — ERA per 20 TBF/game
-  speed?: boolean;      // hitters — elite projected SB (⚡ Speed tag)
-  power?: boolean;      // hitters — elite projected HR (💪 Power tag)
+  speed?: ToolGrade;    // hitters — projected SB tool (⚡)
+  power?: ToolGrade;    // hitters — projected HR tool (💪)
 }
 
 export interface InjuryStatus {
@@ -91,8 +94,8 @@ export interface CallUp extends SearchResult {
   war?: number;         // peak WAR — drives the sort always; number shown to premium only
   peakWrcPlus?: number; // hitters — peak wRC+ (premium only; stripped for non-premium)
   era20?: number;       // pitchers — ERA/20 TBF (premium only; stripped for non-premium)
-  speed?: boolean;      // hitters — ⚡ Speed tag (premium only)
-  power?: boolean;      // hitters — 💪 Power tag (premium only)
+  speed?: ToolGrade;    // hitters — ⚡ Speed tool (premium only)
+  power?: ToolGrade;    // hitters — 💪 Power tool (premium only)
   fromLevel?: string;   // level promoted from, e.g. "AAA"
   priorLine?: string;   // season line at the prior level (the production that earned it)
   last30Line?: string;  // rolling last-30 figure at the prior level

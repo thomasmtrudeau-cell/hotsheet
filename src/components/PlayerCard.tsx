@@ -114,10 +114,14 @@ function PremiumBadges({ metrics, isPitcher }: { metrics: PremiumMetrics; isPitc
         <span className={chip} title="ERA per 20 TBF/game (ScoutTheStatline)">{metrics.era20.toFixed(2)} ERA/20</span>
       )}
       {!isPitcher && metrics.speed && (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300" title="Elite projected stolen-base rate (ScoutTheStatline)">⚡ Speed</span>
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${metrics.speed === 'double-plus' ? 'bg-sky-500/30 text-sky-200' : 'bg-sky-500/20 text-sky-300'}`} title={`${metrics.speed === 'double-plus' ? 'Double-plus' : 'Plus'} projected speed (ScoutTheStatline)`}>
+          ⚡ Speed{metrics.speed === 'double-plus' ? '++' : '+'}
+        </span>
       )}
       {!isPitcher && metrics.power && (
-        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300" title="Elite projected home-run power (ScoutTheStatline)">💪 Power</span>
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${metrics.power === 'double-plus' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-500/20 text-rose-300'}`} title={`${metrics.power === 'double-plus' ? 'Double-plus' : 'Plus'} projected power (ScoutTheStatline)`}>
+          💪 Power{metrics.power === 'double-plus' ? '++' : '+'}
+        </span>
       )}
     </>
   );
@@ -330,7 +334,7 @@ function MatchupRow({ m }: { m: Matchup }) {
             <span>· {platoonText}</span>
           </div>
           <div className="text-zinc-600">
-            <span className="text-zinc-500">How:</span> platoon &amp; pitcher quality (weighted equally) + park. A pre-game projection — it disappears once the game starts.
+            <span className="text-zinc-500">How:</span> platoon &amp; pitcher quality (weighted equally) + park.
           </div>
         </div>
       )}
