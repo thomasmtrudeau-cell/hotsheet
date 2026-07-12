@@ -57,6 +57,8 @@ export interface PremiumMetrics {
   war?: number;         // peak WAR
   peakWrcPlus?: number; // hitters — peak wRC+
   era20?: number;       // pitchers — ERA per 20 TBF/game
+  speed?: boolean;      // hitters — elite projected SB (⚡ Speed tag)
+  power?: boolean;      // hitters — elite projected HR (💪 Power tag)
 }
 
 export interface InjuryStatus {
@@ -134,6 +136,7 @@ export interface DailyPlayerStats {
   calledUpDate?: string;     // ISO date of a recent recall/selection to MLB (recently called up)
   promotedDate?: string;     // ISO date of a recent MiLB level-up (recently promoted)
   nextStart?: { date: string; opponent: string }; // pitcher's next announced start (MLB + MiLB)
+  positionsPlayed?: string; // most-played fielding position this season (e.g. "CF" vs generic "OF")
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

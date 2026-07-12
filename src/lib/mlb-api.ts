@@ -1290,6 +1290,34 @@ async function getNextStarts(players: FollowedPlayer[], date: string): Promise<M
   return result;
 }
 
+// Most-played position this season per hitter (from fielding-by-position), so a
+// minor-leaguer listed generically as "OF" shows the spot he actually plays
+// (e.g. CF). One batched people call, cached long. MLB-system hitters only.
+async function getPrimaryPositions(players: FollowedPlayer[], season: number): Promise<Map<number, string>> {
+  const out = new Map<number, string>();
+  const hitters = players.filter((p) => p.primaryPosition !== 'P' && isMLBSystem(p.sportId));
+  if (hitters.length === 0) return out;
+  try {
+    const data = await cachedFetch<{ people?: Array<{ id: number; stats?: Array<{ splits?: Array<{ position?: { abbreviation?: string }; stat?: { games?: number } }> }> }> }>(
+      `${MLB_API}/people?personIds=${hitters.map((p) => p.id).join(',')}&hydrate=stats(group=fielding,type=season,season=${season})`,
+      6 * 3600_000
+    );
+    for (const p of data.people ?? []) {
+      let bestPos: string | undefined;
+      let bestGames = -1;
+      for (const s of p.stats ?? []) {
+        for (const sp of s.splits ?? []) {
+          const pos = sp.position?.abbreviation;
+          const games = sp.stat?.games ?? 0;
+          if (pos && games > bestGames) { bestGames = games; bestPos = pos; }
+        }
+      }
+      if (bestPos) out.set(p.id, bestPos);
+    }
+  } catch { /* leave empty — cards fall back to the roster position */ }
+  return out;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -1330,14 +1358,17 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     boxscores.set(pk, data);
   }
 
-  // Rolling recent form + matchup + two-start + call-ups + promotions + next starts.
-  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap] = await Promise.all([
+  // Rolling recent form + matchup + two-start + call-ups + promotions + next
+  // starts + most-played position.
+  const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, positionMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
     getRecentCallups(date),
     getRecentPromotions(date),
     getNextStarts(players, date),
+    getPrimaryPositions(players, season),
   ]);
 
   // Build stats for each player
@@ -1373,6 +1404,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.calledUpDate = callupMap.get(player.id);
     stat.promotedDate = promotionMap.get(player.id);
     stat.nextStart = nextStartMap.get(player.id);
+    stat.positionsPlayed = positionMap.get(player.id);
     return stat;
   });
 }

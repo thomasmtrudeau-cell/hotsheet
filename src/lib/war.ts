@@ -71,6 +71,9 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const extraIdx = isPitcher
     ? header.findIndex((h) => h === 'era 20 tbf/g')
     : header.findIndex((h) => h === 'wRC+');
+  // Hitter tool tags (peak projections): elite SB/600 → Speed, elite HR → Power.
+  const sbIdx = isPitcher ? -1 : header.findIndex((h) => h === 'SB/600');
+  const hrIdx = isPitcher ? -1 : header.findIndex((h) => h === 'HR');
   if (nameIdx < 0) return out;
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -88,6 +91,8 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         else m.peakWrcPlus = Math.round(v);
       }
     }
+    if (sbIdx >= 0) { const v = parseFloat(cells[sbIdx]); if (Number.isFinite(v) && v >= 30) m.speed = true; }
+    if (hrIdx >= 0) { const v = parseFloat(cells[hrIdx]); if (Number.isFinite(v) && v >= 24) m.power = true; }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;

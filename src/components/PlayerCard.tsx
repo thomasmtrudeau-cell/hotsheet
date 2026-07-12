@@ -113,6 +113,12 @@ function PremiumBadges({ metrics, isPitcher }: { metrics: PremiumMetrics; isPitc
       {isPitcher && metrics.era20 !== undefined && (
         <span className={chip} title="ERA per 20 TBF/game (ScoutTheStatline)">{metrics.era20.toFixed(2)} ERA/20</span>
       )}
+      {!isPitcher && metrics.speed && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300" title="Elite projected stolen-base rate (ScoutTheStatline)">⚡ Speed</span>
+      )}
+      {!isPitcher && metrics.power && (
+        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300" title="Elite projected home-run power (ScoutTheStatline)">💪 Power</span>
+      )}
     </>
   );
 }
@@ -400,7 +406,7 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
           </div>
         )}
         <div className="text-xs text-zinc-500 mt-1">
-          {stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
+          {stats.positionsPlayed || stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
         </div>
       </div>
 
