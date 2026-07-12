@@ -65,7 +65,12 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
       parentOrgAbbrev: result.parentOrgAbbrev,
       followedAt: new Date().toISOString(),
     }, groupIds);
+    // Adding is a one-and-done action — clear the box and close the dropdown so
+    // it doesn't linger with stale results (the player's row now shows Following).
     setPickerId(null);
+    setQuery('');
+    setResults([]);
+    setOpen(false);
   };
 
   // Open the optional list picker for a result. Starts empty — following never
