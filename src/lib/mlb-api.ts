@@ -528,9 +528,10 @@ function buildDailyStats(
   base.gameStartTime = new Date(game.gameDate).getTime();
   base.gamePk = game.gamePk;
 
-  // Populate starting position / batting order from boxscore (live/final games)
+  // Populate starting position / batting order from boxscore (live/final games).
+  // MLB encodes battingOrder as "901" (9th, sub 01) etc. — floor to the spot.
   if (boxscorePlayer?.battingOrder) {
-    base.battingOrder = parseInt(boxscorePlayer.battingOrder, 10) / 100;
+    base.battingOrder = Math.floor(parseInt(boxscorePlayer.battingOrder, 10) / 100);
     base.startingPosition = boxscorePlayer.position?.abbreviation;
   }
 
@@ -1093,7 +1094,7 @@ async function warSortMovers(out: CallUp[], warSheetId?: string): Promise<CallUp
       );
       for (const c of out) {
         const m = premiumMap[c.id];
-        if (m) { c.war = m.war; c.peakWrcPlus = m.peakWrcPlus; c.era20 = m.era20; }
+        if (m) { c.war = m.war; c.peakWrcPlus = m.peakWrcPlus; c.era20 = m.era20; c.speed = m.speed; c.power = m.power; }
       }
     } catch {
       // Premium metrics unavailable — fall back to date order.

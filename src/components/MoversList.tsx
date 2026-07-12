@@ -83,6 +83,12 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                           {c.era20.toFixed(2)} ERA/20
                         </span>
                       )}
+                      {!c.isPitcher && c.speed && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-sky-500/20 text-sky-300" title="Elite projected stolen-base rate">⚡ Speed</span>
+                      )}
+                      {!c.isPitcher && c.power && (
+                        <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300" title="Elite projected home-run power">💪 Power</span>
+                      )}
                     </>
                   )
                 ) : (

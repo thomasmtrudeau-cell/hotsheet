@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { getWarRows } from '@/lib/war';
+import { getOopsy } from '@/lib/oopsy';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const maxDuration = 30;
@@ -74,9 +75,22 @@ export async function GET() {
     }
   }
 
-  // Critical checks decide up/down; snapshot age + sheet are "degraded" warnings.
+  // 4) OOPSY weekly projections sheet (warning only — premium feature).
+  const oopsyId = process.env.OOPSY_SHEET_ID;
+  if (!oopsyId) {
+    checks.oopsy = { ok: true, detail: 'OOPSY_SHEET_ID not set' };
+  } else {
+    try {
+      const { pitchers, hitters } = await getOopsy(oopsyId);
+      checks.oopsy = { ok: pitchers.length + hitters.length > 0, detail: `${pitchers.length} SP / ${hitters.length} H` };
+    } catch (e) {
+      checks.oopsy = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  // Critical checks decide up/down; snapshot age + sheets are "degraded" warnings.
   const critical = checks.mlbApi.ok && checks.supabase.ok;
-  const allOk = critical && checks.warSnapshot.ok && checks.warSheet.ok;
+  const allOk = critical && checks.warSnapshot.ok && checks.warSheet.ok && checks.oopsy.ok;
   const status = !critical ? 'down' : allOk ? 'ok' : 'degraded';
 
   if (status === 'down' && process.env.SLACK_WEBHOOK_URL) {

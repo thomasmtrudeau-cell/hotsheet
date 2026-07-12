@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW } from '@/lib/types';
 
+const SHOW_ROSTER_IMPORT = false; // hidden until we have a clean paste source
+
 function Pill({ id, label, active, count, onSelect }: {
   id: string; label: string; active: boolean; count: number; onSelect: (id: string) => void;
 }) {
@@ -145,7 +147,10 @@ export default function GroupBar({
         </button>
       )}
 
-      {onImport && (
+      {/* Roster import hidden for now — CBS/Fantrax export abbreviated names
+          ("B Harper") that don't paste/match cleanly. Revisit with a cleaner
+          source or initial+lastname matching. Flip to re-enable. */}
+      {SHOW_ROSTER_IMPORT && onImport && (
         <button
           onClick={onImport}
           className="shrink-0 px-3 py-1.5 rounded-full text-xs font-medium text-zinc-400 bg-zinc-800/60 border border-zinc-700 hover:text-zinc-100 hover:bg-zinc-700 transition-colors cursor-pointer"

@@ -431,8 +431,9 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
         {/* Time is shown once, in the grade row ("Game at …") for scheduled games. */}
       </div>
 
-      {/* Matchup — a PRE-game projection only; it's moot once the game starts. */}
-      {stats.matchup && stats.gameStatus === 'Scheduled' && (
+      {/* Matchup — a PRE-game projection only, and moot once he's confirmed OUT
+          of the lineup. Hidden once the game starts or he's not starting. */}
+      {stats.matchup && stats.gameStatus === 'Scheduled' && stats.lineupStatus !== 'not_starting' && (
         <MatchupRow m={stats.matchup} />
       )}
 

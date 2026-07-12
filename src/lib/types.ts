@@ -91,6 +91,8 @@ export interface CallUp extends SearchResult {
   war?: number;         // peak WAR — drives the sort always; number shown to premium only
   peakWrcPlus?: number; // hitters — peak wRC+ (premium only; stripped for non-premium)
   era20?: number;       // pitchers — ERA/20 TBF (premium only; stripped for non-premium)
+  speed?: boolean;      // hitters — ⚡ Speed tag (premium only)
+  power?: boolean;      // hitters — 💪 Power tag (premium only)
   fromLevel?: string;   // level promoted from, e.g. "AAA"
   priorLine?: string;   // season line at the prior level (the production that earned it)
   last30Line?: string;  // rolling last-30 figure at the prior level

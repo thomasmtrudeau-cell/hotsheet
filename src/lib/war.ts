@@ -51,12 +51,15 @@ export function parseCsv(text: string): string[][] {
 // role-specific extra metric is peak wRC+ (hitting, header "wRC+") or ERA/20 TBF
 // (pitching, header "era 20 tbf/g") — matched exactly so the many "current
 // year"/"no reg" variants in the sheet are never picked up by mistake.
-// A row's id is "stale" when it keeps the old minor-league id (prefixed "sa")
-// after a promotion. The sheet occasionally has BOTH the stale row and the
-// correct numeric-id row for the same player (name-change cases like Lee,
-// Antonacci, Ingle). Per the sheet owner, the non-"sa" id is the correct one.
+// A row is "stale" (a duplicate to skip) when its id is NOT a clean numeric id:
+// either blank OR prefixed "sa" (the old minor-league id kept after a promotion).
+// The sheet sometimes has both the stale row and the correct numeric-id row for
+// the same player (name-change cases like Lee, Antonacci, Ingle) — e.g. a blank
+// "Hao-Yu Lee" (2.7) alongside the real "Hao Yu Lee" id 30080 (2.24). Prefer the
+// row with a real numeric id.
 function isStaleId(id: string): boolean {
-  return /^\s*sa/i.test(id);
+  const t = id.trim();
+  return t === '' || /^sa/i.test(t);
 }
 
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
