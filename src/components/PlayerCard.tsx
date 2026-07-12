@@ -143,6 +143,40 @@ function TwoStartBadge({ dates }: { dates: string[] }) {
   );
 }
 
+// MLB home-park run factors (100 = neutral). Used for a persistent home-park
+// favorability badge — up = favorable for this player, down = unfavorable.
+const HOME_PARK_PF: Record<string, number> = {
+  'Colorado Rockies': 112, 'Boston Red Sox': 106, 'Cincinnati Reds': 105,
+  'Philadelphia Phillies': 103, 'Arizona Diamondbacks': 103, 'New York Yankees': 103,
+  'Chicago Cubs': 102, 'Baltimore Orioles': 101, 'Atlanta Braves': 101,
+  'Washington Nationals': 101, 'Milwaukee Brewers': 101, 'Toronto Blue Jays': 101,
+  'Houston Astros': 101, 'Chicago White Sox': 101, 'Texas Rangers': 100,
+  'Los Angeles Angels': 100, 'Los Angeles Dodgers': 99, 'Minnesota Twins': 99,
+  'Cleveland Guardians': 98, 'Kansas City Royals': 98, 'St. Louis Cardinals': 97,
+  'Pittsburgh Pirates': 97, 'Detroit Tigers': 97, 'Miami Marlins': 96,
+  'New York Mets': 96, 'San Diego Padres': 95, 'San Francisco Giants': 94,
+  'Seattle Mariners': 93,
+};
+
+function homeParkBadge(team: string, sportId: number, isPitcher: boolean): { label: string; cls: string; title: string } | null {
+  if (sportId !== 1) return null;
+  const pf = HOME_PARK_PF[team];
+  if (pf === undefined) return null;
+  const fav = isPitcher ? 100 - pf : pf - 100; // >0 = favorable for this player
+  if (Math.abs(fav) < 4) return null;           // ~neutral (97–103): hide
+  const strong = Math.abs(fav) >= 10;           // Coors-type extreme
+  const up = fav > 0;
+  const arrows = up ? (strong ? '↑↑' : '↑') : (strong ? '↓↓' : '↓');
+  const cls = up
+    ? (strong ? 'bg-green-500/30 text-green-200' : 'bg-green-500/15 text-green-300')
+    : (strong ? 'bg-red-500/30 text-red-200' : 'bg-red-500/15 text-red-300');
+  return {
+    label: `Park ${arrows}`,
+    cls,
+    title: `Home park factor ${pf} — ${up ? 'favors' : 'works against'} this ${isPitcher ? 'pitcher' : 'hitter'}`,
+  };
+}
+
 function RehabBadge() {
   return (
     <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400">
@@ -373,7 +407,8 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-wrap flex-1">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
-            <LevelBadge sportId={stats.sportId} />
+            {/* MLB is implied by the section header; badge only the notable levels. */}
+            {stats.sportId !== 1 && <LevelBadge sportId={stats.sportId} />}
             {stats.injury && <ILBadge label={stats.injury.label} />}
             {onRehab && <RehabBadge />}
           </div>
@@ -401,14 +436,29 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
           </div>
         </div>
         {/* Full-width signal row: flows left-to-right across the whole card. */}
-        {((stats.twoStartDates && stats.twoStartDates.length >= 2) || stats.calledUpDate || stats.promotedDate || premium) && (
-          <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
-            {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
-            {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
-            {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
-            {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
-          </div>
-        )}
+        {(() => {
+          const park = homeParkBadge(stats.team, stats.sportId, stats.position === 'P');
+          const hasRow = (stats.twoStartDates && stats.twoStartDates.length >= 2) || stats.calledUpDate || stats.promotedDate || stats.catcherFlex || park || premium;
+          if (!hasRow) return null;
+          return (
+            <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
+              {stats.twoStartDates && stats.twoStartDates.length >= 2 && <TwoStartBadge dates={stats.twoStartDates} />}
+              {stats.calledUpDate && <CallUpBadge date={stats.calledUpDate} />}
+              {stats.promotedDate && !stats.calledUpDate && <PromotedBadge date={stats.promotedDate} />}
+              {stats.catcherFlex && (
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-500/20 text-teal-300" title={`Catcher who also plays ${stats.catcherFlex}`}>
+                  C+{stats.catcherFlex}
+                </span>
+              )}
+              {park && (
+                <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${park.cls}`} title={park.title}>
+                  {park.label}
+                </span>
+              )}
+              {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
+            </div>
+          );
+        })()}
         <div className="text-xs text-zinc-500 mt-1">
           {stats.positionsPlayed || stats.position} &middot; <TeamLine team={stats.team} sportId={stats.sportId} parentOrgAbbrev={stats.parentOrgAbbrev} />
         </div>
@@ -504,7 +554,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { s
         <div className="flex items-start justify-between gap-2">
           <div className="flex items-center gap-2 min-w-0 flex-wrap flex-1">
             <h3 className="text-sm font-semibold text-zinc-100 truncate">{stats.playerName}</h3>
-            <LevelBadge sportId={stats.sportId} />
+            {stats.sportId !== 1 && <LevelBadge sportId={stats.sportId} />}
             {stats.injury && <ILBadge label={stats.injury.label} />}
           </div>
           <div className="flex items-center gap-0.5 shrink-0">

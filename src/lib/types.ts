@@ -142,6 +142,7 @@ export interface DailyPlayerStats {
   promotedDate?: string;     // ISO date of a recent MiLB level-up (recently promoted)
   nextStart?: { date: string; opponent: string }; // pitcher's next announced start (MLB + MiLB)
   positionsPlayed?: string; // most-played fielding position this season (e.g. "CF" vs generic "OF")
+  catcherFlex?: string;     // for a catcher, a non-C/non-DH position he also plays (e.g. "1B")
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

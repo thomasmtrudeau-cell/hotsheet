@@ -1291,29 +1291,38 @@ async function getNextStarts(players: FollowedPlayer[], date: string): Promise<M
   return result;
 }
 
-// Most-played position this season per hitter (from fielding-by-position), so a
-// minor-leaguer listed generically as "OF" shows the spot he actually plays
-// (e.g. CF). One batched people call, cached long. MLB-system hitters only.
-async function getPrimaryPositions(players: FollowedPlayer[], season: number): Promise<Map<number, string>> {
-  const out = new Map<number, string>();
+// Per-hitter position info from fielding-by-position (batched, cached long):
+//  - primary: most-played position, so a generic "OF" shows the real spot (CF).
+//  - catcherFlex: for a catcher, the non-C/non-DH field position he also logs
+//    (e.g. "1B") — valuable positional flexibility.
+interface PositionInfo { primary?: string; catcherFlex?: string }
+async function getPositionInfo(players: FollowedPlayer[], season: number): Promise<Map<number, PositionInfo>> {
+  const out = new Map<number, PositionInfo>();
   const hitters = players.filter((p) => p.primaryPosition !== 'P' && isMLBSystem(p.sportId));
   if (hitters.length === 0) return out;
+  const rosterPos = new Map(hitters.map((p) => [p.id, p.primaryPosition]));
   try {
     const data = await cachedFetch<{ people?: Array<{ id: number; stats?: Array<{ splits?: Array<{ position?: { abbreviation?: string }; stat?: { games?: number } }> }> }> }>(
       `${MLB_API}/people?personIds=${hitters.map((p) => p.id).join(',')}&hydrate=stats(group=fielding,type=season,season=${season})`,
       6 * 3600_000
     );
     for (const p of data.people ?? []) {
-      let bestPos: string | undefined;
-      let bestGames = -1;
+      const games = new Map<string, number>();
       for (const s of p.stats ?? []) {
         for (const sp of s.splits ?? []) {
           const pos = sp.position?.abbreviation;
-          const games = sp.stat?.games ?? 0;
-          if (pos && games > bestGames) { bestGames = games; bestPos = pos; }
+          if (pos) games.set(pos, (games.get(pos) ?? 0) + (sp.stat?.games ?? 0));
         }
       }
-      if (bestPos) out.set(p.id, bestPos);
+      if (games.size === 0) continue;
+      let primary: string | undefined; let best = -1;
+      for (const [pos, g] of games) if (g > best) { best = g; primary = pos; }
+      let catcherFlex: string | undefined;
+      if (rosterPos.get(p.id) === 'C') {
+        let flexBest = 0;
+        for (const [pos, g] of games) if (pos !== 'C' && pos !== 'DH' && g > flexBest) { flexBest = g; catcherFlex = pos; }
+      }
+      out.set(p.id, { primary, catcherFlex });
     }
   } catch { /* leave empty — cards fall back to the roster position */ }
   return out;
@@ -1369,7 +1378,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     getRecentCallups(date),
     getRecentPromotions(date),
     getNextStarts(players, date),
-    getPrimaryPositions(players, season),
+    getPositionInfo(players, season),
   ]);
 
   // Build stats for each player
@@ -1405,7 +1414,9 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.calledUpDate = callupMap.get(player.id);
     stat.promotedDate = promotionMap.get(player.id);
     stat.nextStart = nextStartMap.get(player.id);
-    stat.positionsPlayed = positionMap.get(player.id);
+    const posInfo = positionMap.get(player.id);
+    stat.positionsPlayed = posInfo?.primary;
+    stat.catcherFlex = posInfo?.catcherFlex;
     return stat;
   });
 }
