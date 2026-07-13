@@ -104,7 +104,11 @@ function computePvFv(opts: {
 }): { present: number; future: number } | undefined {
   if (opts.war === undefined) return undefined;
 
-  // Future value: peak ceiling above a soft keeper baseline, aged + proximity.
+  // Future value: peak WAR above the ~2.0 keeper bar (a 28×20 keeper league keeps
+  // ~560 players, so a sub-2-WAR ceiling is barely keepable). Fantasy is a bonus
+  // that mostly only helps players already over the bar — it shouldn't rescue an
+  // aging 1.8-WAR bat into keeper relevance.
+  const KEEPER_BAR = 2.0;
   let fantasy = 0;
   if (opts.isPitcher) { if (opts.era20 !== undefined) fantasy = Math.max(0, 4.0 - opts.era20); }
   else {
@@ -112,7 +116,9 @@ function computePvFv(opts: {
     if (opts.hr !== undefined) fantasy += opts.hr / 25;
     if (opts.sb !== undefined) fantasy += opts.sb / 25;
   }
-  const future = (Math.max(0, opts.war - 1.0) * 3 + fantasy) * ageMultiplier(opts.age) * proximityMultiplier(opts.level);
+  const warTerm = Math.max(0, opts.war - KEEPER_BAR) * 3;
+  const fantasyTerm = fantasy * (opts.war > KEEPER_BAR ? 1 : 0.15);
+  const future = (warTerm + fantasyTerm) * ageMultiplier(opts.age) * proximityMultiplier(opts.level);
 
   // Present value: current-year production (fall back to peak if no current data).
   let prod = 0;

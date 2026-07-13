@@ -2,6 +2,7 @@
 
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus } from '@/lib/types';
+import { homeParkMultiplier } from '@/lib/parks';
 import PremiumTeaser from './PremiumTeaser';
 
 interface TradeCheckerProps {
@@ -70,8 +71,12 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const remove = (id: number, side: Side) =>
     (side === 'A' ? setSideA : setSideB)((prev) => prev.filter((p) => p.id !== id));
 
-  // Injured players lose most of their present value; future value barely dips.
-  const pvOf = (p: SearchResult) => (metrics[p.id]?.presentValue ?? 0) * (injuries[p.id] ? 0.6 : 1);
+  // Present value: injured players lose most of it, and the home park nudges it
+  // (a hitter's park / a pitcher's park helps real-life output).
+  const pvOf = (p: SearchResult) =>
+    (metrics[p.id]?.presentValue ?? 0)
+    * (injuries[p.id] ? 0.6 : 1)
+    * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   const fvOf = (p: SearchResult) => metrics[p.id]?.futureValue ?? 0;
   const sumPv = (s: SearchResult[]) => s.reduce((t, p) => t + pvOf(p), 0);
   const sumFv = (s: SearchResult[]) => s.reduce((t, p) => t + fvOf(p), 0);

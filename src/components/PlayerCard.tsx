@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup, PremiumMetrics, OopsyHitter, OopsyPitcher } from '@/lib/types';
+import { HOME_PARK_PF } from '@/lib/parks';
 
 type OopsySnapshot = { hitter?: OopsyHitter; pitcher?: OopsyPitcher };
 
@@ -180,21 +181,6 @@ function TwoStartBadge({ dates }: { dates: string[] }) {
     </span>
   );
 }
-
-// MLB home-park run factors (100 = neutral). Used for a persistent home-park
-// favorability badge — up = favorable for this player, down = unfavorable.
-const HOME_PARK_PF: Record<string, number> = {
-  'Colorado Rockies': 112, 'Boston Red Sox': 106, 'Cincinnati Reds': 105,
-  'Philadelphia Phillies': 103, 'Arizona Diamondbacks': 103, 'New York Yankees': 103,
-  'Chicago Cubs': 102, 'Baltimore Orioles': 101, 'Atlanta Braves': 101,
-  'Washington Nationals': 101, 'Milwaukee Brewers': 101, 'Toronto Blue Jays': 101,
-  'Houston Astros': 101, 'Chicago White Sox': 101, 'Texas Rangers': 100,
-  'Los Angeles Angels': 100, 'Los Angeles Dodgers': 99, 'Minnesota Twins': 99,
-  'Cleveland Guardians': 98, 'Kansas City Royals': 98, 'St. Louis Cardinals': 97,
-  'Pittsburgh Pirates': 97, 'Detroit Tigers': 97, 'Miami Marlins': 96,
-  'New York Mets': 96, 'San Diego Padres': 95, 'San Francisco Giants': 94,
-  'Seattle Mariners': 93,
-};
 
 function homeParkBadge(team: string, sportId: number, isPitcher: boolean): { label: string; cls: string; title: string } | null {
   if (sportId !== 1) return null;
