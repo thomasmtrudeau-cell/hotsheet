@@ -1385,6 +1385,40 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
   return out;
 }
 
+// Playing-time risk: a same-org teammate in the same position area who's on the
+// IL now — a returning threat to a followed hitter's reps (e.g. José Ramírez
+// coming back for a fringe infielder's time). MLB hitters only; team rosters
+// cached ~1h.
+const POS_GROUP: Record<string, string> = {
+  '1B': 'IF', '2B': 'IF', '3B': 'IF', SS: 'IF',
+  LF: 'OF', CF: 'OF', RF: 'OF', OF: 'OF', C: 'C',
+};
+async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, { name: string; position: string }>> {
+  const out = new Map<number, { name: string; position: string }>();
+  const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && POS_GROUP[p.primaryPosition]);
+  if (hitters.length === 0) return out;
+  const teamIds = [...new Set(hitters.map((p) => p.currentTeam.id))];
+  const rosterByTeam = new Map<number, Array<{ id?: number; name: string; pos: string; il: boolean }>>();
+  await Promise.all(teamIds.map(async (tid) => {
+    try {
+      const data = await cachedFetch<{ roster?: Array<{ person?: { id?: number; fullName?: string }; position?: { abbreviation?: string }; status?: { code?: string } }> }>(
+        `${MLB_API}/teams/${tid}/roster?rosterType=40Man`, 3600_000
+      );
+      rosterByTeam.set(tid, (data.roster ?? []).map((e) => ({
+        id: e.person?.id, name: e.person?.fullName ?? '', pos: e.position?.abbreviation ?? '',
+        il: (e.status?.code ?? '').startsWith('D'),
+      })));
+    } catch { /* skip this team */ }
+  }));
+  for (const p of hitters) {
+    const group = POS_GROUP[p.primaryPosition];
+    const roster = rosterByTeam.get(p.currentTeam.id) ?? [];
+    const threat = roster.find((e) => e.il && e.id !== p.id && POS_GROUP[e.pos] === group);
+    if (threat) out.set(p.id, { name: threat.name, position: threat.pos });
+  }
+  return out;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -1428,7 +1462,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
   // Rolling recent form + matchup + two-start + call-ups + promotions + next
   // starts + most-played position.
   const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
-  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, positionMap, pitcherMatchupMap] = await Promise.all([
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, positionMap, pitcherMatchupMap, ptRiskMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
@@ -1437,6 +1471,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     getNextStarts(players, date),
     getPositionInfo(players, season),
     getPitcherMatchups(players, teamGames, season),
+    getPlayingTimeRisk(players),
   ]);
 
   // Build stats for each player
@@ -1476,6 +1511,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     stat.positionsPlayed = posInfo?.primary;
     stat.catcherFlex = posInfo?.catcherFlex;
     stat.pitcherMatchup = pitcherMatchupMap.get(player.id);
+    stat.playingTimeRisk = ptRiskMap.get(player.id);
     return stat;
   });
 }

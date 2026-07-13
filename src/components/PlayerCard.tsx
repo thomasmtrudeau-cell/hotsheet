@@ -585,6 +585,11 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
           default card lean; expand to see the L15 line + last 15 games). */}
       {logOpen && canLog && (
         <>
+          {stats.playingTimeRisk && (
+            <div className="mt-2 text-[11px] text-amber-300/90" title="A same-area teammate is on the IL and could reclaim playing time">
+              ⚠ PT watch: <span className="text-zinc-200">{stats.playingTimeRisk.name}</span> ({stats.playingTimeRisk.position}) on the IL — could reclaim reps.
+            </div>
+          )}
           {oopsy && (oopsy.hitter || oopsy.pitcher) && <OopsyRow o={oopsy} />}
           {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
           <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} teamId={stats.teamId} />

@@ -161,6 +161,7 @@ export interface DailyPlayerStats {
   positionsPlayed?: string; // most-played fielding position this season (e.g. "CF" vs generic "OF")
   catcherFlex?: string;     // for a catcher, a non-C/non-DH position he also plays (e.g. "1B")
   pitcherMatchup?: PitcherMatchup; // starter's matchup today (opp offense + park)
+  playingTimeRisk?: { name: string; position: string }; // same-org same-area teammate on the IL, a returning threat
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;
