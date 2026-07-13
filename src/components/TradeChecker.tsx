@@ -20,6 +20,7 @@ function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetri
       {role && role.factor < 1 && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
+      {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Math.round(m.age)} yo</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
@@ -135,7 +136,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // always another streamer producing a little), so it scales linearly. Keeper
   // value is NOT — you can grab maybe one decent free prospect, and each extra
   // open spot yields a worse guy, so it diminishes toward a low cap.
-  const PV_REPL = 0.5; // Isaac Collins-level FA, per spot
+  const PV_REPL = 0.4; // a freely-available ~1-WAR body, per spot
   const FV_CAP = 2.0;  // the best a freed spot can grab is ~one 2-FV free prospect
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
   const pvFill = (n: number) => n * PV_REPL;
@@ -227,7 +228,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         {renderColumn('B', sideB)}
       </div>
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) blends the auction-market baseline (cross-position calibrated, above each role&apos;s free-agent line) with current-year production, then discounts for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) is WAR-driven — WAR captures total value including an everyday role — anchored by the auction market (cross-position) and current-year form, then discounted for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
       </p>
     </div>
   );

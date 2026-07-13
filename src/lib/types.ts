@@ -66,8 +66,9 @@ export interface PremiumMetrics {
   power?: ToolGrade;    // hitters — projected HR tool (💪)
   dual?: ToolGrade;     // hitters — combined power+speed profile (⚡💪)
   def?: DefGrade;       // hitters — projected defensive value (🧤)
-  presentValue?: number;   // win-now value (current production × MLB role)
+  presentValue?: number;   // win-now value (WAR-driven, discounted downstream)
   futureValue?: number;    // keeper value (peak ceiling × age × proximity)
+  age?: number;            // projection age (peak age for hitters, current for pitchers)
 }
 
 // A starting pitcher's matchup today: the opposing lineup's offense + park, from

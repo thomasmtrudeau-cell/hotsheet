@@ -106,7 +106,6 @@ function presentLevelFactor(level?: string): number {
 // free-agent line (freely available on the wire) and normalize to the PV scale.
 const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 5 };
 const AUCTION_DIV = 5; // $ above the FA line per 1.0 of present value
-const MARKET_WEIGHT = 0.6; // how much the market baseline drives present value
 function marketPv(auctionId?: string): number | undefined {
   if (!auctionId) return undefined;
   const a = AUCTION_VALUES[auctionId.trim()];
@@ -136,23 +135,34 @@ function computePvFv(opts: {
   const fantasyTerm = fantasy * (opts.war > KEEPER_BAR ? 1 : 0.15);
   const future = (warTerm + fantasyTerm) * ageMultiplier(opts.age) * proximityMultiplier(opts.level);
 
-  // Present value: current-year production (fall back to peak if no current data).
+  // Present value is WAR-DRIVEN. WAR is the best single measure of a player's
+  // total current value — bat, glove, position, AND playing time — so it's the
+  // primary signal that a guy is an entrenched everyday regular (a 2.5-WAR player
+  // isn't near replacement even with a modest bat). Present value only counts in
+  // the majors, so it's gated by level.
+  const lvl = presentLevelFactor(opts.level);
+  const REPLACEMENT_WAR = 1.0; // a freely-available roster body sits ~here
+  const warPv = Math.max(0, opts.war - REPLACEMENT_WAR) * 1.8 * lvl;
+
+  // Current-year rate is the form signal: a hot bat/arm adds a little, a
+  // scuffling one gives a little back. Secondary to WAR by design.
   let prod = 0;
   if (opts.isPitcher) {
     const e = opts.curEra20 ?? opts.era20;
-    if (e !== undefined) prod = Math.max(0, (5.0 - e) * 2);
+    if (e !== undefined) prod = Math.max(0, (4.8 - e) * 1.5);
   } else {
     const w = opts.curWrcPlus ?? opts.peakWrcPlus;
-    if (w !== undefined) prod = Math.max(0, (w - 85) / 8);
+    if (w !== undefined) prod = Math.max(0, (w - 85) / 10);
   }
-  const productionPv = prod * presentLevelFactor(opts.level);
+  const prodPv = prod * lvl;
 
-  // Blend the market baseline in as a frame of reference. Auction $ assumes a
-  // static full-season role; our dynamic PT/injury/job-security discounts (applied
-  // downstream) are what handle the day-to-day risk a low-WAR guy actually carries,
-  // so we only borrow the market's cross-position calibration here.
-  const mkt = marketPv(opts.auctionId);
-  const present = mkt !== undefined ? MARKET_WEIGHT * mkt + (1 - MARKET_WEIGHT) * productionPv : productionPv;
+  // Market $ (auction) is a cross-position sanity anchor — a dollar is a dollar,
+  // which raw rate stats aren't across hitters and pitchers.
+  const mkt = marketPv(opts.auctionId) ?? 0;
+
+  // Dynamic PT/injury/job-security discounts are applied downstream (Trade
+  // Checker), so this is the pre-discount role/production value.
+  const present = 0.6 * warPv + 0.25 * mkt + 0.15 * prodPv;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };
@@ -230,6 +240,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
       auctionId: idIdx >= 0 ? cells[idIdx] : undefined,
     });
     if (tv) { m.presentValue = tv.present; m.futureValue = tv.future; }
+    if (Number.isFinite(age)) m.age = age;
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
