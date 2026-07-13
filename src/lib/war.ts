@@ -1,4 +1,4 @@
-import { FollowedPlayer, PremiumMetrics, RegressionRow } from './types';
+import { FollowedPlayer, PremiumMetrics, RegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
 import { AUCTION_VALUES, AuctionRole } from './auction-values';
 import { computeValue, DEFAULT_SETTINGS } from './value-model';
 
@@ -376,6 +376,70 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
     keptStale.set(key, stale);
   }
   return { rows: [...byKey.values()] };
+}
+
+// Scouting: every projected player with a peak-WAR ceiling + level, age, and the
+// headline metric/tool tags — so the client can filter prospects by a WAR slider
+// and level (incl. rookie ball). Reads both tabs; dedupes per (name, role). Premium.
+function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): ScoutingRow[] {
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return [];
+  const header = rows[0].map((x) => x.trim());
+  const pi = header.findIndex((x) => x.toLowerCase() === nameHeader);
+  const idI = header.findIndex((x) => x.toLowerCase() === 'id');
+  const warCol = warCols(header, isPitcher);
+  const wrcI = isPitcher ? -1 : header.findIndex((x) => x === 'wRC+');
+  const eraI = isPitcher ? header.findIndex((x) => x === 'era 20 tbf/g') : -1;
+  const sbI = isPitcher ? -1 : header.findIndex((x) => x === 'SB/600');
+  const hrI = isPitcher ? -1 : header.findIndex((x) => x === 'HR');
+  const defI = isPitcher ? -1 : header.findIndex((x) => x === 'DEF');
+  let ageI = header.findIndex((x) => x.toLowerCase() === 'max age');
+  if (ageI < 0) ageI = header.findIndex((x) => x.toLowerCase() === 'age');
+  const lvlI = header.findIndex((x) => x.toLowerCase() === 'highest level');
+  if (pi < 0 || warCol.primary < 0) return [];
+
+  const byKey = new Map<string, ScoutingRow>();
+  const keptStale = new Map<string, boolean>();
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r];
+    const name = c[pi]?.trim();
+    if (!name) continue;
+    const war = readWar(c, warCol);
+    if (!Number.isFinite(war)) continue;
+    const key = normalizeName(name);
+    const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
+    if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
+    const sb = sbI >= 0 ? parseFloat(c[sbI]) : NaN;
+    const hr = hrI >= 0 ? parseFloat(c[hrI]) : NaN;
+    const def = defI >= 0 ? parseFloat(c[defI]) : NaN;
+    const age = ageI >= 0 ? parseFloat(c[ageI]) : NaN;
+    const wrc = wrcI >= 0 ? parseFloat(c[wrcI]) : NaN;
+    const era = eraI >= 0 ? parseFloat(c[eraI]) : NaN;
+    const speed: ToolGrade | undefined = Number.isFinite(sb) ? (sb >= 34 ? 'double-plus' : sb >= 24 ? 'plus' : undefined) : undefined;
+    const power: ToolGrade | undefined = Number.isFinite(hr) ? (hr >= 30 ? 'double-plus' : hr >= 22 ? 'plus' : undefined) : undefined;
+    let dual: ToolGrade | undefined;
+    if (Number.isFinite(sb) && Number.isFinite(hr) && sb >= 12 && hr >= 12) {
+      const combined = sb + hr;
+      dual = combined >= 40 ? 'double-plus' : combined >= 30 ? 'plus' : undefined;
+    }
+    const defGrade: DefGrade | undefined = Number.isFinite(def)
+      ? (def >= 8 ? 'double-plus' : def >= 4 ? 'plus' : def <= -9 ? 'double-minus' : def <= -5 ? 'minus' : undefined)
+      : undefined;
+    byKey.set(key, {
+      nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, isPitcher, war,
+      age: Number.isFinite(age) ? age : undefined,
+      wrcPlus: Number.isFinite(wrc) ? Math.round(wrc) : undefined,
+      era20: Number.isFinite(era) ? era : undefined,
+      speed, power, dual, def: defGrade,
+    });
+    keptStale.set(key, stale);
+  }
+  return [...byKey.values()];
+}
+
+export async function getScouting(sheetId: string): Promise<{ rows: ScoutingRow[] }> {
+  const [hitCsv, pitCsv] = await Promise.all([fetchCsvTab(sheetId, HIT_TAB), fetchCsvTab(sheetId, PIT_TAB)]);
+  return { rows: [...parseScoutTab(hitCsv, 'name', false), ...parseScoutTab(pitCsv, 'player', true)] };
 }
 
 // WAR-only join (playerId -> WAR), used to sort the call-up / promotion

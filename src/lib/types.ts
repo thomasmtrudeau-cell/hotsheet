@@ -321,9 +321,27 @@ export const RISERS_VIEW = 'risers';
 export const PROJECTIONS_VIEW = 'projections';
 export const TRADE_VIEW = 'trade';
 export const REGRESSION_VIEW = 'regression';
+export const SCOUTING_VIEW = 'scouting';
 
 // A starter's peak (true-talent) ERA/20 vs current-year ERA/20 — the gap flags
 // sell-highs (overperforming) and buy-lows (underperforming). Premium.
+// Scouting: every projected player with a peak-WAR ceiling, for filtering
+// prospects by WAR / level (incl. rookie ball). Premium.
+export interface ScoutingRow {
+  nameKey: string;
+  player: string;
+  level?: string;
+  isPitcher: boolean;
+  war: number;          // peak WAR ceiling
+  age?: number;
+  wrcPlus?: number;     // hitters — peak wRC+
+  era20?: number;       // pitchers — peak ERA/20
+  speed?: ToolGrade;
+  power?: ToolGrade;
+  dual?: ToolGrade;
+  def?: DefGrade;
+}
+
 export interface RegressionRow {
   nameKey: string;
   player: string;

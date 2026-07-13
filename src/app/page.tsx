@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, ScoutingRow, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -23,6 +23,7 @@ import RosterImport from '@/components/RosterImport';
 import ProjectionsView from '@/components/ProjectionsView';
 import TradeChecker from '@/components/TradeChecker';
 import RegressionView from '@/components/RegressionView';
+import ScoutingView from '@/components/ScoutingView';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -127,6 +128,8 @@ export default function Home() {
   const [oopsyLoading, setOopsyLoading] = useState(false);
   const [regression, setRegression] = useState<RegressionRow[]>([]);
   const [regressionLoading, setRegressionLoading] = useState(false);
+  const [scouting, setScouting] = useState<ScoutingRow[]>([]);
+  const [scoutingLoading, setScoutingLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -179,6 +182,13 @@ export default function Home() {
         .then((d) => setRegression(Array.isArray(d?.rows) ? d.rows : []))
         .catch(() => setRegression([]))
         .finally(() => setRegressionLoading(false));
+    } else if (activeGroup === SCOUTING_VIEW) {
+      setScoutingLoading(true);
+      fetch('/api/scouting')
+        .then((r) => r.json())
+        .then((d) => setScouting(Array.isArray(d?.rows) ? d.rows : []))
+        .catch(() => setScouting([]))
+        .finally(() => setScoutingLoading(false));
     }
   }, [activeGroup, risersWindow]);
 
@@ -355,7 +365,8 @@ export default function Home() {
   const isProjections = activeGroup === PROJECTIONS_VIEW;
   const isTrade = activeGroup === TRADE_VIEW;
   const isRegression = activeGroup === REGRESSION_VIEW;
-  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression;
+  const isScouting = activeGroup === SCOUTING_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression || isScouting;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = Object.keys(premiumMap).length > 0;
@@ -625,6 +636,8 @@ export default function Home() {
             ? 'Trade checker'
             : isRegression
             ? 'SP regression'
+            : isScouting
+            ? 'Scouting'
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -718,6 +731,13 @@ export default function Home() {
         <RegressionView
           rows={showPremium ? regression : []}
           loading={regressionLoading}
+          isPremium={isPremium}
+          isFollowing={(name) => isFollowingName(name)}
+        />
+      ) : isScouting ? (
+        <ScoutingView
+          rows={showPremium ? scouting : []}
+          loading={scoutingLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}
         />

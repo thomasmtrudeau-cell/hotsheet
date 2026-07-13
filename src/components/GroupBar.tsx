@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW } from '@/lib/types';
 
 const SHOW_ROSTER_IMPORT = false; // hidden until we have a clean paste source
 
@@ -142,6 +142,15 @@ export default function GroupBar({
         title="SP sell-high / buy-low regression (premium)"
       >
         📉 Regression
+      </button>
+      <button
+        onClick={() => onSelect(SCOUTING_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === SCOUTING_VIEW ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+        }`}
+        title="Scout prospects by peak WAR & level (premium)"
+      >
+        🔭 Scouting
       </button>
 
       {creating ? (
