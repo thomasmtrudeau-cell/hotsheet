@@ -11,7 +11,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
@@ -19,7 +19,7 @@ function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetri
       <span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`} title="Future value — keeper/dynasty">FV {fv.toFixed(1)}</span>
       {role && role.factor < 1 && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
-      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={risk.kind === 'depth' ? `${risk.name} (${risk.position}) pushing up from the minors — an in-house threat to his reps` : `${risk.name} (${risk.position}) on the IL — a returning threat to his reps`}>⚠ PT</span>}
+      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
@@ -116,22 +116,32 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     }
     return f;
   };
+  // Playing-time dock: a direct (same-position) IL return is the most imminent
+  // hit; a minors pusher is slower; a positional logjam (adjacent spot) is the
+  // lightest touch.
+  const ptDock = (r?: { kind?: 'il' | 'depth'; adjacent?: boolean }) =>
+    !r ? 1 : r.adjacent ? 0.95 : r.kind === 'depth' ? 0.9 : 0.8;
   const pvOf = (p: SearchResult) =>
     (metrics[p.id]?.presentValue ?? 0)
     * (injuries[p.id] ? 0.6 : 1)
-    * (ptRisk[p.id] ? (ptRisk[p.id]!.kind === 'depth' ? 0.9 : 0.8) : 1)
+    * ptDock(ptRisk[p.id])
     * (roles[p.id]?.factor ?? 1)
     * jobSecurity(p)
     * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   const fvOf = (p: SearchResult) => metrics[p.id]?.futureValue ?? 0;
   // Freely-available replacement level: an unbalanced trade opens roster spots
   // you refill off the wire, so the side receiving FEWER players gets that many
-  // theoretical replacements baked in.
-  const PV_REPL = 0.5; // Isaac Collins-level FA
-  const FV_REPL = 1.5; // best free prospect keeper fill
+  // theoretical replacements baked in. Present value is repeatable (there's
+  // always another streamer producing a little), so it scales linearly. Keeper
+  // value is NOT — you can grab maybe one decent free prospect, and each extra
+  // open spot yields a worse guy, so it diminishes toward a low cap.
+  const PV_REPL = 0.5; // Isaac Collins-level FA, per spot
+  const FV_CAP = 2.0;  // the best a freed spot can grab is ~one 2-FV free prospect
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
-  const sumPv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + pvOf(p), 0) + fillCount(side) * PV_REPL;
-  const sumFv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + fvOf(p), 0) + fillCount(side) * FV_REPL;
+  const pvFill = (n: number) => n * PV_REPL;
+  const fvFill = (n: number) => FV_CAP * (1 - Math.pow(0.5, n)); // 1.0, 1.5, 1.75 … → 2.0
+  const sumPv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + pvOf(p), 0) + pvFill(fillCount(side));
+  const sumFv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + fvOf(p), 0) + fvFill(fillCount(side));
   const pvDiff = sumPv(sideA, 'A') - sumPv(sideB, 'B');
   const fvDiff = sumFv(sideA, 'A') - sumFv(sideB, 'B');
   const edge = (d: number, unit: string) =>
@@ -163,8 +173,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
               <div className="min-w-0">
                 <div className="text-sm text-zinc-400 italic truncate">+{fill} free-agent fill</div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {(fill * PV_REPL).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {(fill * FV_REPL).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {pvFill(fill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {fvFill(fill).toFixed(1)}</span>
                 </div>
               </div>
             </div>

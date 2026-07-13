@@ -175,7 +175,9 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const sbIdx = isPitcher ? -1 : header.findIndex((h) => h === 'SB/600');
   const hrIdx = isPitcher ? -1 : header.findIndex((h) => h === 'HR');
   const defIdx = isPitcher ? -1 : header.findIndex((h) => h === 'DEF');
-  const ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
+  // Age column: hitting sheet uses "max age", pitching sheet uses "age".
+  let ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
+  if (ageIdx < 0) ageIdx = header.findIndex((h) => h.toLowerCase() === 'age');
   const levelIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
   const curWrcIdx = isPitcher ? -1 : header.findIndex((h) => h === 'wRC+ - current year only');
   const curEraIdx = isPitcher ? header.findIndex((h) => h === 'era 20 tbf/g - current year') : -1;

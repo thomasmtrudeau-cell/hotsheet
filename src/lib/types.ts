@@ -100,7 +100,7 @@ export interface FollowedPlayer {
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
   batSide?: 'L' | 'R' | 'S'; // for platoon weighting in the matchup rating
-  playingTimeRisk?: { name: string; position: string; kind?: 'il' | 'depth' }; // same-org same-area teammate on the IL / pushing up from the minors
+  playingTimeRisk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; // same-org teammate at his (or an adjacent) position: returning from IL or pushing up from the minors
 }
 
 // A recent MLB call-up (browsable discovery list; followable like a search hit).
@@ -162,7 +162,7 @@ export interface DailyPlayerStats {
   positionsPlayed?: string; // most-played fielding position this season (e.g. "CF" vs generic "OF")
   catcherFlex?: string;     // for a catcher, a non-C/non-DH position he also plays (e.g. "1B")
   pitcherMatchup?: PitcherMatchup; // starter's matchup today (opp offense + park)
-  playingTimeRisk?: { name: string; position: string; kind?: 'il' | 'depth' }; // same-org same-area teammate: returning from IL or pushing up from the minors
+  playingTimeRisk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; // same-org teammate at his (or an adjacent) position: returning from IL or pushing up
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

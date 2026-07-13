@@ -1393,14 +1393,28 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
 // real starter. That WAR gate needs the premium sheet; without it we fall back
 // to IL-return detection only (no gate), which is the conservative case.
 // MLB hitters only; team rosters cached ~1h.
-const POS_GROUP: Record<string, string> = {
-  '1B': 'IF', '2B': 'IF', '3B': 'IF', SS: 'IF',
-  LF: 'OF', CF: 'OF', RF: 'OF', OF: 'OF', C: 'C',
+// Playing time is position-specific: a returning 2B doesn't take a 3B's job.
+// We match on EXACT position (a direct threat) or a realistic neighbor on the
+// defensive spectrum (a positional logjam that could shuffle reps). Corners and
+// middle infield are adjacent; 2B and 3B are NOT (across the diamond), so e.g.
+// a returning Marcelo Mayer (2B) won't flag Caleb Durbin (3B), but a returning
+// SS or a promoted infielder still would.
+const POS_ADJ: Record<string, string[]> = {
+  '1B': ['3B', 'DH'], '3B': ['1B', 'SS'], SS: ['2B', '3B'], '2B': ['SS'], DH: ['1B'],
+  LF: ['CF', 'RF', 'OF'], CF: ['LF', 'RF', 'OF'], RF: ['LF', 'CF', 'OF'], OF: ['LF', 'CF', 'RF'],
+  C: [],
 };
-type RiskInfo = { name: string; position: string; kind: 'il' | 'depth' };
+// A position is "playable" (has reps to lose) if it's in the adjacency map.
+const playablePos = (pos: string) => pos === 'C' || pos in POS_ADJ;
+// null = not a threat to this position; 'exact' = same spot; 'adjacent' = logjam.
+function posRelevance(myPos: string, matePos: string): 'exact' | 'adjacent' | null {
+  if (myPos === matePos) return 'exact';
+  return (POS_ADJ[myPos] ?? []).includes(matePos) ? 'adjacent' : null;
+}
+type RiskInfo = { name: string; position: string; kind: 'il' | 'depth'; adjacent?: boolean };
 export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, RiskInfo>> {
   const out = new Map<number, RiskInfo>();
-  const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && POS_GROUP[p.primaryPosition]);
+  const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && playablePos(p.primaryPosition));
   if (hitters.length === 0) return out;
   const teamIds = [...new Set(hitters.map((p) => p.currentTeam.id))];
   type Mate = { id?: number; name: string; pos: string; kind: 'il' | 'depth' | 'active' };
@@ -1423,9 +1437,8 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
   const candidates = new Map<number, Mate[]>();
   const threatNames = new Set<string>();
   for (const p of hitters) {
-    const group = POS_GROUP[p.primaryPosition];
     const roster = rosterByTeam.get(p.currentTeam.id) ?? [];
-    const c = roster.filter((e) => e.kind !== 'active' && e.id !== p.id && POS_GROUP[e.pos] === group && e.name);
+    const c = roster.filter((e) => e.kind !== 'active' && e.id !== p.id && e.name && posRelevance(p.primaryPosition, e.pos) !== null);
     if (c.length) { candidates.set(p.id, c); c.forEach((e) => threatNames.add(e.name)); }
   }
   if (candidates.size === 0) return out;
@@ -1456,7 +1469,7 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
     const c = candidates.get(p.id);
     if (!c) continue;
     const myWar = warByKey.get(p.fullName.toLowerCase()) ?? 0;
-    let best: { mate: Mate; war: number } | undefined;
+    let best: { mate: Mate; score: number; adjacent: boolean } | undefined;
     for (const mate of c) {
       const w = warByKey.get(mate.name.toLowerCase());
       if (gated) {
@@ -1466,10 +1479,12 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
         // No WAR data → conservative: IL returns only (skip minors pushers).
         continue;
       }
-      const score = w ?? 0;
-      if (!best || score > best.war) best = { mate, war: score };
+      const adjacent = posRelevance(p.primaryPosition, mate.pos) === 'adjacent';
+      // Prefer a direct (same-position) threat over a positional logjam, then WAR.
+      const score = (adjacent ? 0 : 100) + (w ?? 0);
+      if (!best || score > best.score) best = { mate, score, adjacent };
     }
-    if (best) out.set(p.id, { name: best.mate.name, position: best.mate.pos, kind: best.mate.kind === 'il' ? 'il' : 'depth' });
+    if (best) out.set(p.id, { name: best.mate.name, position: best.mate.pos, kind: best.mate.kind === 'il' ? 'il' : 'depth', adjacent: best.adjacent || undefined });
   }
   return out;
 }
