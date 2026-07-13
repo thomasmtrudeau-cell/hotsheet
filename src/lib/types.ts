@@ -68,6 +68,15 @@ export interface PremiumMetrics {
   def?: DefGrade;       // hitters — projected defensive value (🧤)
 }
 
+// A starting pitcher's matchup today: the opposing lineup's offense + park, from
+// the pitcher's POV (weak offense / pitcher park = favorable). v1 = team-level.
+export interface PitcherMatchup {
+  oppTeam: string;
+  oppRpg?: number;      // opponent runs/game this season
+  parkFactor?: number;  // game venue run factor (100 = neutral)
+  ratingTier: 'strong' | 'plus' | 'neutral' | 'tough';
+}
+
 export interface InjuryStatus {
   code: string; // e.g. "D10", "D60", "ILF"
   label: string; // e.g. "10-Day IL"
@@ -149,6 +158,7 @@ export interface DailyPlayerStats {
   nextStart?: { date: string; opponent: string }; // pitcher's next announced start (MLB + MiLB)
   positionsPlayed?: string; // most-played fielding position this season (e.g. "CF" vs generic "OF")
   catcherFlex?: string;     // for a catcher, a non-C/non-DH position he also plays (e.g. "1B")
+  pitcherMatchup?: PitcherMatchup; // starter's matchup today (opp offense + park)
   // Batting (no RBI/R per user request)
   hits?: number;
   atBats?: number;

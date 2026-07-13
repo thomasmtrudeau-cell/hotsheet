@@ -395,6 +395,38 @@ function MatchupRow({ m }: { m: Matchup }) {
   );
 }
 
+// Starter's matchup today (opposing offense + park), click to reveal the why.
+function PitcherMatchupRow({ m }: { m: NonNullable<DailyPlayerStats['pitcherMatchup']> }) {
+  const [open, setOpen] = useState(false);
+  const t = TIER_META[m.ratingTier];
+  return (
+    <div className="mb-2">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className={`flex items-center gap-1.5 text-[11px] font-medium ${t.cls} cursor-pointer hover:opacity-80`}
+        title="Weighted by the opposing lineup's offense and the ballpark — click for details"
+      >
+        <span>{t.emoji}</span>
+        <span>{t.label}</span>
+        <svg className={`w-3 h-3 transition-transform ${open ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+      {open && (
+        <div className="mt-1 space-y-0.5 text-[11px] text-zinc-500">
+          <div className="flex flex-wrap gap-x-1.5">
+            <span className="text-zinc-400">Why:</span>
+            <span>vs <span className="text-zinc-300">{m.oppTeam}</span> offense</span>
+            {m.oppRpg !== undefined && <span>· {m.oppRpg.toFixed(1)} R/G</span>}
+            {m.parkFactor !== undefined && <span>· Park {m.parkFactor}</span>}
+          </div>
+          <div className="text-zinc-600"><span className="text-zinc-500">How:</span> opposing team offense + park (team-level).</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Pitcher's next announced start (MLB + MiLB), when scheduled.
 function NextStartRow({ next }: { next: { date: string; opponent: string } }) {
   const [, m, d] = next.date.split('-');
@@ -508,6 +540,11 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
           of the lineup. Hidden once the game starts or he's not starting. */}
       {stats.matchup && stats.gameStatus === 'Scheduled' && stats.lineupStatus !== 'not_starting' && (
         <MatchupRow m={stats.matchup} />
+      )}
+
+      {/* Starter's matchup today (pitchers, when they're the probable starter). */}
+      {stats.pitcherMatchup && stats.gameStatus === 'Scheduled' && (
+        <PitcherMatchupRow m={stats.pitcherMatchup} />
       )}
 
       {/* Next announced start (pitchers) */}

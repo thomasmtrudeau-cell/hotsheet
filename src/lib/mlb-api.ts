@@ -1,4 +1,4 @@
-import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, RangePlayerStats, CallUp } from './types';
+import { LEVEL_LABELS, SearchResult, DailyPlayerStats, SeasonPlayerStats, SeasonLevelLine, FollowedPlayer, LeagueAverages, GameLogEntry, isMLBSystem, InjuryStatus, RecentForm, Matchup, PitcherMatchup, RangePlayerStats, CallUp } from './types';
 import { gradeHitter, gradePitcher, formatBattingLine, formatPitchingLine, parseIP } from './grading';
 import { fetchPremiumMap } from './war';
 
@@ -1328,6 +1328,63 @@ async function getPositionInfo(players: FollowedPlayer[], season: number): Promi
   return out;
 }
 
+// Team offense (runs/game) per MLB team, for rating a starter's matchup. ~6h cache.
+let teamOffenseCache: { season: number; at: number; rpg: Map<number, number> } | null = null;
+async function getTeamOffense(season: number): Promise<Map<number, number>> {
+  const now = Date.now();
+  if (teamOffenseCache && teamOffenseCache.season === season && now - teamOffenseCache.at < 6 * 3600_000) return teamOffenseCache.rpg;
+  const rpg = new Map<number, number>();
+  try {
+    const data = await cachedFetch<{ stats?: Array<{ splits?: Array<{ team?: { id?: number }; stat?: { runs?: number; gamesPlayed?: number } }> }> }>(
+      `${MLB_API}/teams/stats?stats=season&group=hitting&season=${season}&sportIds=1`, 6 * 3600_000
+    );
+    for (const sp of data.stats?.[0]?.splits ?? []) {
+      const id = sp.team?.id; const r = sp.stat?.runs; const g = sp.stat?.gamesPlayed;
+      if (id && r && g) rpg.set(id, r / g);
+    }
+  } catch { /* leave empty */ }
+  teamOffenseCache = { season, at: now, rpg };
+  return rpg;
+}
+
+// Weak opposing offense + pitcher-friendly park = favorable for the starter.
+function ratePitcherMatchup(oppRpg?: number, pf?: number): PitcherMatchup['ratingTier'] {
+  let score = 0;
+  if (oppRpg !== undefined) {
+    if (oppRpg <= 3.9) score += 2; else if (oppRpg <= 4.3) score += 1;
+    else if (oppRpg >= 5.0) score -= 2; else if (oppRpg >= 4.7) score -= 1;
+  }
+  if (pf !== undefined) {
+    if (pf <= 93) score += 2; else if (pf <= 96) score += 1;
+    else if (pf >= 110) score -= 2; else if (pf >= 104) score -= 1;
+  }
+  if (score >= 3) return 'strong';
+  if (score >= 1) return 'plus';
+  if (score <= -3) return 'tough';
+  return 'neutral';
+}
+
+// Matchup for a followed starter who's the probable pitcher today (MLB).
+async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<number, ScheduleGame[]>, season: number): Promise<Map<number, PitcherMatchup>> {
+  const out = new Map<number, PitcherMatchup>();
+  const pitchers = players.filter((p) => p.primaryPosition === 'P' && p.sportId === 1);
+  if (pitchers.length === 0) return out;
+  const rpg = await getTeamOffense(season);
+  for (const p of pitchers) {
+    const games = teamGames.get(p.currentTeam.id);
+    const game = games?.find((g) => { const s = getGameStatus(g); return s === 'Scheduled' || s === 'Live'; });
+    if (!game) continue;
+    const isHome = game.teams.home.team.id === p.currentTeam.id;
+    const mine = isHome ? game.teams.home : game.teams.away;
+    if (mine.probablePitcher?.id !== p.id) continue; // only when he's actually starting today
+    const opp = isHome ? game.teams.away.team : game.teams.home.team;
+    const oppRpg = rpg.get(opp.id);
+    const pf = parkFactorFor(game.venue?.name);
+    out.set(p.id, { oppTeam: opp.name, oppRpg, parkFactor: pf, ratingTier: ratePitcherMatchup(oppRpg, pf) });
+  }
+  return out;
+}
+
 export async function getDailyStats(players: FollowedPlayer[], date: string): Promise<DailyPlayerStats[]> {
   if (players.length === 0) return [];
 
@@ -1371,7 +1428,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
   // Rolling recent form + matchup + two-start + call-ups + promotions + next
   // starts + most-played position.
   const season = new Date(date + 'T00:00:00Z').getUTCFullYear();
-  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, positionMap] = await Promise.all([
+  const [recentFormMap, matchupMap, twoStartMap, callupMap, promotionMap, nextStartMap, positionMap, pitcherMatchupMap] = await Promise.all([
     getRecentForm(players, date),
     getMatchups(players, teamGames),
     getTwoStartPitchers(date),
@@ -1379,6 +1436,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     getRecentPromotions(date),
     getNextStarts(players, date),
     getPositionInfo(players, season),
+    getPitcherMatchups(players, teamGames, season),
   ]);
 
   // Build stats for each player
@@ -1417,6 +1475,7 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     const posInfo = positionMap.get(player.id);
     stat.positionsPlayed = posInfo?.primary;
     stat.catcherFlex = posInfo?.catcherFlex;
+    stat.pitcherMatchup = pitcherMatchupMap.get(player.id);
     return stat;
   });
 }
