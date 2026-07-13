@@ -62,6 +62,50 @@ function isStaleId(id: string): boolean {
   return t === '' || /^sa/i.test(t);
 }
 
+// --- Trade value model ---
+// 2.4 WAR is treated as freely available on the FA/replacement market, so only
+// WAR ABOVE that is scarce. Layered with fantasy counting value, then multiplied
+// by age (control/upside) and proximity to the majors (certainty/timing).
+const REPLACEMENT_WAR = 2.4;
+
+function ageMultiplier(age?: number): number {
+  if (age === undefined) return 1.0;
+  if (age <= 22) return 1.25;
+  if (age <= 25) return 1.15;
+  if (age <= 28) return 1.0;
+  if (age <= 31) return 0.9;
+  return 0.8;
+}
+
+function proximityMultiplier(level?: string): number {
+  const l = (level ?? '').toUpperCase();
+  if (l.includes('MLB') || l.includes('MAJOR')) return 1.0;
+  if (l.includes('AAA')) return 0.92;
+  if (l.includes('AA')) return 0.82;
+  if (l.includes('A+') || l.includes('HIGH')) return 0.72;
+  if (l.includes('A')) return 0.62;
+  return 0.5; // rookie/complex/other
+}
+
+function computeTradeValue(opts: {
+  isPitcher: boolean; war?: number; wrcPlus?: number; hr?: number; sb?: number; era20?: number; age?: number; level?: string;
+}): { peak: number; adjusted: number } | undefined {
+  if (opts.war === undefined) return undefined;
+  const warSurplus = opts.war - REPLACEMENT_WAR;
+  let fantasy = 0;
+  if (opts.isPitcher) {
+    if (opts.era20 !== undefined) fantasy = Math.max(0, 4.0 - opts.era20); // lower ERA/20 = more value
+  } else {
+    if (opts.wrcPlus !== undefined) fantasy += Math.max(0, (opts.wrcPlus - 100) / 20);
+    if (opts.hr !== undefined) fantasy += opts.hr / 25;
+    if (opts.sb !== undefined) fantasy += opts.sb / 25;
+  }
+  const raw = warSurplus * 3 + fantasy;                                    // peak ceiling
+  const adjusted = raw * ageMultiplier(opts.age) * proximityMultiplier(opts.level); // time/risk-adjusted
+  const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
+  return { peak: r(raw), adjusted: r(adjusted) };
+}
+
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
   const rows = parseCsv(csv);
   const out = new Map<string, PremiumMetrics>();
@@ -79,6 +123,8 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const sbIdx = isPitcher ? -1 : header.findIndex((h) => h === 'SB/600');
   const hrIdx = isPitcher ? -1 : header.findIndex((h) => h === 'HR');
   const defIdx = isPitcher ? -1 : header.findIndex((h) => h === 'DEF');
+  const ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
+  const levelIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
   if (nameIdx < 0) return out;
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -113,6 +159,15 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         m.def = d >= 8 ? 'double-plus' : d >= 4 ? 'plus' : d <= -9 ? 'double-minus' : d <= -5 ? 'minus' : undefined;
       }
     }
+    const age = ageIdx >= 0 ? parseFloat(cells[ageIdx]) : NaN;
+    const tv = computeTradeValue({
+      isPitcher, war: m.war, wrcPlus: m.peakWrcPlus,
+      hr: Number.isFinite(hrVal) ? hrVal : undefined,
+      sb: Number.isFinite(sbVal) ? sbVal : undefined,
+      era20: m.era20, age: Number.isFinite(age) ? age : undefined,
+      level: levelIdx >= 0 ? cells[levelIdx] : undefined,
+    });
+    if (tv) { m.tradeValue = tv.adjusted; m.tradeValuePeak = tv.peak; }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;

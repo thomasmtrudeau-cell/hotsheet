@@ -66,6 +66,8 @@ export interface PremiumMetrics {
   power?: ToolGrade;    // hitters — projected HR tool (💪)
   dual?: ToolGrade;     // hitters — combined power+speed profile (⚡💪)
   def?: DefGrade;       // hitters — projected defensive value (🧤)
+  tradeValue?: number;     // adjusted trade value (peak × age × proximity)
+  tradeValuePeak?: number; // raw peak value (no time/risk discount)
 }
 
 // A starting pitcher's matchup today: the opposing lineup's offense + park, from
