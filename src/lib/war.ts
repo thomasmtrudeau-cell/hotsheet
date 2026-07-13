@@ -62,12 +62,14 @@ function isStaleId(id: string): boolean {
   return t === '' || /^sa/i.test(t);
 }
 
-// --- Trade value model ---
-// 2.4 WAR is treated as freely available on the FA/replacement market, so only
-// WAR ABOVE that is scarce. Layered with fantasy counting value, then multiplied
-// by age (control/upside) and proximity to the majors (certainty/timing).
-const REPLACEMENT_WAR = 2.4;
-
+// --- Value model: Present Value (win-now) + Future Value (keeper) ---
+// Context: 28-keeper, 20-team league (~560 keepers), so "replacement" isn't a raw
+// 2.4-WAR line — the 2.4-WAR guys on the wire are stuck in bad roles or the
+// minors. A healthy MLB regular clears that bar on role alone.
+//  - Present Value: current-year production, and only really counts if he's in
+//    the majors now (a great AA line doesn't help you win this week).
+//  - Future Value: peak (true-talent) ceiling, aged + discounted by distance to
+//    the majors — the keeper/dynasty number.
 function ageMultiplier(age?: number): number {
   if (age === undefined) return 1.0;
   if (age <= 22) return 1.25;
@@ -84,26 +86,47 @@ function proximityMultiplier(level?: string): number {
   if (l.includes('AA')) return 0.82;
   if (l.includes('A+') || l.includes('HIGH')) return 0.72;
   if (l.includes('A')) return 0.62;
-  return 0.5; // rookie/complex/other
+  return 0.5;
 }
 
-function computeTradeValue(opts: {
-  isPitcher: boolean; war?: number; wrcPlus?: number; hr?: number; sb?: number; era20?: number; age?: number; level?: string;
-}): { peak: number; adjusted: number } | undefined {
+// How much a player's current production translates to present value — MLB is
+// the only place it fully counts.
+function presentLevelFactor(level?: string): number {
+  const l = (level ?? '').toUpperCase();
+  if (l.includes('MLB') || l.includes('MAJOR')) return 1.0;
+  if (l.includes('AAA')) return 0.3;
+  return 0.1;
+}
+
+function computePvFv(opts: {
+  isPitcher: boolean; war?: number; peakWrcPlus?: number; hr?: number; sb?: number; era20?: number;
+  curWrcPlus?: number; curEra20?: number; age?: number; level?: string;
+}): { present: number; future: number } | undefined {
   if (opts.war === undefined) return undefined;
-  const warSurplus = opts.war - REPLACEMENT_WAR;
+
+  // Future value: peak ceiling above a soft keeper baseline, aged + proximity.
   let fantasy = 0;
-  if (opts.isPitcher) {
-    if (opts.era20 !== undefined) fantasy = Math.max(0, 4.0 - opts.era20); // lower ERA/20 = more value
-  } else {
-    if (opts.wrcPlus !== undefined) fantasy += Math.max(0, (opts.wrcPlus - 100) / 20);
+  if (opts.isPitcher) { if (opts.era20 !== undefined) fantasy = Math.max(0, 4.0 - opts.era20); }
+  else {
+    if (opts.peakWrcPlus !== undefined) fantasy += Math.max(0, (opts.peakWrcPlus - 100) / 20);
     if (opts.hr !== undefined) fantasy += opts.hr / 25;
     if (opts.sb !== undefined) fantasy += opts.sb / 25;
   }
-  const raw = warSurplus * 3 + fantasy;                                    // peak ceiling
-  const adjusted = raw * ageMultiplier(opts.age) * proximityMultiplier(opts.level); // time/risk-adjusted
+  const future = (Math.max(0, opts.war - 1.0) * 3 + fantasy) * ageMultiplier(opts.age) * proximityMultiplier(opts.level);
+
+  // Present value: current-year production (fall back to peak if no current data).
+  let prod = 0;
+  if (opts.isPitcher) {
+    const e = opts.curEra20 ?? opts.era20;
+    if (e !== undefined) prod = Math.max(0, (5.0 - e) * 2);
+  } else {
+    const w = opts.curWrcPlus ?? opts.peakWrcPlus;
+    if (w !== undefined) prod = Math.max(0, (w - 85) / 8);
+  }
+  const present = prod * presentLevelFactor(opts.level);
+
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  return { peak: r(raw), adjusted: r(adjusted) };
+  return { present: r(present), future: r(future) };
 }
 
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
@@ -125,6 +148,8 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const defIdx = isPitcher ? -1 : header.findIndex((h) => h === 'DEF');
   const ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
   const levelIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
+  const curWrcIdx = isPitcher ? -1 : header.findIndex((h) => h === 'wRC+ - current year only');
+  const curEraIdx = isPitcher ? header.findIndex((h) => h === 'era 20 tbf/g - current year') : -1;
   if (nameIdx < 0) return out;
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -160,14 +185,19 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
       }
     }
     const age = ageIdx >= 0 ? parseFloat(cells[ageIdx]) : NaN;
-    const tv = computeTradeValue({
-      isPitcher, war: m.war, wrcPlus: m.peakWrcPlus,
+    const curWrc = curWrcIdx >= 0 ? parseFloat(cells[curWrcIdx]) : NaN;
+    const curEra = curEraIdx >= 0 ? parseFloat(cells[curEraIdx]) : NaN;
+    const tv = computePvFv({
+      isPitcher, war: m.war, peakWrcPlus: m.peakWrcPlus,
       hr: Number.isFinite(hrVal) ? hrVal : undefined,
       sb: Number.isFinite(sbVal) ? sbVal : undefined,
-      era20: m.era20, age: Number.isFinite(age) ? age : undefined,
+      era20: m.era20,
+      curWrcPlus: Number.isFinite(curWrc) ? curWrc : undefined,
+      curEra20: Number.isFinite(curEra) ? curEra : undefined,
+      age: Number.isFinite(age) ? age : undefined,
       level: levelIdx >= 0 ? cells[levelIdx] : undefined,
     });
-    if (tv) { m.tradeValue = tv.adjusted; m.tradeValuePeak = tv.peak; }
+    if (tv) { m.presentValue = tv.present; m.futureValue = tv.future; }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
