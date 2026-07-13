@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
     }
     // Strip ALL premium numbers for non-premium (WAR + peak wRC+ + ERA/20); the
     // WAR-derived order stays. Real values never reach a non-premium payload.
-    const out = premium ? list : list.map((c) => ({ ...c, war: undefined, peakWrcPlus: undefined, era20: undefined, speed: undefined, power: undefined, dual: undefined, def: undefined }));
+    const out = premium ? list : list.map((c) => ({ ...c, war: undefined, peakWrcPlus: undefined, era20: undefined, speed: undefined, power: undefined, dual: undefined, def: undefined, presentValue: undefined, futureValue: undefined, age: undefined, hr: undefined, sb: undefined, curWrcPlus: undefined, curEra20: undefined, level: undefined, marketBaseline: undefined }));
     return NextResponse.json(out);
   } catch (error) {
     console.error('Call-ups route error:', error);

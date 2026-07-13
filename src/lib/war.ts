@@ -1,5 +1,6 @@
 import { FollowedPlayer, PremiumMetrics, RegressionRow } from './types';
 import { AUCTION_VALUES, AuctionRole } from './auction-values';
+import { computeValue, DEFAULT_SETTINGS } from './value-model';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
@@ -71,101 +72,17 @@ function isStaleId(id: string): boolean {
 //    the majors now (a great AA line doesn't help you win this week).
 //  - Future Value: peak (true-talent) ceiling, aged + discounted by distance to
 //    the majors — the keeper/dynasty number.
-function ageMultiplier(age?: number): number {
-  if (age === undefined) return 1.0;
-  if (age <= 22) return 1.25;
-  if (age <= 25) return 1.15;
-  if (age <= 28) return 1.0;
-  if (age <= 31) return 0.9;
-  return 0.8;
-}
-
-function proximityMultiplier(level?: string): number {
-  const l = (level ?? '').toUpperCase();
-  if (l.includes('MLB') || l.includes('MAJOR')) return 1.0;
-  if (l.includes('AAA')) return 0.92;
-  if (l.includes('AA')) return 0.82;
-  if (l.includes('A+') || l.includes('HIGH')) return 0.72;
-  if (l.includes('A')) return 0.62;
-  return 0.5;
-}
-
-// How much a player's current production translates to present value — MLB is
-// the only place it fully counts.
-function presentLevelFactor(level?: string): number {
-  const l = (level ?? '').toUpperCase();
-  if (l.includes('MLB') || l.includes('MAJOR')) return 1.0;
-  if (l.includes('AAA')) return 0.3;
-  return 0.1;
-}
-
-// Market-vetted present value from the auction calculator. Auction $ is
-// cross-position calibrated (a dollar is a dollar), which our production-based
-// PV is NOT — hitter wRC+ and pitcher ERA/20 live on different scales, so a
-// star hitter used to read far above a comparable ace. We subtract the role's
-// free-agent line (freely available on the wire) and normalize to the PV scale.
+// Market baseline from the auction calculator — cross-position calibrated ($ is
+// a $). We subtract the role's free-agent line (freely available on the wire)
+// and normalize to the PV scale; computeValue() blends it in. Kept here because
+// the auction table + FA lines are server-side reference data.
 const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 5 };
 const AUCTION_DIV = 5; // $ above the FA line per 1.0 of present value
-function marketPv(auctionId?: string): number | undefined {
+function marketBaselineFor(auctionId?: string): number | undefined {
   if (!auctionId) return undefined;
   const a = AUCTION_VALUES[auctionId.trim()];
   if (!a) return undefined;
   return Math.max(0, a.d - FA_LINE[a.r]) / AUCTION_DIV;
-}
-
-function computePvFv(opts: {
-  isPitcher: boolean; war?: number; peakWrcPlus?: number; hr?: number; sb?: number; era20?: number;
-  curWrcPlus?: number; curEra20?: number; age?: number; level?: string; auctionId?: string;
-}): { present: number; future: number } | undefined {
-  if (opts.war === undefined) return undefined;
-
-  // Future value: peak WAR above the ~2.0 keeper bar (a 28×20 keeper league keeps
-  // ~560 players, so a sub-2-WAR ceiling is barely keepable). Fantasy is a bonus
-  // that mostly only helps players already over the bar — it shouldn't rescue an
-  // aging 1.8-WAR bat into keeper relevance.
-  const KEEPER_BAR = 2.0;
-  let fantasy = 0;
-  if (opts.isPitcher) { if (opts.era20 !== undefined) fantasy = Math.max(0, 4.0 - opts.era20); }
-  else {
-    if (opts.peakWrcPlus !== undefined) fantasy += Math.max(0, (opts.peakWrcPlus - 100) / 20);
-    if (opts.hr !== undefined) fantasy += opts.hr / 25;
-    if (opts.sb !== undefined) fantasy += opts.sb / 25;
-  }
-  const warTerm = Math.max(0, opts.war - KEEPER_BAR) * 3;
-  const fantasyTerm = fantasy * (opts.war > KEEPER_BAR ? 1 : 0.15);
-  const future = (warTerm + fantasyTerm) * ageMultiplier(opts.age) * proximityMultiplier(opts.level);
-
-  // Present value is WAR-DRIVEN. WAR is the best single measure of a player's
-  // total current value — bat, glove, position, AND playing time — so it's the
-  // primary signal that a guy is an entrenched everyday regular (a 2.5-WAR player
-  // isn't near replacement even with a modest bat). Present value only counts in
-  // the majors, so it's gated by level.
-  const lvl = presentLevelFactor(opts.level);
-  const REPLACEMENT_WAR = 1.0; // a freely-available roster body sits ~here
-  const warPv = Math.max(0, opts.war - REPLACEMENT_WAR) * 1.8 * lvl;
-
-  // Current-year rate is the form signal: a hot bat/arm adds a little, a
-  // scuffling one gives a little back. Secondary to WAR by design.
-  let prod = 0;
-  if (opts.isPitcher) {
-    const e = opts.curEra20 ?? opts.era20;
-    if (e !== undefined) prod = Math.max(0, (4.8 - e) * 1.5);
-  } else {
-    const w = opts.curWrcPlus ?? opts.peakWrcPlus;
-    if (w !== undefined) prod = Math.max(0, (w - 85) / 10);
-  }
-  const prodPv = prod * lvl;
-
-  // Market $ (auction) is a cross-position sanity anchor — a dollar is a dollar,
-  // which raw rate stats aren't across hitters and pitchers.
-  const mkt = marketPv(opts.auctionId) ?? 0;
-
-  // Dynamic PT/injury/job-security discounts are applied downstream (Trade
-  // Checker), so this is the pre-discount role/production value.
-  const present = 0.6 * warPv + 0.25 * mkt + 0.15 * prodPv;
-
-  const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  return { present: r(present), future: r(future) };
 }
 
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
@@ -228,19 +145,26 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     const age = ageIdx >= 0 ? parseFloat(cells[ageIdx]) : NaN;
     const curWrc = curWrcIdx >= 0 ? parseFloat(cells[curWrcIdx]) : NaN;
     const curEra = curEraIdx >= 0 ? parseFloat(cells[curEraIdx]) : NaN;
-    const tv = computePvFv({
-      isPitcher, war: m.war, peakWrcPlus: m.peakWrcPlus,
-      hr: Number.isFinite(hrVal) ? hrVal : undefined,
-      sb: Number.isFinite(sbVal) ? sbVal : undefined,
-      era20: m.era20,
-      curWrcPlus: Number.isFinite(curWrc) ? curWrc : undefined,
-      curEra20: Number.isFinite(curEra) ? curEra : undefined,
-      age: Number.isFinite(age) ? age : undefined,
-      level: levelIdx >= 0 ? cells[levelIdx] : undefined,
-      auctionId: idIdx >= 0 ? cells[idIdx] : undefined,
-    });
-    if (tv) { m.presentValue = tv.present; m.futureValue = tv.future; }
+    // Stash the raw value-model inputs so the client can recompute PV/FV against
+    // the user's league settings.
+    if (Number.isFinite(hrVal)) m.hr = hrVal;
+    if (Number.isFinite(sbVal)) m.sb = sbVal;
+    if (Number.isFinite(curWrc)) m.curWrcPlus = curWrc;
+    if (Number.isFinite(curEra)) m.curEra20 = curEra;
+    if (levelIdx >= 0 && cells[levelIdx]) m.level = cells[levelIdx];
     if (Number.isFinite(age)) m.age = age;
+    const mkt = marketBaselineFor(idIdx >= 0 ? cells[idIdx] : undefined);
+    if (mkt !== undefined) m.marketBaseline = mkt;
+    // Bake a DEFAULT-settings PV/FV as the payload fallback (position unknown at
+    // parse time, so scarcity is neutral here; the client refines it).
+    if (m.war !== undefined) {
+      const tv = computeValue({
+        isPitcher, war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
+        hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
+        age: m.age, level: m.level, marketBaseline: m.marketBaseline,
+      }, DEFAULT_SETTINGS);
+      m.presentValue = tv.present; m.futureValue = tv.future;
+    }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;

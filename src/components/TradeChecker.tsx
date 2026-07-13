@@ -3,7 +3,11 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
+import { computeValue, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
+
+const SETTINGS_KEY = 'hotsheet_league_settings';
 
 interface TradeCheckerProps {
   isPremium: boolean;
@@ -20,7 +24,7 @@ function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetri
       {role && role.factor < 1 && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
-      {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Math.round(m.age)} yo</span>}
+      {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{m.age.toFixed(1)} yo</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
@@ -40,7 +44,25 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number }>>({}); // IL-aware playing-time role
+  const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
+  const [showSettings, setShowSettings] = useState(false);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  // League settings persist locally (cross-device sync is a later add).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const s = JSON.parse(raw);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSettings({ ...DEFAULT_SETTINGS, ...s, slots: { ...DEFAULT_SETTINGS.slots, ...(s.slots ?? {}) } });
+      }
+    } catch { /* ignore */ }
+  }, []);
+  const updateSettings = useCallback((s: LeagueSettings) => {
+    setSettings(s);
+    try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
+  }, []);
 
   const search = useCallback(async (q: string) => {
     if (q.length < 2) { setResults([]); return; }
@@ -122,14 +144,27 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // lightest touch.
   const ptDock = (r?: { kind?: 'il' | 'depth'; adjacent?: boolean }) =>
     !r ? 1 : r.adjacent ? 0.95 : r.kind === 'depth' ? 0.9 : 0.8;
+  // Base PV/FV recomputed live from raw inputs against the user's league
+  // settings (keeper depth, format, positional slots), then PV gets the dynamic
+  // discounts layered on top.
+  const baseValue = (p: SearchResult) => {
+    const m = metrics[p.id];
+    if (!m) return { present: 0, future: 0 };
+    return computeValue({
+      isPitcher: p.primaryPosition === 'P', position: p.primaryPosition,
+      war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
+      hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
+      age: m.age, level: m.level, marketBaseline: m.marketBaseline,
+    }, settings);
+  };
   const pvOf = (p: SearchResult) =>
-    (metrics[p.id]?.presentValue ?? 0)
+    baseValue(p).present
     * (injuries[p.id] ? 0.6 : 1)
     * ptDock(ptRisk[p.id])
     * (roles[p.id]?.factor ?? 1)
     * jobSecurity(p)
     * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
-  const fvOf = (p: SearchResult) => metrics[p.id]?.futureValue ?? 0;
+  const fvOf = (p: SearchResult) => baseValue(p).future;
   // Freely-available replacement level: an unbalanced trade opens roster spots
   // you refill off the wire, so the side receiving FEWER players gets that many
   // theoretical replacements baked in. Present value is repeatable (there's
@@ -215,6 +250,14 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           </div>
         )}
       </div>
+
+      <div className="mb-3">
+        <button onClick={() => setShowSettings((v) => !v)}
+          className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          ⚙ League settings — {settings.teams}-team · {settings.keepers} keepers · {settings.format.toUpperCase()} {showSettings ? '▲' : '▼'}
+        </button>
+      </div>
+      {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
       {(sideA.length > 0 || sideB.length > 0) && (
         <div className="mb-4 text-center text-sm flex flex-wrap justify-center gap-x-4">

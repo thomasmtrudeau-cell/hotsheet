@@ -66,9 +66,17 @@ export interface PremiumMetrics {
   power?: ToolGrade;    // hitters — projected HR tool (💪)
   dual?: ToolGrade;     // hitters — combined power+speed profile (⚡💪)
   def?: DefGrade;       // hitters — projected defensive value (🧤)
-  presentValue?: number;   // win-now value (WAR-driven, discounted downstream)
-  futureValue?: number;    // keeper value (peak ceiling × age × proximity)
+  presentValue?: number;   // win-now value (WAR-driven, discounted downstream) — DEFAULT-settings baseline
+  futureValue?: number;    // keeper value (peak ceiling × age × proximity) — DEFAULT-settings baseline
   age?: number;            // projection age (peak age for hitters, current for pitchers)
+  // Raw value-model inputs, so the client can recompute PV/FV live against the
+  // user's league settings. Premium-only — stripped from non-premium payloads.
+  hr?: number;
+  sb?: number;
+  curWrcPlus?: number;     // current-year wRC+ (hitters)
+  curEra20?: number;       // current-year ERA/20 TBF (pitchers)
+  level?: string;          // highest level (for proximity / present-level factor)
+  marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
 }
 
 // A starting pitcher's matchup today: the opposing lineup's offense + park, from
