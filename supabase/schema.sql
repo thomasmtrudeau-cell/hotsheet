@@ -237,3 +237,33 @@ drop trigger if exists followed_players_cap on public.followed_players;
 create trigger followed_players_cap
   before insert on public.followed_players
   for each row execute function public.enforce_follow_cap();
+
+-- ---------------------------------------------------------------------------
+-- push_subscriptions: Web Push endpoints for background ("app closed") alerts.
+-- One row per browser/device a user opts in on. The push cron reads across all
+-- users under the service role; each user manages only their own rows. See
+-- supabase/migrations/2026-07-13-push-subscriptions.sql for the canonical DDL
+-- (columns: endpoint PK, user_id, subscription jsonb, last_state jsonb, times).
+-- ---------------------------------------------------------------------------
+create table if not exists public.push_subscriptions (
+  endpoint     text primary key,
+  user_id      uuid not null references auth.users (id) on delete cascade,
+  subscription jsonb not null,
+  last_state   jsonb not null default '{}'::jsonb,
+  created_at   timestamptz not null default now(),
+  updated_at   timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_user_idx
+  on public.push_subscriptions (user_id);
+
+alter table public.push_subscriptions enable row level security;
+
+drop policy if exists "push: select own" on public.push_subscriptions;
+create policy "push: select own" on public.push_subscriptions for select using (auth.uid() = user_id);
+drop policy if exists "push: insert own" on public.push_subscriptions;
+create policy "push: insert own" on public.push_subscriptions for insert with check (auth.uid() = user_id);
+drop policy if exists "push: update own" on public.push_subscriptions;
+create policy "push: update own" on public.push_subscriptions for update using (auth.uid() = user_id);
+drop policy if exists "push: delete own" on public.push_subscriptions;
+create policy "push: delete own" on public.push_subscriptions for delete using (auth.uid() = user_id);

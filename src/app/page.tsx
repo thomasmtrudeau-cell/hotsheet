@@ -14,6 +14,7 @@ import PlayerCard from '@/components/PlayerCard';
 import EmptyState from '@/components/EmptyState';
 import GroupBar from '@/components/GroupBar';
 import NotificationBell from '@/components/NotificationBell';
+import PushToggle from '@/components/PushToggle';
 import RangeView from '@/components/RangeView';
 import MoversList from '@/components/MoversList';
 import RisersView from '@/components/RisersView';
@@ -555,6 +556,7 @@ export default function Home() {
             onOpen={markNotificationsRead}
             onClear={clearAllNotifications}
           />
+          <PushToggle />
           <div className="flex flex-col items-end">
             <span className="text-xs text-zinc-500 hidden sm:block max-w-[180px] truncate">{user.email}</span>
             <button

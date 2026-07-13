@@ -1,5 +1,6 @@
 {
   "crons": [
-    { "path": "/api/cron/war-snapshot", "schedule": "0 13 * * *" }
+    { "path": "/api/cron/war-snapshot", "schedule": "0 13 * * *" },
+    { "path": "/api/cron/push-check", "schedule": "*/30 * * * *" }
   ]
 }
