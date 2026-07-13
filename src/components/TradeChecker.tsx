@@ -103,11 +103,25 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // Present value: injured players lose most of it, a returning teammate (PT
   // risk) docks it, and the home park nudges it (wRC+ is already park-adjusted,
   // so this is a light real-life-output touch).
+  // Perpetual job-security discount: low-WAR bats are always a slump/call-up from
+  // losing the job, even if full-time now. 1B/DH get slack — their WAR is
+  // positionally deflated, so a good bat (high wRC+) secures the spot.
+  const jobSecurity = (p: SearchResult) => {
+    if (p.primaryPosition === 'P') return 1;
+    const war = metrics[p.id]?.war;
+    if (war === undefined) return 1;
+    let f = war >= 2.0 ? 1.0 : war >= 1.5 ? 0.93 : war >= 1.0 ? 0.85 : 0.7;
+    if ((p.primaryPosition === '1B' || p.primaryPosition === 'DH') && (metrics[p.id]?.peakWrcPlus ?? 0) >= 110) {
+      f = Math.min(1, f + 0.1);
+    }
+    return f;
+  };
   const pvOf = (p: SearchResult) =>
     (metrics[p.id]?.presentValue ?? 0)
     * (injuries[p.id] ? 0.6 : 1)
     * (ptRisk[p.id] ? 0.8 : 1)
     * (roles[p.id]?.factor ?? 1)
+    * jobSecurity(p)
     * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   const fvOf = (p: SearchResult) => metrics[p.id]?.futureValue ?? 0;
   const sumPv = (s: SearchResult[]) => s.reduce((t, p) => t + pvOf(p), 0);
@@ -183,7 +197,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         {renderColumn('B', sideB)}
       </div>
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = current-year production, counts only in the majors. <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Injured players take a present-value hit. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = current-year production (majors only), discounted for injury, a returning teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
       </p>
     </div>
   );
