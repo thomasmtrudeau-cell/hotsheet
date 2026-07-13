@@ -13,16 +13,22 @@ export const HOME_PARK_PF: Record<string, number> = {
   'Seattle Mariners': 93,
 };
 
-// A modest value multiplier from the home park. wRC+ is already park-adjusted,
-// so this is a light touch reflecting real-life counting-stat/roto output —
-// inverted for pitchers (a pitcher-friendly park helps them).
+// A value multiplier from the home park, applied to PRESENT value only — a hot
+// park inflates the short-term counting-stat/roto output a player actually
+// banks now. wRC+ is already park-adjusted, so this is the extra real-life
+// output on top, inverted for pitchers. Extreme parks (Coors +12) get a bigger
+// swing. FUTURE value is deliberately left park-agnostic: the park benefit is
+// fragile (a struggling hitter won't hold the job/park long-term), so a keeper
+// ceiling shouldn't bank it.
 export function homeParkMultiplier(team: string, isPitcher: boolean): number {
   const pf = HOME_PARK_PF[team];
   if (pf === undefined) return 1;
   const fav = isPitcher ? 100 - pf : pf - 100; // >0 favorable for this player
-  if (fav >= 10) return 1.08;
-  if (fav >= 4) return 1.04;
-  if (fav <= -10) return 0.92;
-  if (fav <= -4) return 0.96;
+  if (fav >= 11) return 1.11;  // Coors-tier
+  if (fav >= 7) return 1.07;
+  if (fav >= 3) return 1.03;
+  if (fav <= -11) return 0.89;
+  if (fav <= -7) return 0.93;
+  if (fav <= -3) return 0.97;
   return 1;
 }
