@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { Riser } from '@/lib/types';
 import PremiumTeaser from './PremiumTeaser';
 
@@ -13,10 +14,19 @@ interface RisersViewProps {
 }
 
 const WINDOWS = [7, 14, 30];
+const WAR_FLOORS = [
+  { label: 'All', val: 0 },
+  { label: '1+ WAR', val: 1 },
+  { label: '2+ WAR', val: 2 },
+];
 
 export default function RisersView({ risers, window, onWindow, loading, isPremium, isFollowing }: RisersViewProps) {
+  // Default to 2+ WAR — climbers below that are rarely worth acting on.
+  const [minWar, setMinWar] = useState(2);
   // Regular users get the premium preview, not the (empty) board.
   if (!isPremium) return <PremiumTeaser />;
+
+  const shown = risers.filter((r) => r.war >= minWar);
 
   return (
     <div>
@@ -35,24 +45,38 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
             </button>
           ))}
         </div>
-        <span className="text-[11px] text-zinc-600">biggest peak-WAR gains</span>
+        <div className="flex rounded-lg overflow-hidden border border-zinc-700">
+          {WAR_FLOORS.map((f) => (
+            <button
+              key={f.val}
+              onClick={() => setMinWar(f.val)}
+              className={`px-2.5 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                minWar === f.val ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+              }`}
+            >
+              {f.label}
+            </button>
+          ))}
+        </div>
       </div>
 
       {loading && risers.length === 0 ? (
         <div className="flex justify-center py-16">
           <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
         </div>
-      ) : risers.length === 0 ? (
+      ) : shown.length === 0 ? (
         <div className="text-center py-12 text-sm text-zinc-500">
-          No risers yet for this window.
-          <div className="text-[11px] text-zinc-600 mt-1">
-            Risers build from WAR snapshots taken a few times a day — this fills in once there are two captures with a change between them.
-          </div>
+          {risers.length === 0 ? 'No risers yet for this window.' : `No risers at ${minWar}+ WAR — lower the filter to see more.`}
+          {risers.length === 0 && (
+            <div className="text-[11px] text-zinc-600 mt-1">
+              Risers build from WAR snapshots taken a few times a day — this fills in once there are two captures with a change between them.
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-1.5">
-          <p className="text-[11px] text-zinc-500 mb-2">Top prospect risers — biggest peak-WAR gains over the last {window} days.</p>
-          {risers.map((r, i) => (
+          <p className="text-[11px] text-zinc-500 mb-2">Top prospect risers — biggest peak-WAR gains over the last {window} days{minWar > 0 ? `, ${minWar}+ WAR` : ''}.</p>
+          {shown.map((r, i) => (
             <div
               key={`${r.name_key}-${r.is_pitcher}`}
               className="flex items-center justify-between gap-3 px-3 py-2 bg-zinc-800/50 border border-zinc-700/40 rounded-lg"
