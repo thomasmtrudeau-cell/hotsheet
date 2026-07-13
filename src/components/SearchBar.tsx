@@ -1,15 +1,16 @@
 'use client';
 
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { SearchResult, LEVEL_LABELS, FollowedPlayer, Group } from '@/lib/types';
+import { SearchResult, LEVEL_LABELS, FollowedPlayer, Group, PremiumMetrics } from '@/lib/types';
 
 interface SearchBarProps {
   onFollow: (player: FollowedPlayer, groupIds?: string[]) => void;
   isFollowing: (playerId: number) => boolean;
   groups: Group[];
+  onCreateList: (name: string) => Promise<Group | null>;
 }
 
-export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarProps) {
+export default function SearchBar({ onFollow, isFollowing, groups, onCreateList }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -17,6 +18,9 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
   // Which result's "add to group" picker is open, and the groups checked in it.
   const [pickerId, setPickerId] = useState<number | null>(null);
   const [pickerGroups, setPickerGroups] = useState<string[]>([]);
+  const [warMap, setWarMap] = useState<Record<number, PremiumMetrics>>({}); // premium WAR for search hits
+  const [creatingList, setCreatingList] = useState(false);
+  const [newListName, setNewListName] = useState('');
   const wrapperRef = useRef<HTMLDivElement>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -39,7 +43,21 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
     try {
       const res = await fetch(`/api/search?q=${encodeURIComponent(q)}`);
       const data = await res.json();
-      setResults(Array.isArray(data) ? data : []);
+      const arr: SearchResult[] = Array.isArray(data) ? data : [];
+      setResults(arr);
+      // Premium WAR for the hits (server returns {} for non-premium).
+      if (arr.length > 0) {
+        fetch('/api/war', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ players: arr }),
+        })
+          .then((r) => r.json())
+          .then((d) => setWarMap(d && typeof d === 'object' ? d : {}))
+          .catch(() => setWarMap({}));
+      } else {
+        setWarMap({});
+      }
     } catch {
       setResults([]);
     } finally {
@@ -131,6 +149,11 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
                       }`}>
                         {LEVEL_LABELS[r.sportId] || 'Unknown'}
                       </span>
+                      {warMap[r.id]?.war !== undefined && (
+                        <span className="ml-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-500/20 text-amber-300" title="Peak WAR projection (ScoutTheStatline)">
+                          {warMap[r.id]!.war!.toFixed(1)} WAR
+                        </span>
+                      )}
                     </div>
                   </div>
                   {following ? (
@@ -142,12 +165,12 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
                       {/* Primary action: follow immediately, no list required. */}
                       <button
                         onClick={() => handleFollow(r)}
-                        className={`px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors ${groups.length > 0 ? 'rounded-l' : 'rounded'}`}
+                        className="px-3 py-1 text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors rounded-l"
                       >
                         Follow
                       </button>
-                      {/* Optional: open the inline list picker. */}
-                      {groups.length > 0 && (
+                      {/* Optional: open the inline list picker (existing lists + new). */}
+                      {(
                         <button
                           onClick={() => (picking ? setPickerId(null) : openPicker(r.id))}
                           title="Add to lists (optional)"
@@ -183,6 +206,37 @@ export default function SearchBar({ onFollow, isFollowing, groups }: SearchBarPr
                           <span className="truncate">{g.name}</span>
                         </button>
                       ))}
+                      {/* Create a brand-new list right here and add him to it. */}
+                      {creatingList ? (
+                        <form
+                          onSubmit={async (e) => {
+                            e.preventDefault();
+                            const name = newListName.trim();
+                            if (!name) return;
+                            const g = await onCreateList(name);
+                            if (g) setPickerGroups((prev) => [...prev, g.id]);
+                            setNewListName('');
+                            setCreatingList(false);
+                          }}
+                          className="flex items-center gap-1 px-1 py-1"
+                        >
+                          <input
+                            autoFocus
+                            value={newListName}
+                            onChange={(e) => setNewListName(e.target.value)}
+                            placeholder="New list name…"
+                            className="flex-1 min-w-0 px-2 py-1 bg-zinc-800 border border-zinc-700 rounded text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
+                          />
+                          <button type="submit" className="px-2 py-1 rounded text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white cursor-pointer">Add</button>
+                        </form>
+                      ) : (
+                        <button
+                          onClick={() => setCreatingList(true)}
+                          className="w-full text-left px-1 py-1 text-xs text-blue-300 hover:bg-zinc-700/40 rounded cursor-pointer"
+                        >
+                          + New list
+                        </button>
+                      )}
                     </div>
                     <button
                       onClick={() => handleFollow(r, pickerGroups)}

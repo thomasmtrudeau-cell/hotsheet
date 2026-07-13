@@ -547,6 +547,7 @@ export default function Home() {
           onFollow={follow}
           isFollowing={(id) => players.some(p => p.id === id)}
           groups={groups}
+          onCreateList={addGroup}
         />
       </div>
 
