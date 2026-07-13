@@ -85,6 +85,18 @@ function marketBaselineFor(auctionId?: string): number | undefined {
   return Math.max(0, a.d - FA_LINE[a.r]) / AUCTION_DIV;
 }
 
+// Pitcher WAR lives in the column labeled 'WAR (20 TBFG)' (col BB) — the
+// reliever-adjusted figure. The plain 'WAR' columns under-credit relievers
+// (Griffin Jax reads 1.6 there vs 2.69 here; Clase 2.15 vs 3.52). Hitters use
+// the plain 'WAR' column.
+function warColumn(header: string[], isPitcher: boolean): number {
+  if (isPitcher) {
+    const i = header.findIndex((h) => h === 'WAR (20 TBFG)');
+    if (i >= 0) return i;
+  }
+  return header.findIndex((h) => h === 'WAR');
+}
+
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
   const rows = parseCsv(csv);
   const out = new Map<string, PremiumMetrics>();
@@ -93,7 +105,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
   const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
-  const warIdx = header.findIndex((h) => h === 'WAR');
+  const warIdx = warColumn(header, isPitcher);
   const extraIdx = isPitcher
     ? header.findIndex((h) => h === 'era 20 tbf/g')
     : header.findIndex((h) => h === 'wRC+');
@@ -196,14 +208,27 @@ async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
 async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> }> {
   const now = Date.now();
   if (cache && cache.sheetId === sheetId && now - cache.at < TTL) return cache;
-  const [hitCsv, pitCsv] = await Promise.all([
-    fetchCsvTab(sheetId, HIT_TAB),
-    fetchCsvTab(sheetId, PIT_TAB),
-  ]);
-  const hitters = parseTab(hitCsv, 'name', false);
-  const pitchers = parseTab(pitCsv, 'player', true);
-  cache = { sheetId, at: now, hitters, pitchers };
-  return cache;
+  try {
+    const [hitCsv, pitCsv] = await Promise.all([
+      fetchCsvTab(sheetId, HIT_TAB),
+      fetchCsvTab(sheetId, PIT_TAB),
+    ]);
+    const hitters = parseTab(hitCsv, 'name', false);
+    const pitchers = parseTab(pitCsv, 'player', true);
+    // A transient bad/empty response must not clobber good data — keep the last
+    // good cache rather than blanking every player's metrics to zero.
+    if (hitters.size === 0 && pitchers.size === 0 && cache && cache.sheetId === sheetId) {
+      return cache;
+    }
+    cache = { sheetId, at: now, hitters, pitchers };
+    return cache;
+  } catch (err) {
+    if (cache && cache.sheetId === sheetId) {
+      console.warn('WAR sheet refetch failed — serving stale cache:', err);
+      return cache; // stale-on-error: better slightly old than all-zeros
+    }
+    throw err;
+  }
 }
 
 export interface WarRow {
@@ -225,7 +250,7 @@ function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
   const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
-  const warIdx = header.findIndex((h) => h === 'WAR');
+  const warIdx = warColumn(header, isPitcher);
   const lvlIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
   if (nameIdx < 0 || warIdx < 0) return [];
   for (let r = 1; r < rows.length; r++) {
