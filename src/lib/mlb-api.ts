@@ -286,6 +286,14 @@ export async function hydrateFollowedPlayers(
 
   return withTeams.map(({ p, details, currentTeam }) => {
     const teamInfo = teamMap.get(currentTeam.id);
+    const onRehab = isOnRehabAssignment(details);
+    // A player on a rehab assignment is STILL on the IL — but his affiliate
+    // roster lists him as 'RA' (active), not a "Dxx" IL code, so the roster scan
+    // finds no injury. Left alone that reads as "activated," and when he returns
+    // to the parent club's IL it re-registers as "placed on the IL" — a false
+    // on/off churn (Semien: on the IL since 6/25, but a 7/12 rehab stint made it
+    // re-fire). Carry his prior IL status through the rehab stint instead.
+    const injury = injuryMap.get(p.id) ?? (onRehab ? p.injury : undefined);
     return {
       ...p,
       fullName: details ? formatDisplayName(details) : p.fullName,
@@ -293,8 +301,8 @@ export async function hydrateFollowedPlayers(
       sportId: teamInfo?.sportId ?? p.sportId,
       parentOrg: teamInfo?.parentOrgName ?? p.parentOrg,
       parentOrgAbbrev: teamInfo?.parentOrgAbbrev ?? p.parentOrgAbbrev,
-      injury: injuryMap.get(p.id),
-      onRehab: isOnRehabAssignment(details),
+      injury,
+      onRehab,
       batSide: (() => {
         const code = (details?.batSide as { code?: string } | undefined)?.code;
         return code === 'L' || code === 'R' || code === 'S' ? code : undefined;
