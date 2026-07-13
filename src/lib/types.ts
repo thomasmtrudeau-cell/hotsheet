@@ -327,10 +327,11 @@ export const REGRESSION_VIEW = 'regression';
 export interface RegressionRow {
   nameKey: string;
   player: string;
-  level?: string;
-  peakEra20: number;
-  currentEra20: number;
-  delta: number; // current - peak; negative = overperforming (sell), positive = underperforming (buy)
+  level?: string;        // level where he's actually pitching this year
+  peakEra20: number;     // sheet's true-talent ERA/20 projection
+  currentEra20: number;  // ACTUAL current-year ERA (from the MLB/MiLB API)
+  delta: number;         // actual − peak; positive = underperforming (buy-low), negative = overperforming (sell-high)
+  ip?: number;           // actual current-year innings (sample size)
 }
 
 // OOPSY weekly projections (premium). Read from a separate published sheet.

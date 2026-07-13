@@ -294,12 +294,49 @@ export async function fetchPremiumMap(
   return result;
 }
 
-// SP regression: peak vs current-year ERA/20 for starters (IP/G ≥ 3.5, so SP and
-// SP prospects, not relievers). "peak" = the sheet's 'era 20 tbf/g' true-talent
-// projection; "now" = 'era 20 tbf/g - current year'; delta = now − peak. Returns
-// the full starter set (all levels); the client applies the ERA / level / gap
-// filters and splits sell-high (pitching under → regresses up) vs buy-low
-// (pitching over → bounce-back). Premium.
+// Actual current-year pitching, pulled live from the MLB/MiLB stats API across
+// every level. Keyed by normalized name (the same join key the sheet uses); when
+// a pitcher has thrown at multiple levels we keep the one with the most innings
+// (his primary current role). Cached ~30 min. Season stamped in via `season`.
+const SPORT_LEVEL: Record<number, string> = { 1: 'MLB', 11: 'AAA', 12: 'AA', 13: 'A+', 14: 'A', 16: 'Rk' };
+let actualCache: { at: number; season: number; map: Map<string, { era: number; ip: number; level: string }> } | null = null;
+const ACTUAL_TTL = 30 * 60 * 1000;
+async function fetchActualPitcherStats(season: number): Promise<Map<string, { era: number; ip: number; level: string }>> {
+  if (actualCache && actualCache.season === season && Date.now() - actualCache.at < ACTUAL_TTL) return actualCache.map;
+  const byName = new Map<string, { era: number; ip: number; level: string }>();
+  await Promise.all(Object.keys(SPORT_LEVEL).map(async (sidStr) => {
+    const sid = Number(sidStr);
+    try {
+      const res = await fetch(
+        `https://statsapi.mlb.com/api/v1/stats?stats=season&group=pitching&season=${season}&sportId=${sid}&limit=2000&playerPool=all`,
+        { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' }
+      );
+      if (!res.ok) return;
+      const d = await res.json();
+      const splits = d?.stats?.[0]?.splits ?? [];
+      for (const s of splits) {
+        const name: string | undefined = s?.player?.fullName;
+        const era = parseFloat(s?.stat?.era);
+        const ip = parseFloat(s?.stat?.inningsPitched);
+        if (!name || !Number.isFinite(era) || !Number.isFinite(ip)) continue;
+        const key = normalizeName(name);
+        const cur = byName.get(key);
+        if (!cur || ip > cur.ip) byName.set(key, { era, ip, level: SPORT_LEVEL[sid] });
+      }
+    } catch { /* skip this level */ }
+  }));
+  actualCache = { at: Date.now(), season, map: byName };
+  return byName;
+}
+
+// SP regression: the sheet's PEAK (true-talent) ERA/20 projection vs the pitcher's
+// ACTUAL current-year ERA from the MLB/MiLB API. delta = actual − peak, so a
+// pitcher running ABOVE his projection (positive delta) is a buy-low bounce-back
+// candidate; running UNDER it (negative) is a sell-high (regression up looms).
+// Starters only (sheet IP/G ≥ 3.5) with real innings this year (≥ MIN_IP), which
+// also drops guys who haven't actually pitched. Level = where he's actually
+// throwing. The client applies the ERA / level / gap filters. Premium.
+const REGRESSION_MIN_IP = 20;
 export async function getSpRegression(sheetId: string): Promise<{ rows: RegressionRow[] }> {
   const csv = await fetchCsvTab(sheetId, PIT_TAB);
   const rows = parseCsv(csv);
@@ -307,11 +344,11 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
   const h = rows[0].map((x) => x.trim());
   const pi = h.findIndex((x) => x.toLowerCase() === 'player');
   const peakI = h.findIndex((x) => x === 'era 20 tbf/g');
-  const curI = h.findIndex((x) => x === 'era 20 tbf/g - current year');
   const ipgI = h.findIndex((x) => x === 'IP/G');
-  const lvlI = h.findIndex((x) => x.toLowerCase() === 'highest level');
   const idI = h.findIndex((x) => x.toLowerCase() === 'id');
-  if (pi < 0 || peakI < 0 || curI < 0) return { rows: [] };
+  if (pi < 0 || peakI < 0) return { rows: [] };
+
+  const actual = await fetchActualPitcherStats(new Date().getUTCFullYear());
 
   const byKey = new Map<string, RegressionRow>();
   const keptStale = new Map<string, boolean>();
@@ -320,14 +357,15 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
     const name = c[pi]?.trim();
     if (!name) continue;
     const peak = parseFloat(c[peakI]);
-    const cur = parseFloat(c[curI]);
     const ipg = ipgI >= 0 ? parseFloat(c[ipgI]) : NaN;
-    if (!Number.isFinite(peak) || !Number.isFinite(cur)) continue;
+    if (!Number.isFinite(peak)) continue;
     if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only (SP + SP prospects)
     const key = normalizeName(name);
+    const a = actual.get(key);
+    if (!a || a.ip < REGRESSION_MIN_IP) continue; // must have real current-year innings
     const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
-    byKey.set(key, { nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, peakEra20: peak, currentEra20: cur, delta: cur - peak });
+    byKey.set(key, { nameKey: key, player: name, level: a.level, peakEra20: peak, currentEra20: a.era, delta: a.era - peak, ip: a.ip });
     keptStale.set(key, stale);
   }
   return { rows: [...byKey.values()] };

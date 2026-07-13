@@ -46,7 +46,7 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
               </div>
               <div className="flex items-center gap-2 whitespace-nowrap font-mono">
                 <span className={accent}>{r.delta > 0 ? '+' : ''}{r.delta.toFixed(2)}</span>
-                <span className="text-zinc-500">{r.currentEra20.toFixed(2)} now · {r.peakEra20.toFixed(2)} peak</span>
+                <span className="text-zinc-500">{r.currentEra20.toFixed(2)} ERA{r.ip ? ` (${Math.round(r.ip)} IP)` : ''} · {r.peakEra20.toFixed(2)} proj</span>
               </div>
             </div>
           ))}
@@ -105,8 +105,8 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
   return (
     <div>
       <p className="text-[11px] text-zinc-500 mb-3">
-        Starters (SP &amp; SP prospects) whose current-year ERA/20 has drifted from their{' '}
-        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload.">peak (true-talent) projection</span>
+        Starters (SP &amp; SP prospects) whose <span className="text-zinc-300">actual current-year ERA</span> (live from the MLB/MiLB API, min {' '}20 IP) has drifted from their{' '}
+        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload. (ERA/20 runs ~0.2 above traditional ERA, so on-talent arms sit slightly negative.)">peak (true-talent) ERA/20 projection</span>
         {' '}— the gap is the regression signal.
       </p>
 
