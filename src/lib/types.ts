@@ -296,6 +296,7 @@ export const CALLUPS_VIEW = 'callups';
 export const PROMOTIONS_VIEW = 'promotions';
 export const RISERS_VIEW = 'risers';
 export const PROJECTIONS_VIEW = 'projections';
+export const TRADE_VIEW = 'trade';
 
 // OOPSY weekly projections (premium). Read from a separate published sheet.
 export interface OopsyPitcher {

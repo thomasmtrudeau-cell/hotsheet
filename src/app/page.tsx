@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -20,6 +20,7 @@ import RisersView from '@/components/RisersView';
 import PremiumTeaser from '@/components/PremiumTeaser';
 import RosterImport from '@/components/RosterImport';
 import ProjectionsView from '@/components/ProjectionsView';
+import TradeChecker from '@/components/TradeChecker';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -138,7 +139,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -328,7 +329,8 @@ export default function Home() {
   const isPromotions = activeGroup === PROMOTIONS_VIEW;
   const isRisers = activeGroup === RISERS_VIEW;
   const isProjections = activeGroup === PROJECTIONS_VIEW;
-  const isDiscovery = isCallups || isPromotions || isRisers || isProjections;
+  const isTrade = activeGroup === TRADE_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = Object.keys(premiumMap).length > 0;
@@ -591,6 +593,8 @@ export default function Home() {
             ? `${risers.length} riser${risers.length !== 1 ? 's' : ''}`
             : isProjections
             ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections`
+            : isTrade
+            ? 'Trade checker'
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -678,6 +682,8 @@ export default function Home() {
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}
         />
+      ) : isTrade ? (
+        <TradeChecker isPremium={isPremium} />
       ) : players.length === 0 ? (
         <EmptyState />
       ) : isRange ? (
