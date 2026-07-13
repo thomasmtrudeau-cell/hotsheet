@@ -42,6 +42,8 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
               <div className="min-w-0 flex items-center gap-1.5">
                 <span className="text-zinc-100 truncate">{r.player}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
+                {r.role && <span className={`text-[10px] ${r.role === 'RP' ? 'text-purple-300/80' : 'text-zinc-500'}`} title={r.role === 'RP' ? 'Pitching in relief this year' : 'In the rotation'}>{r.role}</span>}
+                {r.il && <span className="text-[10px] px-1 rounded bg-red-500/20 text-red-400" title="Currently on the IL — small sample / anomalous line">IL</span>}
                 {isFollowing(r.player) && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
               </div>
               <div className="flex items-center gap-2 whitespace-nowrap font-mono">

@@ -209,7 +209,7 @@ function isOnRehabAssignment(details?: Record<string, unknown>): boolean {
   return entries.some((e) => e.isActive && e.status?.code === 'RA');
 }
 
-async function getInjuryStatusForTeams(
+export async function getInjuryStatusForTeams(
   teamIds: number[],
   failedTeams?: Set<number>
 ): Promise<Map<number, InjuryStatus>> {

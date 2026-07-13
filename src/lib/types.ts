@@ -350,6 +350,10 @@ export interface RegressionRow {
   currentEra20: number;  // ACTUAL current-year ERA (from the MLB/MiLB API)
   delta: number;         // actual − peak; positive = underperforming (buy-low), negative = overperforming (sell-high)
   ip?: number;           // actual current-year innings (sample size)
+  role?: 'SP' | 'RP';    // current-year usage: rotation vs bullpen
+  il?: boolean;          // currently on the IL
+  playerId?: number;     // MLBAM id (for the IL join)
+  teamId?: number;       // current team (for the IL join)
 }
 
 // OOPSY weekly projections (premium). Read from a separate published sheet.
