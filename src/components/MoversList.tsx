@@ -1,6 +1,7 @@
 'use client';
 
 import { CallUp, FollowedPlayer } from '@/lib/types';
+import Tooltip from './Tooltip';
 
 interface MoversListProps {
   items: CallUp[];
@@ -98,12 +99,11 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                     </>
                   )
                 ) : (
-                  <span
-                    className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/25 text-amber-300/70"
-                    title="Premium: WAR, peak wRC+ & ERA/20 TBF from ScoutTheStatline. Tap ✨ Premium to learn more."
-                  >
-                    🔒 WAR · wRC+ · ERA/20
-                  </span>
+                  <Tooltip text="Premium: WAR, peak wRC+ & ERA/20 TBF from ScoutTheStatline. Tap ✨ Premium to learn more.">
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/25 text-amber-300/70 cursor-help">
+                      🔒 WAR · wRC+ · ERA/20
+                    </span>
+                  </Tooltip>
                 )}
               </div>
               <div className="text-[11px] text-zinc-500 truncate">

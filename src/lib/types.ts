@@ -352,6 +352,9 @@ export interface RegressionRow {
   ip?: number;           // actual current-year innings (sample size)
   role?: 'SP' | 'RP';    // current-year usage: rotation vs bullpen
   il?: boolean;          // currently on the IL
+  ilLabel?: string;      // e.g. "60-Day IL" (from the roster)
+  ilNote?: string;       // injury reason, e.g. "Right shoulder impingement." (roster)
+  ilSince?: string;      // IL placement date (YYYY-MM-DD, from transactions)
   playerId?: number;     // MLBAM id (for the IL join)
   teamId?: number;       // current team (for the IL join)
 }

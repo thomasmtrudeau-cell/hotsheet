@@ -241,6 +241,32 @@ export async function getInjuryStatusForTeams(
   return result;
 }
 
+// IL placement detail (when + why) per player, from the transactions feed —
+// straight facts, no speculation. Fetches each team's transactions for the
+// season and keeps the most recent IL-placement per player. Cached ~1h.
+export interface IlDetail { date: string; description: string }
+export async function getIlDetailsForTeams(teamIds: number[]): Promise<Map<number, IlDetail>> {
+  const season = new Date().getFullYear();
+  const out = new Map<number, IlDetail>();
+  await Promise.all(Array.from(new Set(teamIds)).map(async (tid) => {
+    try {
+      const data = await cachedFetch<{ transactions?: Array<{ person?: { id?: number }; date?: string; description?: string }> }>(
+        `${MLB_API}/transactions?teamId=${tid}&startDate=${season}-01-01&endDate=${season}-12-31`,
+        3600_000
+      );
+      for (const t of data.transactions ?? []) {
+        const id = t.person?.id;
+        const desc = t.description ?? '';
+        if (!id || !t.date) continue;
+        if (!/injured list/i.test(desc) || !/placed/i.test(desc)) continue; // IL placements only
+        const prev = out.get(id);
+        if (!prev || t.date > prev.date) out.set(id, { date: t.date, description: desc });
+      }
+    } catch { /* skip team */ }
+  }));
+  return out;
+}
+
 // --- Hydrate followed players with correct team data + names ---
 
 export async function hydrateFollowedPlayers(

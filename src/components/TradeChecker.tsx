@@ -212,7 +212,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const pvDiff = sumPv(sideA, 'A') - sumPv(sideB, 'B');
   const fvDiff = sumFv(sideA, 'A') - sumFv(sideB, 'B');
   const edge = (d: number, unit: string) =>
-    Math.abs(d) < 1 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
+    Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
   const renderColumn = (side: Side, players: SearchResult[]) => {
     const isOpened = side === openedSide;
