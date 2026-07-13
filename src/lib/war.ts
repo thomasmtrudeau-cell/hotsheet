@@ -294,13 +294,16 @@ export async function fetchPremiumMap(
   return result;
 }
 
-// SP regression: peak vs current-year ERA/20 for starters (IP/G ≥ 3.5). Sell-highs
-// are pitching well UNDER their true-talent projection (regression up looms);
-// buy-lows are pitching OVER it (positive regression). Premium.
-export async function getSpRegression(sheetId: string): Promise<{ sellHighs: RegressionRow[]; buyLows: RegressionRow[] }> {
+// SP regression: peak vs current-year ERA/20 for starters (IP/G ≥ 3.5, so SP and
+// SP prospects, not relievers). "peak" = the sheet's 'era 20 tbf/g' true-talent
+// projection; "now" = 'era 20 tbf/g - current year'; delta = now − peak. Returns
+// the full starter set (all levels); the client applies the ERA / level / gap
+// filters and splits sell-high (pitching under → regresses up) vs buy-low
+// (pitching over → bounce-back). Premium.
+export async function getSpRegression(sheetId: string): Promise<{ rows: RegressionRow[] }> {
   const csv = await fetchCsvTab(sheetId, PIT_TAB);
   const rows = parseCsv(csv);
-  if (rows.length < 2) return { sellHighs: [], buyLows: [] };
+  if (rows.length < 2) return { rows: [] };
   const h = rows[0].map((x) => x.trim());
   const pi = h.findIndex((x) => x.toLowerCase() === 'player');
   const peakI = h.findIndex((x) => x === 'era 20 tbf/g');
@@ -308,7 +311,7 @@ export async function getSpRegression(sheetId: string): Promise<{ sellHighs: Reg
   const ipgI = h.findIndex((x) => x === 'IP/G');
   const lvlI = h.findIndex((x) => x.toLowerCase() === 'highest level');
   const idI = h.findIndex((x) => x.toLowerCase() === 'id');
-  if (pi < 0 || peakI < 0 || curI < 0) return { sellHighs: [], buyLows: [] };
+  if (pi < 0 || peakI < 0 || curI < 0) return { rows: [] };
 
   const byKey = new Map<string, RegressionRow>();
   const keptStale = new Map<string, boolean>();
@@ -320,22 +323,14 @@ export async function getSpRegression(sheetId: string): Promise<{ sellHighs: Reg
     const cur = parseFloat(c[curI]);
     const ipg = ipgI >= 0 ? parseFloat(c[ipgI]) : NaN;
     if (!Number.isFinite(peak) || !Number.isFinite(cur)) continue;
-    if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only
-    // Curate to fantasy-relevant arms: a true-talent (peak) ERA/20 at or below
-    // ~4.30 is a rosterable starter. This drops the flood of complex-league /
-    // low-A arms sitting at 6-7 ERA that regress but no one would ever add.
-    if (peak > 4.30) continue;
+    if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only (SP + SP prospects)
     const key = normalizeName(name);
     const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
     byKey.set(key, { nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, peakEra20: peak, currentEra20: cur, delta: cur - peak });
     keptStale.set(key, stale);
   }
-  const all = [...byKey.values()];
-  return {
-    sellHighs: all.filter((x) => x.delta <= -0.3).sort((a, b) => a.delta - b.delta).slice(0, 40),
-    buyLows: all.filter((x) => x.delta >= 0.3).sort((a, b) => b.delta - a.delta).slice(0, 40),
-  };
+  return { rows: [...byKey.values()] };
 }
 
 // WAR-only join (playerId -> WAR), used to sort the call-up / promotion

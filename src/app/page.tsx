@@ -125,7 +125,7 @@ export default function Home() {
   const [risersLoading, setRisersLoading] = useState(false);
   const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[] }>({ pitchers: [], hitters: [] });
   const [oopsyLoading, setOopsyLoading] = useState(false);
-  const [regression, setRegression] = useState<{ sellHighs: RegressionRow[]; buyLows: RegressionRow[] }>({ sellHighs: [], buyLows: [] });
+  const [regression, setRegression] = useState<RegressionRow[]>([]);
   const [regressionLoading, setRegressionLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -176,8 +176,8 @@ export default function Home() {
       setRegressionLoading(true);
       fetch('/api/regression')
         .then((r) => r.json())
-        .then((d) => setRegression({ sellHighs: Array.isArray(d?.sellHighs) ? d.sellHighs : [], buyLows: Array.isArray(d?.buyLows) ? d.buyLows : [] }))
-        .catch(() => setRegression({ sellHighs: [], buyLows: [] }))
+        .then((d) => setRegression(Array.isArray(d?.rows) ? d.rows : []))
+        .catch(() => setRegression([]))
         .finally(() => setRegressionLoading(false));
     }
   }, [activeGroup, risersWindow]);
@@ -716,8 +716,7 @@ export default function Home() {
         <TradeChecker isPremium={isPremium} />
       ) : isRegression ? (
         <RegressionView
-          sellHighs={showPremium ? regression.sellHighs : []}
-          buyLows={showPremium ? regression.buyLows : []}
+          rows={showPremium ? regression : []}
           loading={regressionLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}

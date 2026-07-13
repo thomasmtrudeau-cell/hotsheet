@@ -5,7 +5,7 @@ import { getSpRegression } from '@/lib/war';
 // SP sell-high / buy-low regression — PREMIUM ONLY. Returns empty sets for
 // non-premium / unconfigured so the client shows the teaser.
 export async function GET() {
-  const empty = { sellHighs: [], buyLows: [] };
+  const empty = { rows: [] };
   try {
     const sheetId = process.env.WAR_SHEET_ID;
     if (!sheetId) return NextResponse.json(empty);
