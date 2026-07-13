@@ -1,4 +1,5 @@
 import { FollowedPlayer, PremiumMetrics, RegressionRow } from './types';
+import { AUCTION_VALUES, AuctionRole } from './auction-values';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
@@ -98,9 +99,24 @@ function presentLevelFactor(level?: string): number {
   return 0.1;
 }
 
+// Market-vetted present value from the auction calculator. Auction $ is
+// cross-position calibrated (a dollar is a dollar), which our production-based
+// PV is NOT — hitter wRC+ and pitcher ERA/20 live on different scales, so a
+// star hitter used to read far above a comparable ace. We subtract the role's
+// free-agent line (freely available on the wire) and normalize to the PV scale.
+const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 5 };
+const AUCTION_DIV = 5; // $ above the FA line per 1.0 of present value
+const MARKET_WEIGHT = 0.6; // how much the market baseline drives present value
+function marketPv(auctionId?: string): number | undefined {
+  if (!auctionId) return undefined;
+  const a = AUCTION_VALUES[auctionId.trim()];
+  if (!a) return undefined;
+  return Math.max(0, a.d - FA_LINE[a.r]) / AUCTION_DIV;
+}
+
 function computePvFv(opts: {
   isPitcher: boolean; war?: number; peakWrcPlus?: number; hr?: number; sb?: number; era20?: number;
-  curWrcPlus?: number; curEra20?: number; age?: number; level?: string;
+  curWrcPlus?: number; curEra20?: number; age?: number; level?: string; auctionId?: string;
 }): { present: number; future: number } | undefined {
   if (opts.war === undefined) return undefined;
 
@@ -129,7 +145,14 @@ function computePvFv(opts: {
     const w = opts.curWrcPlus ?? opts.peakWrcPlus;
     if (w !== undefined) prod = Math.max(0, (w - 85) / 8);
   }
-  const present = prod * presentLevelFactor(opts.level);
+  const productionPv = prod * presentLevelFactor(opts.level);
+
+  // Blend the market baseline in as a frame of reference. Auction $ assumes a
+  // static full-season role; our dynamic PT/injury/job-security discounts (applied
+  // downstream) are what handle the day-to-day risk a low-WAR guy actually carries,
+  // so we only borrow the market's cross-position calibration here.
+  const mkt = marketPv(opts.auctionId);
+  const present = mkt !== undefined ? MARKET_WEIGHT * mkt + (1 - MARKET_WEIGHT) * productionPv : productionPv;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };
@@ -202,6 +225,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
       curEra20: Number.isFinite(curEra) ? curEra : undefined,
       age: Number.isFinite(age) ? age : undefined,
       level: levelIdx >= 0 ? cells[levelIdx] : undefined,
+      auctionId: idIdx >= 0 ? cells[idIdx] : undefined,
     });
     if (tv) { m.presentValue = tv.present; m.futureValue = tv.future; }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;

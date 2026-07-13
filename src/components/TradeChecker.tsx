@@ -217,7 +217,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         {renderColumn('B', sideB)}
       </div>
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = current-year production (majors only), discounted for injury, a returning teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) blends the auction-market baseline (cross-position calibrated, above each role&apos;s free-agent line) with current-year production, then discounts for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
       </p>
     </div>
   );
