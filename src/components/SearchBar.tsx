@@ -8,9 +8,11 @@ interface SearchBarProps {
   isFollowing: (playerId: number) => boolean;
   groups: Group[];
   onCreateList: (name: string) => Promise<Group | null>;
+  memberOf?: (playerId: number) => string[];               // current lists for a followed player
+  onAssignGroups?: (playerId: number, groupIds: string[]) => void; // set lists for a followed player
 }
 
-export default function SearchBar({ onFollow, isFollowing, groups, onCreateList }: SearchBarProps) {
+export default function SearchBar({ onFollow, isFollowing, groups, onCreateList, memberOf, onAssignGroups }: SearchBarProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [loading, setLoading] = useState(false);
@@ -91,11 +93,13 @@ export default function SearchBar({ onFollow, isFollowing, groups, onCreateList 
     setOpen(false);
   };
 
-  // Open the optional list picker for a result. Starts empty — following never
-  // forces a list on you, and we don't auto-suggest the list you're viewing.
-  const openPicker = (resultId: number) => {
+  // Open the list picker for a result. New follows start empty; an already-
+  // followed player opens pre-checked with his current lists so you can add/remove.
+  const openPicker = (resultId: number, preChecked: string[] = []) => {
     setPickerId(resultId);
-    setPickerGroups([]);
+    setPickerGroups(preChecked);
+    setCreatingList(false);
+    setNewListName('');
   };
 
   const togglePickerGroup = (groupId: string) => {
@@ -157,9 +161,20 @@ export default function SearchBar({ onFollow, isFollowing, groups, onCreateList 
                     </div>
                   </div>
                   {following ? (
-                    <button disabled className="ml-3 px-3 py-1 rounded text-xs font-medium bg-zinc-700 text-zinc-500 cursor-default">
-                      Following
-                    </button>
+                    <div className="ml-3 flex items-center shrink-0">
+                      <span className="px-3 py-1 text-xs font-medium bg-zinc-700 text-zinc-400 rounded-l">Following</span>
+                      {onAssignGroups && (
+                        <button
+                          onClick={() => (picking ? setPickerId(null) : openPicker(r.id, memberOf?.(r.id) ?? []))}
+                          title="Add to / manage lists"
+                          className="px-1.5 py-1 rounded-r border-l border-zinc-600 bg-zinc-700 hover:bg-zinc-600 text-zinc-300 cursor-pointer transition-colors"
+                        >
+                          <svg className={`w-3 h-3 transition-transform ${picking ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                          </svg>
+                        </button>
+                      )}
+                    </div>
                   ) : (
                     <div className="ml-3 flex items-center shrink-0">
                       {/* Primary action: follow immediately, no list required. */}
@@ -186,9 +201,9 @@ export default function SearchBar({ onFollow, isFollowing, groups, onCreateList 
                 </div>
 
                 {/* Inline list picker — part of the normal flow, so it never clips. */}
-                {picking && !following && (
+                {picking && (
                   <div className="px-4 pb-3 pt-1 bg-zinc-900/40">
-                    <div className="px-1 py-1 text-[10px] uppercase tracking-wider text-zinc-500">Add to lists (optional)</div>
+                    <div className="px-1 py-1 text-[10px] uppercase tracking-wider text-zinc-500">{following ? 'Manage lists' : 'Add to lists (optional)'}</div>
                     <div className="space-y-0.5">
                       {groups.map((g) => (
                         <button
@@ -238,13 +253,22 @@ export default function SearchBar({ onFollow, isFollowing, groups, onCreateList 
                         </button>
                       )}
                     </div>
-                    <button
-                      onClick={() => handleFollow(r, pickerGroups)}
-                      disabled={pickerGroups.length === 0}
-                      className="mt-2 w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
-                    >
-                      {pickerGroups.length > 0 ? `Follow + add to ${pickerGroups.length} list${pickerGroups.length > 1 ? 's' : ''}` : 'Pick a list above'}
-                    </button>
+                    {following ? (
+                      <button
+                        onClick={() => { onAssignGroups?.(r.id, pickerGroups); setPickerId(null); }}
+                        className="mt-2 w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white cursor-pointer transition-colors"
+                      >
+                        Save lists
+                      </button>
+                    ) : (
+                      <button
+                        onClick={() => handleFollow(r, pickerGroups)}
+                        disabled={pickerGroups.length === 0}
+                        className="mt-2 w-full px-3 py-1.5 rounded text-xs font-medium bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer transition-colors"
+                      >
+                        {pickerGroups.length > 0 ? `Follow + add to ${pickerGroups.length} list${pickerGroups.length > 1 ? 's' : ''}` : 'Pick a list above'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

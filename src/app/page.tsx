@@ -574,6 +574,8 @@ export default function Home() {
           isFollowing={(id) => players.some(p => p.id === id)}
           groups={groups}
           onCreateList={addGroup}
+          memberOf={(id) => memberships.get(id) ?? []}
+          onAssignGroups={assignGroups}
         />
       </div>
 
