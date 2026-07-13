@@ -42,15 +42,26 @@ export interface ValueInputs {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
-// Younger = more keeper years ahead. Past the peak (28), keeper value decays
-// steadily and keeps decaying — a 36-yo has little dynasty value even while he's
-// still productive now (that's what PRESENT value captures; FV must not flatten).
-export function ageMultiplier(age?: number): number {
+// Keeper value is a DISCOUNTED SUM over the next several seasons, weighting NEXT
+// year far more than distant ones (2027 >> 2030). Each future season is scaled
+// by a gentle aging curve. Because the near years dominate the sum, an aging
+// star who still projects well next year keeps real keeper value instead of
+// being zeroed out — while youth compounds across many productive seasons. The
+// aging curve is deliberately gentle: WAR already separates elite-aging from
+// washed, since a low-WAR vet has little annual value to carry forward anyway.
+const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year
+const KEEPER_HORIZON = 7;     // seasons of keeper value considered
+function ageRetention(a: number): number {
+  return Math.max(0, Math.min(1.0, 1.05 - Math.max(0, a - 30) * 0.06)); // flat ≤30, then −6%/yr
+}
+const KEEPER_NORM = 2.76;     // normalize so a prime-age (26) player lands ≈ 1.15
+export function keeperAgeFactor(age?: number): number {
   if (age === undefined) return 1.0;
-  if (age <= 22) return 1.25;
-  if (age <= 25) return 1.15;
-  if (age <= 28) return 1.0;
-  return Math.max(0.18, 1.0 - (age - 28) * 0.08); // 30→.84, 33→.60, 36→.36, 38→.20
+  let sum = 0;
+  for (let k = 1; k <= KEEPER_HORIZON; k++) {
+    sum += Math.pow(YEAR_DISCOUNT, k - 1) * ageRetention(age + k);
+  }
+  return sum / KEEPER_NORM;
 }
 
 // Distance from the majors discounts a keeper ceiling.
@@ -142,7 +153,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   }
   const warTerm = Math.max(0, inp.war - bar) * 3;
   const fantasyTerm = fantasy * (inp.war > bar ? 1 : 0.15);
-  const future = (warTerm + fantasyTerm) * ageMultiplier(inp.age) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) value: WAR-driven ----
   const lvl = presentLevelFactor(inp.level);
