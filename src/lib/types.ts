@@ -309,6 +309,18 @@ export const PROMOTIONS_VIEW = 'promotions';
 export const RISERS_VIEW = 'risers';
 export const PROJECTIONS_VIEW = 'projections';
 export const TRADE_VIEW = 'trade';
+export const REGRESSION_VIEW = 'regression';
+
+// A starter's peak (true-talent) ERA/20 vs current-year ERA/20 — the gap flags
+// sell-highs (overperforming) and buy-lows (underperforming). Premium.
+export interface RegressionRow {
+  nameKey: string;
+  player: string;
+  level?: string;
+  peakEra20: number;
+  currentEra20: number;
+  delta: number; // current - peak; negative = overperforming (sell), positive = underperforming (buy)
+}
 
 // OOPSY weekly projections (premium). Read from a separate published sheet.
 export interface OopsyPitcher {

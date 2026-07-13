@@ -1,4 +1,4 @@
-import { FollowedPlayer, PremiumMetrics } from './types';
+import { FollowedPlayer, PremiumMetrics, RegressionRow } from './types';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
@@ -270,6 +270,46 @@ export async function fetchPremiumMap(
   }
   if (misses.length > 0) console.warn(`Premium: no sheet match for ${misses.length}:`, misses.slice(0, 20));
   return result;
+}
+
+// SP regression: peak vs current-year ERA/20 for starters (IP/G ≥ 3.5). Sell-highs
+// are pitching well UNDER their true-talent projection (regression up looms);
+// buy-lows are pitching OVER it (positive regression). Premium.
+export async function getSpRegression(sheetId: string): Promise<{ sellHighs: RegressionRow[]; buyLows: RegressionRow[] }> {
+  const csv = await fetchCsvTab(sheetId, PIT_TAB);
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return { sellHighs: [], buyLows: [] };
+  const h = rows[0].map((x) => x.trim());
+  const pi = h.findIndex((x) => x.toLowerCase() === 'player');
+  const peakI = h.findIndex((x) => x === 'era 20 tbf/g');
+  const curI = h.findIndex((x) => x === 'era 20 tbf/g - current year');
+  const ipgI = h.findIndex((x) => x === 'IP/G');
+  const lvlI = h.findIndex((x) => x.toLowerCase() === 'highest level');
+  const idI = h.findIndex((x) => x.toLowerCase() === 'id');
+  if (pi < 0 || peakI < 0 || curI < 0) return { sellHighs: [], buyLows: [] };
+
+  const byKey = new Map<string, RegressionRow>();
+  const keptStale = new Map<string, boolean>();
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r];
+    const name = c[pi]?.trim();
+    if (!name) continue;
+    const peak = parseFloat(c[peakI]);
+    const cur = parseFloat(c[curI]);
+    const ipg = ipgI >= 0 ? parseFloat(c[ipgI]) : NaN;
+    if (!Number.isFinite(peak) || !Number.isFinite(cur)) continue;
+    if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only
+    const key = normalizeName(name);
+    const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
+    if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
+    byKey.set(key, { nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, peakEra20: peak, currentEra20: cur, delta: cur - peak });
+    keptStale.set(key, stale);
+  }
+  const all = [...byKey.values()];
+  return {
+    sellHighs: all.filter((x) => x.delta <= -0.3).sort((a, b) => a.delta - b.delta).slice(0, 40),
+    buyLows: all.filter((x) => x.delta >= 0.3).sort((a, b) => b.delta - a.delta).slice(0, 40),
+  };
 }
 
 // WAR-only join (playerId -> WAR), used to sort the call-up / promotion

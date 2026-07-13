@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW } from '@/lib/types';
 
 const SHOW_ROSTER_IMPORT = false; // hidden until we have a clean paste source
 
@@ -133,6 +133,15 @@ export default function GroupBar({
         title="Trade checker (premium)"
       >
         🔀 Trade
+      </button>
+      <button
+        onClick={() => onSelect(REGRESSION_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === REGRESSION_VIEW ? 'bg-teal-600 text-white' : 'bg-teal-500/10 text-teal-300 hover:bg-teal-500/20'
+        }`}
+        title="SP sell-high / buy-low regression (premium)"
+      >
+        📉 Regression
       </button>
 
       {creating ? (

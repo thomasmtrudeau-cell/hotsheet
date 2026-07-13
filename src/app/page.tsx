@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -21,6 +21,7 @@ import PremiumTeaser from '@/components/PremiumTeaser';
 import RosterImport from '@/components/RosterImport';
 import ProjectionsView from '@/components/ProjectionsView';
 import TradeChecker from '@/components/TradeChecker';
+import RegressionView from '@/components/RegressionView';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -123,6 +124,8 @@ export default function Home() {
   const [risersLoading, setRisersLoading] = useState(false);
   const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[] }>({ pitchers: [], hitters: [] });
   const [oopsyLoading, setOopsyLoading] = useState(false);
+  const [regression, setRegression] = useState<{ sellHighs: RegressionRow[]; buyLows: RegressionRow[] }>({ sellHighs: [], buyLows: [] });
+  const [regressionLoading, setRegressionLoading] = useState(false);
   const [leagueAvgs, setLeagueAvgs] = useState<Map<number, LeagueAverages>>(new Map());
   const [loading, setLoading] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
@@ -139,7 +142,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW || activeGroup === REGRESSION_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -175,6 +178,13 @@ export default function Home() {
         .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [] }))
         .catch(() => setOopsy({ pitchers: [], hitters: [] }))
         .finally(() => setOopsyLoading(false));
+    } else if (activeGroup === REGRESSION_VIEW) {
+      setRegressionLoading(true);
+      fetch('/api/regression')
+        .then((r) => r.json())
+        .then((d) => setRegression({ sellHighs: Array.isArray(d?.sellHighs) ? d.sellHighs : [], buyLows: Array.isArray(d?.buyLows) ? d.buyLows : [] }))
+        .catch(() => setRegression({ sellHighs: [], buyLows: [] }))
+        .finally(() => setRegressionLoading(false));
     }
   }, [activeGroup, risersWindow]);
 
@@ -330,7 +340,8 @@ export default function Home() {
   const isRisers = activeGroup === RISERS_VIEW;
   const isProjections = activeGroup === PROJECTIONS_VIEW;
   const isTrade = activeGroup === TRADE_VIEW;
-  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade;
+  const isRegression = activeGroup === REGRESSION_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = Object.keys(premiumMap).length > 0;
@@ -595,6 +606,8 @@ export default function Home() {
             ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections`
             : isTrade
             ? 'Trade checker'
+            : isRegression
+            ? 'SP regression'
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -684,6 +697,14 @@ export default function Home() {
         />
       ) : isTrade ? (
         <TradeChecker isPremium={isPremium} />
+      ) : isRegression ? (
+        <RegressionView
+          sellHighs={showPremium ? regression.sellHighs : []}
+          buyLows={showPremium ? regression.buyLows : []}
+          loading={regressionLoading}
+          isPremium={isPremium}
+          isFollowing={(name) => isFollowingName(name)}
+        />
       ) : players.length === 0 ? (
         <EmptyState />
       ) : isRange ? (
