@@ -73,7 +73,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const warA = sumWar(sideA), warB = sumWar(sideB);
   const diff = warA - warB;
 
-  const Column = ({ side, players }: { side: Side; players: SearchResult[] }) => (
+  const renderColumn = (side: Side, players: SearchResult[]) => (
     <div className="flex-1 min-w-0 rounded-lg border border-zinc-800 p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-zinc-300">You {side === 'A' ? 'get' : 'give'}</span>
@@ -140,8 +140,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <div className="flex flex-col md:flex-row gap-3">
-        <Column side="A" players={sideA} />
-        <Column side="B" players={sideB} />
+        {renderColumn('A', sideA)}
+        {renderColumn('B', sideB)}
       </div>
       <p className="text-[11px] text-zinc-600 mt-3">Compares peak WAR (with wRC+ / ERA-20 and tool grades per player). Premium.</p>
     </div>
