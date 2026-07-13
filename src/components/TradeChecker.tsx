@@ -40,6 +40,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [open, setOpen] = useState(false);
   const [sideA, setSideA] = useState<SearchResult[]>([]);
   const [sideB, setSideB] = useState<SearchResult[]>([]);
+  const [faFills, setFaFills] = useState<SearchResult[]>([]); // real free agents you'd add back into opened roster spots
   const [metrics, setMetrics] = useState<Record<number, PremiumMetrics>>({});
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
@@ -74,7 +75,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   }, []);
 
   useEffect(() => {
-    const all = [...sideA, ...sideB];
+    const all = [...sideA, ...sideB, ...faFills];
     // eslint-disable-next-line react-hooks/set-state-in-effect
     if (all.length === 0) { setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); return; }
     let active = true;
@@ -110,18 +111,25 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       })
       .catch(() => {});
     return () => { active = false; };
-  }, [sideA, sideB]);
+  }, [sideA, sideB, faFills]);
 
   if (!isPremium) return <PremiumTeaser />;
 
-  const inTrade = (id: number) => sideA.some((p) => p.id === id) || sideB.some((p) => p.id === id);
+  const inTrade = (id: number) => sideA.some((p) => p.id === id) || sideB.some((p) => p.id === id) || faFills.some((p) => p.id === id);
+  const clearSearch = () => { setQuery(''); setResults([]); setOpen(false); };
   const add = (r: SearchResult, side: Side) => {
     if (inTrade(r.id)) return;
     (side === 'A' ? setSideA : setSideB)((prev) => [...prev, r]);
-    setQuery(''); setResults([]); setOpen(false);
+    clearSearch();
+  };
+  const addFa = (r: SearchResult) => {
+    if (inTrade(r.id)) return;
+    setFaFills((prev) => [...prev, r]);
+    clearSearch();
   };
   const remove = (id: number, side: Side) =>
     (side === 'A' ? setSideA : setSideB)((prev) => prev.filter((p) => p.id !== id));
+  const removeFa = (id: number) => setFaFills((prev) => prev.filter((p) => p.id !== id));
 
   // Present value: injured players lose most of it, a returning teammate (PT
   // risk) docks it, and the home park nudges it (wRC+ is already park-adjusted,
@@ -181,22 +189,40 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
   const pvFill = (n: number) => n * PV_REPL;
   const fvFill = (n: number) => FV_CAP * (1 - Math.pow(0.5, n)); // 1.0, 1.5, 1.75 … → 2.0
-  const sumPv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + pvOf(p), 0) + pvFill(fillCount(side));
-  const sumFv = (s: SearchResult[], side: Side) => s.reduce((t, p) => t + fvOf(p), 0) + fvFill(fillCount(side));
+  // The side that gives up more players opens that many roster spots. You can fill
+  // them with the REAL free agents you'd actually add (their true PV/FV), and any
+  // spots you don't name get the theoretical replacement level. Extra FAs beyond
+  // the opened spots don't fit on your roster, so they're ignored.
+  const openedSide: Side | null = sideA.length < sideB.length ? 'A' : sideB.length < sideA.length ? 'B' : null;
+  const openedSpots = openedSide ? Math.abs(sideA.length - sideB.length) : 0;
+  const usedFAs = faFills.slice(0, openedSpots);
+  const theoreticalFill = Math.max(0, openedSpots - usedFAs.length);
+  const sumPv = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + pvOf(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + pvOf(p), 0) + pvFill(theoreticalFill);
+    return t;
+  };
+  const sumFv = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + fvOf(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + fvOf(p), 0) + fvFill(theoreticalFill);
+    return t;
+  };
   const pvDiff = sumPv(sideA, 'A') - sumPv(sideB, 'B');
   const fvDiff = sumFv(sideA, 'A') - sumFv(sideB, 'B');
   const edge = (d: number, unit: string) =>
     Math.abs(d) < 1 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
   const renderColumn = (side: Side, players: SearchResult[]) => {
-    const fill = fillCount(side);
+    const isOpened = side === openedSide;
+    const showFa = isOpened && usedFAs.length > 0;
+    const showTheoretical = isOpened && theoreticalFill > 0;
     return (
     <div className="flex-1 min-w-0 rounded-lg border border-zinc-800 p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-zinc-300">You {side === 'A' ? 'get' : 'give'}</span>
         <span className="text-[11px] font-bold"><span className="text-blue-200">PV {sumPv(players, side).toFixed(1)}</span> · <span className="text-fuchsia-200">FV {sumFv(players, side).toFixed(1)}</span></span>
       </div>
-      {players.length === 0 && fill === 0 ? (
+      {players.length === 0 && !showFa && !showTheoretical ? (
         <p className="text-[11px] text-zinc-600 py-4 text-center">Search above, then tap <strong>+{side}</strong>.</p>
       ) : (
         <div className="space-y-2">
@@ -209,13 +235,24 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
           ))}
-          {fill > 0 && (
-            <div className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2" title="An unbalanced trade opens roster spots you refill off the wire — theoretical replacement players baked in.">
+          {/* Real free agents you'd add into the opened spots */}
+          {showFa && usedFAs.map((p) => (
+            <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-400 italic truncate">+{fill} free-agent fill</div>
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={ptRisk[p.id]} role={roles[p.id]} />
+              </div>
+              <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
+            </div>
+          ))}
+          {/* Theoretical replacement for any opened spot you didn't name a FA for */}
+          {showTheoretical && (
+            <div className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2" title="Opened roster spots you didn't name a free agent for — filled at theoretical replacement level.">
+              <div className="min-w-0">
+                <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} replacement fill</div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {pvFill(fill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {fvFill(fill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {pvFill(theoreticalFill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {fvFill(theoreticalFill).toFixed(1)}</span>
                 </div>
               </div>
             </div>
@@ -249,6 +286,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
                     <button key={s} onClick={() => add(r, s)} disabled={inTrade(r.id)}
                       className="px-2 py-1 rounded text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+{s}</button>
                   ))}
+                  <button onClick={() => addFa(r)} disabled={inTrade(r.id)} title="Add as a free agent you'd pick up to fill an opened roster spot"
+                    className="px-2 py-1 rounded text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+FA</button>
                 </div>
               </div>
             ))}
@@ -275,8 +314,26 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         {renderColumn('A', sideA)}
         {renderColumn('B', sideB)}
       </div>
+
+      {/* FA adds that don't fit the opened spots yet — surfaced, not silently dropped. */}
+      {faFills.length > usedFAs.length && (
+        <div className="mt-3 rounded-lg border border-dashed border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] text-amber-300/90">
+          {faFills.slice(usedFAs.length).map((p) => (
+            <span key={p.id} className="inline-flex items-center gap-1 mr-3">
+              {p.fullName}
+              <button onClick={() => removeFa(p.id)} className="text-zinc-500 hover:text-red-400 cursor-pointer" title="Remove">✕</button>
+            </span>
+          ))}
+          <span className="text-zinc-500">— not counted: {openedSpots ? `only ${openedSpots} spot${openedSpots === 1 ? '' : 's'} open` : 'no roster spots open'} on this trade{openedSpots ? ' (give up more players to fit more)' : ''}.</span>
+        </div>
+      )}
+
+      {faFills.length > 0 && (
+        <button onClick={() => setFaFills([])} className="text-[11px] text-zinc-600 hover:text-zinc-400 cursor-pointer mt-2">Clear FA adds</button>
+      )}
+
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) is WAR-driven — WAR captures total value including an everyday role — anchored by the auction market (cross-position) and current-year form, then discounted for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) is WAR-driven — WAR captures total value including an everyday role — anchored by the auction market (cross-position) and current-year form, then discounted for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade opens roster spots: name the actual <strong className="text-emerald-300">＋FA</strong>s you&apos;d add (their real value counts) or leave them as theoretical replacement (PV {PV_REPL.toFixed(1)}/spot; FV diminishes toward {FV_CAP.toFixed(1)}). Premium — a work in progress.
       </p>
     </div>
   );
