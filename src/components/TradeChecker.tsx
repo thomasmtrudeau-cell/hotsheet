@@ -134,8 +134,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const war = metrics[p.id]?.war;
     if (war === undefined) return 1;
     let f = war >= 2.0 ? 1.0 : war >= 1.5 ? 0.93 : war >= 1.0 ? 0.85 : 0.7;
-    if ((p.primaryPosition === '1B' || p.primaryPosition === 'DH') && (metrics[p.id]?.peakWrcPlus ?? 0) >= 110) {
-      f = Math.min(1, f + 0.1);
+    // A 1B/DH's job IS his bat — a plus bat holds an everyday role even at modest
+    // WAR (a 1.5-WAR, 107-wRC+ power 1B like Burger isn't a PT risk), so job
+    // security keys on wRC+ for them, not the WAR tier.
+    if (p.primaryPosition === '1B' || p.primaryPosition === 'DH') {
+      const wrc = metrics[p.id]?.peakWrcPlus ?? 0;
+      const batSecure = wrc >= 115 ? 1.0 : wrc >= 105 ? 0.96 : wrc >= 95 ? 0.9 : wrc >= 85 ? 0.82 : 0.72;
+      f = Math.max(f, batSecure);
     }
     return f;
   };

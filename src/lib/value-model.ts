@@ -168,7 +168,11 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   }
   const prodPv = prod * lvl;
   const mkt = inp.marketBaseline ?? 0;
-  const present = (fmt.warW * warPv + fmt.mktW * mkt + fmt.prodW * prodPv) * scar;
+  // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
+  // replace on your roster); win-now production is closer to position-agnostic
+  // (a run's a run today), so present value only feels scarcity at half strength.
+  const scarPresent = 1 + (scar - 1) * 0.5;
+  const present = (fmt.warW * warPv + fmt.mktW * mkt + fmt.prodW * prodPv) * scarPresent;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };

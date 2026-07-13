@@ -321,6 +321,10 @@ export async function getSpRegression(sheetId: string): Promise<{ sellHighs: Reg
     const ipg = ipgI >= 0 ? parseFloat(c[ipgI]) : NaN;
     if (!Number.isFinite(peak) || !Number.isFinite(cur)) continue;
     if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only
+    // Curate to fantasy-relevant arms: a true-talent (peak) ERA/20 at or below
+    // ~4.30 is a rosterable starter. This drops the flood of complex-league /
+    // low-A arms sitting at 6-7 ERA that regress but no one would ever add.
+    if (peak > 4.30) continue;
     const key = normalizeName(name);
     const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;

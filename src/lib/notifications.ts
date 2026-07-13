@@ -156,6 +156,10 @@ export function rehabNotifications(stats: DailyPlayerStats[], date: string): Hot
 const LINEUP_KEY = 'hotsheet_last_lineup'; // { [playerId]: lastKnownBattingOrder }
 
 function ordinal(n: number): string {
+  // Floor defensively: MLB encodes the batting spot as e.g. "901" (9th) and an
+  // older build stored the /100 value unfloored (9.01), which would render as
+  // "9.01th". Flooring here renders any such value cleanly.
+  n = Math.floor(n);
   const s = ['th', 'st', 'nd', 'rd'];
   const v = n % 100;
   return n + (s[(v - 20) % 10] || s[v] || s[0]);
