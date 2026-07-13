@@ -1385,36 +1385,91 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
   return out;
 }
 
-// Playing-time risk: a same-org teammate in the same position area who's on the
-// IL now — a returning threat to a followed hitter's reps (e.g. José Ramírez
-// coming back for a fringe infielder's time). MLB hitters only; team rosters
-// cached ~1h.
+// Playing-time risk: a same-org teammate in the same position area who threatens
+// a followed hitter's reps — either returning from the IL (e.g. José Ramírez
+// coming back) or a quality bat pushing up from the minors (e.g. a AAA prospect
+// blocking a pre-peak regular). A threat only counts if it's a GENUINE one: we
+// gate by peak WAR so a replacement-level utility guy on the IL doesn't ding a
+// real starter. That WAR gate needs the premium sheet; without it we fall back
+// to IL-return detection only (no gate), which is the conservative case.
+// MLB hitters only; team rosters cached ~1h.
 const POS_GROUP: Record<string, string> = {
   '1B': 'IF', '2B': 'IF', '3B': 'IF', SS: 'IF',
   LF: 'OF', CF: 'OF', RF: 'OF', OF: 'OF', C: 'C',
 };
-export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, { name: string; position: string }>> {
-  const out = new Map<number, { name: string; position: string }>();
+type RiskInfo = { name: string; position: string; kind: 'il' | 'depth' };
+export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, RiskInfo>> {
+  const out = new Map<number, RiskInfo>();
   const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && POS_GROUP[p.primaryPosition]);
   if (hitters.length === 0) return out;
   const teamIds = [...new Set(hitters.map((p) => p.currentTeam.id))];
-  const rosterByTeam = new Map<number, Array<{ id?: number; name: string; pos: string; il: boolean }>>();
+  type Mate = { id?: number; name: string; pos: string; kind: 'il' | 'depth' | 'active' };
+  const rosterByTeam = new Map<number, Mate[]>();
   await Promise.all(teamIds.map(async (tid) => {
     try {
       const data = await cachedFetch<{ roster?: Array<{ person?: { id?: number; fullName?: string }; position?: { abbreviation?: string }; status?: { code?: string } }> }>(
         `${MLB_API}/teams/${tid}/roster?rosterType=40Man`, 3600_000
       );
-      rosterByTeam.set(tid, (data.roster ?? []).map((e) => ({
-        id: e.person?.id, name: e.person?.fullName ?? '', pos: e.position?.abbreviation ?? '',
-        il: (e.status?.code ?? '').startsWith('D'),
-      })));
+      rosterByTeam.set(tid, (data.roster ?? []).map((e) => {
+        const code = e.status?.code ?? '';
+        const kind: Mate['kind'] = code.startsWith('D') ? 'il' : code === 'A' ? 'active' : 'depth';
+        return { id: e.person?.id, name: e.person?.fullName ?? '', pos: e.position?.abbreviation ?? '', kind };
+      }));
     } catch { /* skip this team */ }
   }));
+
+  // Candidate threats per followed hitter: same position group, not himself,
+  // and either returning from the IL or a non-active (optioned) roster-mate.
+  const candidates = new Map<number, Mate[]>();
+  const threatNames = new Set<string>();
   for (const p of hitters) {
     const group = POS_GROUP[p.primaryPosition];
     const roster = rosterByTeam.get(p.currentTeam.id) ?? [];
-    const threat = roster.find((e) => e.il && e.id !== p.id && POS_GROUP[e.pos] === group);
-    if (threat) out.set(p.id, { name: threat.name, position: threat.pos });
+    const c = roster.filter((e) => e.kind !== 'active' && e.id !== p.id && POS_GROUP[e.pos] === group && e.name);
+    if (c.length) { candidates.set(p.id, c); c.forEach((e) => threatNames.add(e.name)); }
+  }
+  if (candidates.size === 0) return out;
+
+  // WAR-quality gate. Join peak WAR for the followed players and every threat
+  // name; a threat only counts if it's at least as good as the guy it blocks.
+  const sheetId = process.env.WAR_SHEET_ID;
+  const warByKey = new Map<string, number>();
+  if (sheetId) {
+    try {
+      const probe: FollowedPlayer[] = [
+        ...hitters,
+        ...[...threatNames].map((name, i) => ({
+          id: -1_000_000 - i, fullName: name, primaryPosition: '2B', sportId: 1,
+          currentTeam: { id: 0, name: '' }, followedAt: '',
+        } as unknown as FollowedPlayer)),
+      ];
+      const map = await fetchPremiumMap(probe, sheetId);
+      for (const pl of probe) {
+        const w = map[pl.id]?.war;
+        if (w !== undefined) warByKey.set(pl.fullName.toLowerCase(), w);
+      }
+    } catch { /* sheet unavailable — fall back to IL-only below */ }
+  }
+  const gated = warByKey.size > 0;
+
+  for (const p of hitters) {
+    const c = candidates.get(p.id);
+    if (!c) continue;
+    const myWar = warByKey.get(p.fullName.toLowerCase()) ?? 0;
+    let best: { mate: Mate; war: number } | undefined;
+    for (const mate of c) {
+      const w = warByKey.get(mate.name.toLowerCase());
+      if (gated) {
+        // Only a genuine threat: at least as good as the guy (0.3 WAR grace).
+        if (w === undefined || w < myWar - 0.3) continue;
+      } else if (mate.kind !== 'il') {
+        // No WAR data → conservative: IL returns only (skip minors pushers).
+        continue;
+      }
+      const score = w ?? 0;
+      if (!best || score > best.war) best = { mate, war: score };
+    }
+    if (best) out.set(p.id, { name: best.mate.name, position: best.mate.pos, kind: best.mate.kind === 'il' ? 'il' : 'depth' });
   }
   return out;
 }
