@@ -123,6 +123,25 @@ function PremiumBadges({ metrics, isPitcher }: { metrics: PremiumMetrics; isPitc
           💪 Power{metrics.power === 'double-plus' ? '++' : '+'}
         </span>
       )}
+      {/* Dual-threat only when it isn't already obvious from both tool tags. */}
+      {!isPitcher && metrics.dual && !(metrics.speed && metrics.power) && (
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${metrics.dual === 'double-plus' ? 'bg-amber-500/30 text-amber-100' : 'bg-amber-500/20 text-amber-200'}`} title="Combined power + speed (projected HR + SB)">
+          ⚡💪 {metrics.dual === 'double-plus' ? '40+' : '30+'}
+        </span>
+      )}
+      {!isPitcher && metrics.def && (
+        <span
+          className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${
+            metrics.def === 'double-plus' ? 'bg-green-500/30 text-green-200'
+              : metrics.def === 'plus' ? 'bg-green-500/15 text-green-300'
+              : metrics.def === 'double-minus' ? 'bg-red-500/30 text-red-200'
+              : 'bg-red-500/15 text-red-300'
+          }`}
+          title={`Projected defense: ${{ 'double-plus': 'well above average', plus: 'above average', minus: 'below average', 'double-minus': 'well below average' }[metrics.def]}`}
+        >
+          🧤 D{metrics.def === 'double-plus' ? '++' : metrics.def === 'plus' ? '+' : metrics.def === 'double-minus' ? '−−' : '−'}
+        </span>
+      )}
     </>
   );
 }

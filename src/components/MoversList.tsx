@@ -89,6 +89,12 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                       {!c.isPitcher && c.power && (
                         <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.power === 'double-plus' ? 'bg-rose-500/30 text-rose-200' : 'bg-rose-500/20 text-rose-300'}`} title={`${c.power === 'double-plus' ? 'Double-plus' : 'Plus'} projected power`}>💪 Power{c.power === 'double-plus' ? '++' : '+'}</span>
                       )}
+                      {!c.isPitcher && c.dual && !(c.speed && c.power) && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.dual === 'double-plus' ? 'bg-amber-500/30 text-amber-100' : 'bg-amber-500/20 text-amber-200'}`} title="Combined power + speed (projected HR + SB)">⚡💪 {c.dual === 'double-plus' ? '40+' : '30+'}</span>
+                      )}
+                      {!c.isPitcher && c.def && (
+                        <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${c.def === 'double-plus' ? 'bg-green-500/30 text-green-200' : c.def === 'plus' ? 'bg-green-500/15 text-green-300' : c.def === 'double-minus' ? 'bg-red-500/30 text-red-200' : 'bg-red-500/15 text-red-300'}`} title="Projected defense">🧤 D{c.def === 'double-plus' ? '++' : c.def === 'plus' ? '+' : c.def === 'double-minus' ? '−−' : '−'}</span>
+                      )}
                     </>
                   )
                 ) : (

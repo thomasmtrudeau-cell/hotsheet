@@ -55,6 +55,8 @@ export interface Matchup {
 // Premium (ScoutTheStatline) metrics joined from the sheet — premium accounts only.
 // Scouting-style tool grade for standout projected tools.
 export type ToolGrade = 'plus' | 'double-plus';
+// Defense is bidirectional (can be a liability or an asset).
+export type DefGrade = 'double-plus' | 'plus' | 'minus' | 'double-minus';
 
 export interface PremiumMetrics {
   war?: number;         // peak WAR
@@ -62,6 +64,8 @@ export interface PremiumMetrics {
   era20?: number;       // pitchers — ERA per 20 TBF/game
   speed?: ToolGrade;    // hitters — projected SB tool (⚡)
   power?: ToolGrade;    // hitters — projected HR tool (💪)
+  dual?: ToolGrade;     // hitters — combined power+speed profile (⚡💪)
+  def?: DefGrade;       // hitters — projected defensive value (🧤)
 }
 
 export interface InjuryStatus {
@@ -96,6 +100,8 @@ export interface CallUp extends SearchResult {
   era20?: number;       // pitchers — ERA/20 TBF (premium only; stripped for non-premium)
   speed?: ToolGrade;    // hitters — ⚡ Speed tool (premium only)
   power?: ToolGrade;    // hitters — 💪 Power tool (premium only)
+  dual?: ToolGrade;     // hitters — ⚡💪 dual-threat (premium only)
+  def?: DefGrade;       // hitters — 🧤 defense (premium only)
   fromLevel?: string;   // level promoted from, e.g. "AAA"
   priorLine?: string;   // season line at the prior level (the production that earned it)
   last30Line?: string;  // rolling last-30 figure at the prior level

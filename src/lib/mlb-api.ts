@@ -1094,7 +1094,7 @@ async function warSortMovers(out: CallUp[], warSheetId?: string): Promise<CallUp
       );
       for (const c of out) {
         const m = premiumMap[c.id];
-        if (m) { c.war = m.war; c.peakWrcPlus = m.peakWrcPlus; c.era20 = m.era20; c.speed = m.speed; c.power = m.power; }
+        if (m) { c.war = m.war; c.peakWrcPlus = m.peakWrcPlus; c.era20 = m.era20; c.speed = m.speed; c.power = m.power; c.dual = m.dual; c.def = m.def; }
       }
     } catch {
       // Premium metrics unavailable — fall back to date order.

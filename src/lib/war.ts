@@ -74,9 +74,11 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const extraIdx = isPitcher
     ? header.findIndex((h) => h === 'era 20 tbf/g')
     : header.findIndex((h) => h === 'wRC+');
-  // Hitter tool tags (peak projections): elite SB/600 → Speed, elite HR → Power.
+  // Hitter tool tags (peak projections): elite SB/600 → Speed, elite HR → Power,
+  // and DEF (bidirectional defensive value).
   const sbIdx = isPitcher ? -1 : header.findIndex((h) => h === 'SB/600');
   const hrIdx = isPitcher ? -1 : header.findIndex((h) => h === 'HR');
+  const defIdx = isPitcher ? -1 : header.findIndex((h) => h === 'DEF');
   if (nameIdx < 0) return out;
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -96,8 +98,21 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     }
     // Tool grades from peak projections (percentile-calibrated): plus ≈ top ~12%,
     // double-plus ≈ top ~3-4%.
-    if (sbIdx >= 0) { const v = parseFloat(cells[sbIdx]); if (Number.isFinite(v)) m.speed = v >= 34 ? 'double-plus' : v >= 24 ? 'plus' : undefined; }
-    if (hrIdx >= 0) { const v = parseFloat(cells[hrIdx]); if (Number.isFinite(v)) m.power = v >= 30 ? 'double-plus' : v >= 22 ? 'plus' : undefined; }
+    const sbVal = sbIdx >= 0 ? parseFloat(cells[sbIdx]) : NaN;
+    const hrVal = hrIdx >= 0 ? parseFloat(cells[hrIdx]) : NaN;
+    if (Number.isFinite(sbVal)) m.speed = sbVal >= 34 ? 'double-plus' : sbVal >= 24 ? 'plus' : undefined;
+    if (Number.isFinite(hrVal)) m.power = hrVal >= 30 ? 'double-plus' : hrVal >= 22 ? 'plus' : undefined;
+    // Dual-threat: genuine power+speed combo (both ≥12), 30+ = plus, 40+ = elite.
+    if (Number.isFinite(sbVal) && Number.isFinite(hrVal) && sbVal >= 12 && hrVal >= 12) {
+      const combined = sbVal + hrVal;
+      m.dual = combined >= 40 ? 'double-plus' : combined >= 30 ? 'plus' : undefined;
+    }
+    if (defIdx >= 0) {
+      const d = parseFloat(cells[defIdx]);
+      if (Number.isFinite(d)) {
+        m.def = d >= 8 ? 'double-plus' : d >= 4 ? 'plus' : d <= -9 ? 'double-minus' : d <= -5 ? 'minus' : undefined;
+      }
+    }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
