@@ -171,13 +171,6 @@ export default function Home() {
         .then((d) => setRisers(Array.isArray(d) ? d : []))
         .catch(() => setRisers([]))
         .finally(() => setRisersLoading(false));
-    } else if (activeGroup === PROJECTIONS_VIEW) {
-      setOopsyLoading(true);
-      fetch('/api/oopsy')
-        .then((r) => r.json())
-        .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [] }))
-        .catch(() => setOopsy({ pitchers: [], hitters: [] }))
-        .finally(() => setOopsyLoading(false));
     } else if (activeGroup === REGRESSION_VIEW) {
       setRegressionLoading(true);
       fetch('/api/regression')
@@ -332,6 +325,26 @@ export default function Home() {
       .then((d) => setPremiumMap(d && typeof d === 'object' ? d : {}))
       .catch(() => setPremiumMap({}));
   }, [loaded, players]);
+
+  // OOPSY weekly projections loaded once for the whole app (premium), so cards
+  // can show a per-player snapshot — not just the Projections tab.
+  useEffect(() => {
+    if (!loaded) return;
+    setOopsyLoading(true);
+    fetch('/api/oopsy')
+      .then((r) => r.json())
+      .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [] }))
+      .catch(() => setOopsy({ pitchers: [], hitters: [] }))
+      .finally(() => setOopsyLoading(false));
+  }, [loaded]);
+
+  // OOPSY lookup by normalized name, for card snapshots.
+  const oopsyByName = useMemo(() => {
+    const m = new Map<string, { hitter?: OopsyHitter; pitcher?: OopsyPitcher }>();
+    for (const h of oopsy.hitters) m.set(h.nameKey, { ...(m.get(h.nameKey) ?? {}), hitter: h });
+    for (const p of oopsy.pitchers) m.set(p.nameKey, { ...(m.get(p.nameKey) ?? {}), pitcher: p });
+    return m;
+  }, [oopsy]);
 
   const isRange = activeTab === 'last15' || activeTab === 'last30';
   const rangeWindow = activeTab === 'last30' ? 30 : 15;
@@ -744,6 +757,7 @@ export default function Home() {
                         onUnfollow={unfollow}
                         leagueAvg={leagueAvgs.get(stat.sportId)}
                         premium={showPremium ? premiumMap[stat.playerId] : undefined}
+                        oopsy={showPremium ? oopsyByName.get(normalizeCardName(stat.playerName)) : undefined}
                         groupControl={{
                           groups,
                           memberOf: memberships.get(stat.playerId) ?? [],

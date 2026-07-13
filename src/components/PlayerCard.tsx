@@ -1,7 +1,24 @@
 'use client';
 
 import { useState } from 'react';
-import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup, PremiumMetrics } from '@/lib/types';
+import { DailyPlayerStats, SeasonPlayerStats, LeagueAverages, LEVEL_LABELS, isMLBSystem, Group, RecentForm, Matchup, PremiumMetrics, OopsyHitter, OopsyPitcher } from '@/lib/types';
+
+type OopsySnapshot = { hitter?: OopsyHitter; pitcher?: OopsyPitcher };
+
+// Weekly OOPSY projection line, shown in the expanded area (premium).
+function OopsyRow({ o }: { o: OopsySnapshot }) {
+  const p = o.pitcher, h = o.hitter;
+  return (
+    <div className="mt-2 text-[11px] text-indigo-300/90">
+      <span className="text-zinc-500 uppercase tracking-wider text-[10px]">OOPSY this week</span>{' '}
+      {p ? (
+        <span>#{p.rank} SP · {p.era.toFixed(2)} proj ERA{p.day ? ` · ${p.day} vs ${p.opponent}` : ''}</span>
+      ) : h ? (
+        <span>#{h.rank} · {h.fantasyZ !== undefined ? `${h.fantasyZ.toFixed(2)} fantasy` : ''}{h.wrcPlus !== undefined ? ` · ${h.wrcPlus.toFixed(2)} wRC+` : ''}</span>
+      ) : null}
+    </div>
+  );
+}
 import GradeBadge from './GradeBadge';
 import GroupTag from './GroupTag';
 import GameLog from './GameLog';
@@ -39,6 +56,7 @@ interface DailyCardProps {
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
   premium?: PremiumMetrics; // WAR + peak wRC+ / ERA-20TBF (premium only)
+  oopsy?: OopsySnapshot;    // weekly OOPSY projection (premium only)
 }
 
 interface SeasonCardProps {
@@ -48,6 +66,7 @@ interface SeasonCardProps {
   leagueAvg?: LeagueAverages;
   groupControl?: GroupControl;
   premium?: PremiumMetrics; // WAR + peak wRC+ / ERA-20TBF (premium only)
+  oopsy?: OopsySnapshot;    // weekly OOPSY projection (premium only)
 }
 
 type PlayerCardProps = DailyCardProps | SeasonCardProps;
@@ -440,7 +459,7 @@ function NextStartRow({ next }: { next: { date: string; opponent: string } }) {
   );
 }
 
-function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; premium?: PremiumMetrics }) {
+function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats: DailyPlayerStats; onUnfollow: (id: number) => void; groupControl?: GroupControl; premium?: PremiumMetrics; oopsy?: OopsySnapshot }) {
   const [logOpen, setLogOpen] = useState(false);
   const canLog = isMLBSystem(stats.sportId);
   const onRehab = isOnRehab(stats);
@@ -580,6 +599,7 @@ function DailyCard({ stats, onUnfollow, groupControl, premium }: { stats: DailyP
           default card lean; expand to see the L15 line + last 15 games). */}
       {logOpen && canLog && (
         <>
+          {oopsy && (oopsy.hitter || oopsy.pitcher) && <OopsyRow o={oopsy} />}
           {stats.recentForm && <RecentFormRow form={stats.recentForm} />}
           <GameLog playerId={stats.playerId} sportId={stats.sportId} isPitcher={stats.position === 'P'} teamId={stats.teamId} />
         </>
@@ -732,7 +752,7 @@ function StatCell({ label, value, highlight }: { label: string; value: string; h
 
 export default function PlayerCard(props: PlayerCardProps) {
   if (props.type === 'daily') {
-    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} premium={props.premium} />;
+    return <DailyCard stats={props.stats} onUnfollow={props.onUnfollow} groupControl={props.groupControl} premium={props.premium} oopsy={props.oopsy} />;
   }
   return <SeasonCard stats={props.stats} onUnfollow={props.onUnfollow} leagueAvg={props.leagueAvg} groupControl={props.groupControl} premium={props.premium} />;
 }
