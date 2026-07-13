@@ -42,14 +42,15 @@ export interface ValueInputs {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
-// Younger = more keeper years ahead; older decays.
+// Younger = more keeper years ahead. Past the peak (28), keeper value decays
+// steadily and keeps decaying — a 36-yo has little dynasty value even while he's
+// still productive now (that's what PRESENT value captures; FV must not flatten).
 export function ageMultiplier(age?: number): number {
   if (age === undefined) return 1.0;
   if (age <= 22) return 1.25;
   if (age <= 25) return 1.15;
   if (age <= 28) return 1.0;
-  if (age <= 31) return 0.9;
-  return 0.8;
+  return Math.max(0.18, 1.0 - (age - 28) * 0.08); // 30→.84, 33→.60, 36→.36, 38→.20
 }
 
 // Distance from the majors discounts a keeper ceiling.
