@@ -75,10 +75,19 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
   // often injury, not a bench role, so we leave it to the raw "Played X of Y"
   // count rather than mislabel a regular as "part-time".
   let role: { label: string; cls: string } | null = null;
+  // Playing-time TREND: recent half vs the prior half of the window. Playing
+  // time is king, so a meaningful drop (or climb) is worth flagging.
+  let trend: { label: string; cls: string } | null = null;
   if (hasDnp && !isPitcher && entries.length >= 10) {
     const rate = played / entries.length;
     if (rate >= 0.8) role = { label: 'Everyday', cls: 'bg-green-500/20 text-green-400' };
     else if (rate <= 0.35) role = { label: 'Limited role', cls: 'bg-zinc-600/40 text-zinc-300' };
+
+    const half = Math.floor(entries.length / 2); // entries are newest-first
+    const startRate = (arr: typeof entries) => arr.filter((e) => !e.dnp).length / arr.length;
+    const delta = startRate(entries.slice(0, half)) - startRate(entries.slice(half));
+    if (delta <= -0.25) trend = { label: '↓ Losing time', cls: 'bg-red-500/20 text-red-300' };
+    else if (delta >= 0.25) trend = { label: '↑ Gaining time', cls: 'bg-green-500/20 text-green-300' };
   }
 
   // Multi-position eligibility: distinct positions across played games (a
@@ -95,6 +104,11 @@ export default function GameLog({ playerId, sportId, isPitcher, teamId }: GameLo
         {role && (
           <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${role.cls}`} title="Start rate over the team's recent games">
             {role.label}
+          </span>
+        )}
+        {trend && (
+          <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${trend.cls}`} title="Recent starts vs the prior stretch">
+            {trend.label}
           </span>
         )}
         {showPositions && distinctPos.length >= 2 && (
