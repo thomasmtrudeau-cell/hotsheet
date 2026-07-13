@@ -87,14 +87,23 @@ function marketBaselineFor(auctionId?: string): number | undefined {
 
 // Pitcher WAR lives in the column labeled 'WAR (20 TBFG)' (col BB) — the
 // reliever-adjusted figure. The plain 'WAR' columns under-credit relievers
-// (Griffin Jax reads 1.6 there vs 2.69 here; Clase 2.15 vs 3.52). Hitters use
-// the plain 'WAR' column.
-function warColumn(header: string[], isPitcher: boolean): number {
+// (Griffin Jax reads 1.6 there vs 2.69 here; Clase 2.15 vs 3.52). But some
+// pitchers have a BLANK 'WAR (20 TBFG)' cell (e.g. an injured arm whose per-20-TBF
+// normalization didn't compute) while the plain 'WAR' is populated — so we read
+// the 20-TBFG value per row and fall back to plain 'WAR' when it's empty, rather
+// than dropping the player entirely. Hitters just use plain 'WAR'.
+function warCols(header: string[], isPitcher: boolean): { primary: number; fallback: number } {
+  const plain = header.findIndex((h) => h === 'WAR');
   if (isPitcher) {
-    const i = header.findIndex((h) => h === 'WAR (20 TBFG)');
-    if (i >= 0) return i;
+    const tbfg = header.findIndex((h) => h === 'WAR (20 TBFG)');
+    return { primary: tbfg >= 0 ? tbfg : plain, fallback: plain };
   }
-  return header.findIndex((h) => h === 'WAR');
+  return { primary: plain, fallback: plain };
+}
+function readWar(cells: string[], wc: { primary: number; fallback: number }): number {
+  let w = wc.primary >= 0 ? parseFloat(cells[wc.primary]) : NaN;
+  if (!Number.isFinite(w) && wc.fallback >= 0 && wc.fallback !== wc.primary) w = parseFloat(cells[wc.fallback]);
+  return w;
 }
 
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
@@ -105,7 +114,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
   const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
-  const warIdx = warColumn(header, isPitcher);
+  const warCol = warCols(header, isPitcher);
   const extraIdx = isPitcher
     ? header.findIndex((h) => h === 'era 20 tbf/g')
     : header.findIndex((h) => h === 'wRC+');
@@ -126,10 +135,8 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     const name = cells[nameIdx];
     if (!name) continue;
     const m: PremiumMetrics = {};
-    if (warIdx >= 0) {
-      const war = parseFloat(cells[warIdx]);
-      if (Number.isFinite(war)) m.war = war;
-    }
+    const war = readWar(cells, warCol);
+    if (Number.isFinite(war)) m.war = war;
     if (extraIdx >= 0) {
       const v = parseFloat(cells[extraIdx]);
       if (Number.isFinite(v)) {
@@ -250,13 +257,13 @@ function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[
   const header = rows[0].map((h) => h.trim());
   const nameIdx = header.findIndex((h) => h.toLowerCase() === nameHeader);
   const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
-  const warIdx = warColumn(header, isPitcher);
+  const warCol = warCols(header, isPitcher);
   const lvlIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
-  if (nameIdx < 0 || warIdx < 0) return [];
+  if (nameIdx < 0 || warCol.primary < 0) return [];
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
     const name = cells[nameIdx];
-    const war = parseFloat(cells[warIdx]);
+    const war = readWar(cells, warCol);
     if (!name || !Number.isFinite(war)) continue;
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;

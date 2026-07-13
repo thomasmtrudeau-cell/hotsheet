@@ -47,7 +47,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number }>>({}); // IL-aware playing-time role
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
+  const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   // League settings persist locally (cross-device sync is a later add).
   useEffect(() => {
@@ -257,6 +259,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
               </div>
             </div>
           )}
+          {/* Name a real free agent for an opened spot, right from this side */}
+          {isOpened && openedSpots > 0 && (
+            <button onClick={() => { setAddingFa(true); searchRef.current?.focus(); }}
+              className="w-full mt-1 text-[11px] text-emerald-300/80 hover:text-emerald-200 border border-dashed border-emerald-500/30 rounded py-1 cursor-pointer">
+              ＋ name a free agent for a spot
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -267,12 +276,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     <div>
       <div className="relative max-w-xl mb-4">
         <input
+          ref={searchRef}
           value={query}
           onChange={(e) => { setQuery(e.target.value); setOpen(true); if (debounceRef.current) clearTimeout(debounceRef.current); debounceRef.current = setTimeout(() => search(e.target.value), 300); }}
           onFocus={() => query.length >= 2 && setOpen(true)}
-          placeholder="Search a player to add to the trade…"
-          className="w-full px-4 py-2.5 bg-zinc-800/80 border border-zinc-700 rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500 text-sm"
+          placeholder={addingFa ? 'Search the free agent you’d add…' : 'Search a player to add to the trade…'}
+          className={`w-full px-4 py-2.5 bg-zinc-800/80 border rounded-lg text-zinc-100 placeholder-zinc-500 focus:outline-none text-sm ${addingFa ? 'border-emerald-500 focus:border-emerald-400' : 'border-zinc-700 focus:border-blue-500'}`}
         />
+        {addingFa && (
+          <div className="absolute right-2 top-1/2 -translate-y-1/2">
+            <button onClick={() => setAddingFa(false)} className="text-[11px] text-emerald-300 hover:text-emerald-200 cursor-pointer">adding FA · cancel</button>
+          </div>
+        )}
         {open && query.length >= 2 && results.length > 0 && (
           <div className="absolute z-40 w-full mt-1 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl max-h-72 overflow-y-auto">
             {results.map((r) => (
@@ -282,12 +297,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
                   <div className="text-[11px] text-zinc-500">{r.primaryPosition} · {r.currentTeam.name}</div>
                 </div>
                 <div className="flex gap-1 shrink-0">
-                  {(['A', 'B'] as const).map((s) => (
-                    <button key={s} onClick={() => add(r, s)} disabled={inTrade(r.id)}
-                      className="px-2 py-1 rounded text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+{s}</button>
-                  ))}
-                  <button onClick={() => addFa(r)} disabled={inTrade(r.id)} title="Add as a free agent you'd pick up to fill an opened roster spot"
-                    className="px-2 py-1 rounded text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+FA</button>
+                  {addingFa ? (
+                    <button onClick={() => { addFa(r); setAddingFa(false); }} disabled={inTrade(r.id)}
+                      className="px-2 py-1 rounded text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">Add FA</button>
+                  ) : (
+                    <>
+                      {(['A', 'B'] as const).map((s) => (
+                        <button key={s} onClick={() => add(r, s)} disabled={inTrade(r.id)}
+                          className="px-2 py-1 rounded text-xs font-semibold bg-blue-600 hover:bg-blue-500 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+{s}</button>
+                      ))}
+                      <button onClick={() => addFa(r)} disabled={inTrade(r.id)} title="Add as a free agent you'd pick up to fill an opened roster spot"
+                        className="px-2 py-1 rounded text-xs font-semibold bg-emerald-700 hover:bg-emerald-600 text-white disabled:opacity-40 disabled:cursor-default cursor-pointer">+FA</button>
+                    </>
+                  )}
                 </div>
               </div>
             ))}
