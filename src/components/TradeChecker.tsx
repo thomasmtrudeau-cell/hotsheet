@@ -11,13 +11,14 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, injured }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; injured?: boolean }) {
+function Chips({ m, isPitcher, pv, fv, injured, risk }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; injured?: boolean; risk?: { name: string; position: string } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
       <span className={`${chip} bg-blue-500/25 text-blue-200`} title="Present value — win-now">PV {pv.toFixed(1)}</span>
       <span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`} title="Future value — keeper/dynasty">FV {fv.toFixed(1)}</span>
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
+      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) on the IL — a returning threat to his reps`}>⚠ PT</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
@@ -35,6 +36,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [sideB, setSideB] = useState<SearchResult[]>([]);
   const [metrics, setMetrics] = useState<Record<number, PremiumMetrics>>({});
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
+  const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string } | undefined>>({});
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const search = useCallback(async (q: string) => {
@@ -49,13 +51,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   useEffect(() => {
     const all = [...sideA, ...sideB];
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (all.length === 0) { setMetrics({}); setInjuries({}); return; }
+    if (all.length === 0) { setMetrics({}); setInjuries({}); setPtRisk({}); return; }
     let active = true;
     fetch('/api/war', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: all }) })
       .then((r) => r.json()).then((d) => { if (active) setMetrics(d && typeof d === 'object' ? d : {}); }).catch(() => active && setMetrics({}));
     fetch('/api/players/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: all.map((p) => ({ ...p, followedAt: '' })) }) })
       .then((r) => r.json())
-      .then((d) => { if (active && Array.isArray(d)) { const inj: Record<number, InjuryStatus | undefined> = {}; for (const p of d) inj[p.id] = p.injury; setInjuries(inj); } })
+      .then((d) => {
+        if (!active || !Array.isArray(d)) return;
+        const inj: Record<number, InjuryStatus | undefined> = {};
+        const pr: Record<number, { name: string; position: string } | undefined> = {};
+        for (const p of d) { inj[p.id] = p.injury; pr[p.id] = p.playingTimeRisk; }
+        setInjuries(inj); setPtRisk(pr);
+      })
       .catch(() => {});
     return () => { active = false; };
   }, [sideA, sideB]);
@@ -71,11 +79,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const remove = (id: number, side: Side) =>
     (side === 'A' ? setSideA : setSideB)((prev) => prev.filter((p) => p.id !== id));
 
-  // Present value: injured players lose most of it, and the home park nudges it
-  // (a hitter's park / a pitcher's park helps real-life output).
+  // Present value: injured players lose most of it, a returning teammate (PT
+  // risk) docks it, and the home park nudges it (wRC+ is already park-adjusted,
+  // so this is a light real-life-output touch).
   const pvOf = (p: SearchResult) =>
     (metrics[p.id]?.presentValue ?? 0)
     * (injuries[p.id] ? 0.6 : 1)
+    * (ptRisk[p.id] ? 0.8 : 1)
     * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   const fvOf = (p: SearchResult) => metrics[p.id]?.futureValue ?? 0;
   const sumPv = (s: SearchResult[]) => s.reduce((t, p) => t + pvOf(p), 0);
@@ -99,7 +109,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={ptRisk[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>

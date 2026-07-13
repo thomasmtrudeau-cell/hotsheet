@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { hydrateFollowedPlayers } from '@/lib/mlb-api';
+import { hydrateFollowedPlayers, getPlayingTimeRisk } from '@/lib/mlb-api';
 import { FollowedPlayer, isMLBSystem } from '@/lib/types';
 
 // Re-hydrates followed players with their current team, level and IL status.
@@ -29,7 +29,11 @@ export async function POST(request: NextRequest) {
         : p
     );
 
-    return NextResponse.json([...safe, ...intlPlayers]);
+    // Attach playing-time risk (same-org same-area teammate on the IL).
+    const risk = await getPlayingTimeRisk(safe);
+    const withRisk = safe.map((p) => ({ ...p, playingTimeRisk: risk.get(p.id) }));
+
+    return NextResponse.json([...withRisk, ...intlPlayers]);
   } catch (error) {
     console.error('Player refresh error:', error);
     return NextResponse.json({ error: 'Failed to refresh players' }, { status: 500 });

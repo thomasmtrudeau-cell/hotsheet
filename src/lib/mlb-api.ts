@@ -1393,7 +1393,7 @@ const POS_GROUP: Record<string, string> = {
   '1B': 'IF', '2B': 'IF', '3B': 'IF', SS: 'IF',
   LF: 'OF', CF: 'OF', RF: 'OF', OF: 'OF', C: 'C',
 };
-async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, { name: string; position: string }>> {
+export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, { name: string; position: string }>> {
   const out = new Map<number, { name: string; position: string }>();
   const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && POS_GROUP[p.primaryPosition]);
   if (hitters.length === 0) return out;

@@ -100,6 +100,7 @@ export interface FollowedPlayer {
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
   batSide?: 'L' | 'R' | 'S'; // for platoon weighting in the matchup rating
+  playingTimeRisk?: { name: string; position: string }; // same-org same-area teammate on the IL
 }
 
 // A recent MLB call-up (browsable discovery list; followable like a search hit).
