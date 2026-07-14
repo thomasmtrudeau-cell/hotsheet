@@ -55,15 +55,20 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 // washed, since a low-WAR vet has little annual value to carry forward anyway.
 const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year
 const KEEPER_HORIZON = 7;     // seasons of keeper value considered
-function ageRetention(a: number): number {
-  return Math.max(0, Math.min(1.0, 1.05 - Math.max(0, a - 30) * 0.06)); // flat ≤30, then −6%/yr
+// Pitchers age more gracefully than hitters for keeper purposes — a good 31-yo arm
+// is usually still good at 32 — so their retention plateaus a year longer and
+// declines at −5%/yr instead of −6%. Hitters: flat ≤30, then −6%/yr.
+function ageRetention(a: number, isPitcher = false): number {
+  const onset = isPitcher ? 31 : 30;
+  const slope = isPitcher ? 0.05 : 0.06;
+  return Math.max(0, Math.min(1.0, 1.05 - Math.max(0, a - onset) * slope));
 }
 const KEEPER_NORM = 2.76;     // normalize so a prime-age (26) player lands ≈ 1.15
-export function keeperAgeFactor(age?: number): number {
+export function keeperAgeFactor(age?: number, isPitcher = false): number {
   if (age === undefined) return 1.0;
   let sum = 0;
   for (let k = 1; k <= KEEPER_HORIZON; k++) {
-    sum += Math.pow(YEAR_DISCOUNT, k - 1) * ageRetention(age + k);
+    sum += Math.pow(YEAR_DISCOUNT, k - 1) * ageRetention(age + k, isPitcher);
   }
   return sum / KEEPER_NORM;
 }
@@ -215,7 +220,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   }
   const warTerm = Math.max(0, fWar - bar) * 3;
   const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
-  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied

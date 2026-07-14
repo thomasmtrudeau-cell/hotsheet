@@ -259,19 +259,25 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // returnee who'll bump a lesser teammate.
     const risk = ptRisk[p.id] ? 1 - 0.15 * (1 - entrench(p)) : 1;
     // Role-attainment: a part-timer's FV ceiling assumes an everyday role he
-    // doesn't have. The odds of ever securing it FADE with age (a 27-yo part-timer
-    // is likelier "who he is" than a 22-yo) and poor defense (no glove to earn the
-    // reps), but a young / good-glove part-timer keeps most of the ceiling (the
-    // path is open). Esteury Ruiz (27, part-time, −D) gets docked; a 23-yo +D
-    // part-timer like Sanoja barely does.
+    // doesn't have. This only applies to guys still TRYING to establish one — the
+    // young/prime window (≤29). An established vet's bench is temporary or plain
+    // decline (already handled by keeperAgeFactor), NOT a failure to earn a job:
+    // George Springer (36) is a sure-thing DH, not a part-time hopeful, so he's
+    // exempt. Within the window the odds FADE with age (a 27-yo part-timer is
+    // likelier "who he is" than a 22-yo) and poor defense, but a young / good-glove
+    // / good-bat part-timer keeps most of the ceiling (the path is open). Esteury
+    // Ruiz (27, part-time, −D) gets docked; a 23-yo +D part-timer like Sanoja barely
+    // does. A strong bat (wRC+) buys reps regardless.
     let roleF = 1;
     const rate = roles[p.id]?.rate;
-    if (rate !== undefined && rate < 0.8) {
-      const age = metrics[p.id]?.age ?? 26;
+    const rAge = metrics[p.id]?.age ?? 26;
+    if (rate !== undefined && rate < 0.8 && rAge <= 29) {
       const def = metrics[p.id]?.def;
-      let odds = 0.88 - Math.max(0, age - 24) * 0.03;
+      const wrc = metrics[p.id]?.peakWrcPlus ?? 100;
+      let odds = 0.88 - Math.max(0, rAge - 24) * 0.03;
       if (def === 'minus' || def === 'double-minus') odds -= 0.08;
       if (def === 'plus' || def === 'double-plus') odds += 0.06;
+      odds += Math.max(0, wrc - 105) * 0.008; // a real bat finds at-bats
       roleF = Math.max(0.6, Math.min(1, odds));
     }
     return risk * roleF;
@@ -286,7 +292,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // ceiling already exceeds this. Park + current form flow in via PV, so a
     // pitcher's durable park edge counts here too. FV dips below PV only as age
     // fades the keeperAgeFactor below 1 (~30+), which is the clean FV<PV crossover.
-    const sustained = pvOf(p) * keeperAgeFactor(metrics[p.id]?.age);
+    const sustained = pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P');
     return Math.max(ceiling, sustained);
   };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
