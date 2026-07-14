@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
-import { computeValue, presentMaturity, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { computeValue, presentMaturity, keeperAgeFactor, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 
@@ -276,7 +276,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     }
     return risk * roleF;
   };
-  const fvOf = (p: SearchResult) => baseValue(p).future * fvPtFactor(p);
+  const fvOf = (p: SearchResult) => {
+    const ceiling = baseValue(p).future * fvPtFactor(p);
+    // Sustained-production floor: an established player is stable — his future
+    // years ≈ his present production, discounted by how many good years remain
+    // (keeperAgeFactor). So a solid-but-not-star vet's keeper value shouldn't
+    // collapse below his PV the way the ceiling-above-the-keeper-bar formula alone
+    // does (Griffin Jax: FV 2.0 vs PV 2.7). Young/star guys are unaffected — their
+    // ceiling already exceeds this. Park + current form flow in via PV, so a
+    // pitcher's durable park edge counts here too. FV dips below PV only as age
+    // fades the keeperAgeFactor below 1 (~30+), which is the clean FV<PV crossover.
+    const sustained = pvOf(p) * keeperAgeFactor(metrics[p.id]?.age);
+    return Math.max(ceiling, sustained);
+  };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
   // roster, who in a deep league is well above replacement (good players never hit
