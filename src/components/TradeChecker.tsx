@@ -230,11 +230,15 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // linearly (repeatable); keeper value diminishes (each extra freed spot keeps a
   // worse guy). Name the actual guy with ＋FA to override the default.
   const depthFactor = Math.sqrt(560 / Math.max(1, settings.teams * settings.keepers)); // 1.0 at Tom's 560; >1 shallower
-  const PV_KEEP = 0.75 * depthFactor; // marginal keep's present value, per spot
-  const FV_CAP = 3.2 * depthFactor;   // best keep's keeper value the freed spot buys
+  // Bare-minimum replacement a rosterable spot is worth (per Tom, deep 20-team):
+  // PV 0.7, FV 2.0 — a real kept player, not a wire scrub. Linear per freed spot
+  // (each opened spot keeps another replacement-or-better guy); scales up in
+  // shallower leagues where the marginal roster player is better.
+  const PV_KEEP = 0.7 * depthFactor;
+  const FV_KEEP = 2.0 * depthFactor;
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
   const pvFill = (n: number) => n * PV_KEEP;
-  const fvFill = (n: number) => FV_CAP * (1 - Math.pow(0.5, n)); // diminishing → cap
+  const fvFill = (n: number) => n * FV_KEEP;
   // The side that gives up more players opens that many roster spots. You can fill
   // them with the REAL free agents you'd actually add (their true PV/FV), and any
   // spots you don't name get the theoretical replacement level. Extra FAs beyond
@@ -399,7 +403,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) opens roster spots — a <strong>consolidation keep</strong>: you keep a player already on your roster, worth more than a wire pickup and scaled to league depth (PV {PV_KEEP.toFixed(1)}/spot; FV diminishes toward {FV_CAP.toFixed(1)}). Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) opens roster spots — a <strong>consolidation keep</strong>: you keep a player already on your roster, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues). Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. Premium — a work in progress.
       </p>
     </div>
   );
