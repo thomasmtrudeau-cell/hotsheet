@@ -78,6 +78,18 @@ export function proximityMultiplier(level?: string): number {
   return 0.5;
 }
 
+// Time-to-peak discount for FUTURE value. A player's productive peak window is
+// ~26-29; value that arrives years from now is deferred and carries bust /
+// attrition / years-of-minors risk, so a far-from-peak prospect shouldn't rival
+// a proven peak-age star just for being young (a 20-yo AAA bat is 5-6 years out).
+// Only bites BELOW the peak window; older players decay via keeperAgeFactor. Note
+// this is distinct from proximity (distance to the MAJORS) — a 20-yo can be in
+// AAA yet still years from his peak.
+export function maturityFactor(age?: number): number {
+  if (age === undefined) return 1.0;
+  return Math.max(0.45, Math.min(1.0, 1 - Math.max(0, 25 - age) * 0.07)); // 24→.93, 22→.79, 20→.65, 18→.51
+}
+
 // Present value only fully counts in the majors.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -178,7 +190,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   }
   const warTerm = Math.max(0, fWar - bar) * 3;
   const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
-  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * maturityFactor(inp.age) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
