@@ -4,9 +4,12 @@ import { computeValue, DEFAULT_SETTINGS } from './value-model';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
+// Source since 2026-07-14: the "StS Source Data" spreadsheet's raw tabs (updates
+// more easily than the old Hot Sheet Projections file). Same header contract:
+// hitting has one exact "WAR" col + "DEF" + "wRC+"; pitching WAR is "WAR (20 TBFG)".
 
-const HIT_TAB = 'Peak Hitting';
-const PIT_TAB = 'Peak Pitching';
+const HIT_TAB = 'peak hitting raw';
+const PIT_TAB = 'pitching raw';
 
 // Normalize a player name for joining sheet rows to followed players: drop
 // diacritics, punctuation, and generational suffixes; lowercase; collapse space.

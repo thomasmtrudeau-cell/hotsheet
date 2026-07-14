@@ -10,6 +10,7 @@ export interface LeagueSettings {
   keepers: number;               // kept per team
   format: ScoringFormat;
   slots: Record<string, number>; // starting slots for ONE team, by position
+  rebuilder?: boolean;           // rebuilder mode — ignore the time-to-peak discount
 }
 
 // Standard starting slots for the baseline (Tom's) league. CI = corner infield
@@ -79,15 +80,26 @@ export function proximityMultiplier(level?: string): number {
 }
 
 // Time-to-peak discount for FUTURE value. A player's productive peak window is
-// ~26-29; value that arrives years from now is deferred and carries bust /
-// attrition / years-of-minors risk, so a far-from-peak prospect shouldn't rival
-// a proven peak-age star just for being young (a 20-yo AAA bat is 5-6 years out).
-// Only bites BELOW the peak window; older players decay via keeperAgeFactor. Note
-// this is distinct from proximity (distance to the MAJORS) — a 20-yo can be in
-// AAA yet still years from his peak.
-export function maturityFactor(age?: number): number {
-  if (age === undefined) return 1.0;
-  return Math.max(0.45, Math.min(1.0, 1 - Math.max(0, 25 - age) * 0.07)); // 24→.93, 22→.79, 20→.65, 18→.51
+// ~26-29; value years out is deferred and carries bust / attrition / years-of-
+// minors risk. But once a guy reaches the MAJORS his value has ARRIVED — he's
+// "what he is" — so the discount is ZERO in the bigs and scales up the lower the
+// level (a 20-yo in AAA is advanced but still years from peak). Pitchers stabilize
+// sooner, so they take half the discount. Rebuilder mode turns it off entirely
+// (you want the young upside, wait be damned). Distinct from proximity (distance
+// to the MAJORS) — a 20-yo can be in AAA yet still years from his PEAK.
+function deferralByLevel(level?: string): number {
+  const l = (level ?? '').toUpperCase();
+  if (l.includes('MLB') || l.includes('MAJOR')) return 0;   // arrived — no time discount
+  if (l.includes('AAA')) return 0.75;
+  if (l.includes('AA')) return 0.9;
+  return 1.0; // A+ / A / Rk — fully deferred
+}
+export function maturityFactor(age?: number, level?: string, isPitcher?: boolean, rebuilder?: boolean): number {
+  if (rebuilder || age === undefined) return 1.0;
+  let discount = Math.max(0, 25 - age) * 0.07;   // raw time-to-peak (24→.07, 20→.35)
+  if (isPitcher) discount *= 0.5;                 // pitchers are "what they are" sooner
+  discount *= deferralByLevel(level);             // zero in the majors, full in the low minors
+  return Math.max(0.45, 1 - discount);
 }
 
 // Present value only fully counts in the majors.
@@ -190,7 +202,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   }
   const warTerm = Math.max(0, fWar - bar) * 3;
   const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
-  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * maturityFactor(inp.age) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
