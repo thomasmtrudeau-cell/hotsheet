@@ -45,6 +45,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
+  const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
@@ -79,7 +80,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   useEffect(() => {
     const all = [...sideA, ...sideB, ...faFills];
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (all.length === 0) { setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); return; }
+    if (all.length === 0) { setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); return; }
     let active = true;
     // IL-aware playing-time role per hitter (few players in a trade, so per-player
     // team-game-log fetches are fine). Docks PV for part-time / bench guys.
@@ -110,8 +111,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         if (!active || !Array.isArray(d)) return;
         const inj: Record<number, InjuryStatus | undefined> = {};
         const pr: Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined> = {};
-        for (const p of d) { inj[p.id] = p.injury; pr[p.id] = p.playingTimeRisk; }
-        setInjuries(inj); setPtRisk(pr);
+        const bs: Record<number, string | undefined> = {};
+        for (const p of d) { inj[p.id] = p.injury; pr[p.id] = p.playingTimeRisk; bs[p.id] = p.batSide; }
+        setInjuries(inj); setPtRisk(pr); setBatSides(bs);
       })
       .catch(() => {});
     return () => { active = false; };
@@ -200,6 +202,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return Math.max(0, (w - 90) / 12) * ptRateOf(p); // bat rate × actual playing time
   };
   const DYN_W = 0.6; // weight of the dynamic production layer
+  // Lefty platoon risk: a lefty bat who's already NOT everyday is likely sitting
+  // vs LHP, so his playing-time floor is lower than a righty/switch guy in the
+  // same role. Only bites once the role dips (a full-time lefty faces LHP fine).
+  const platoonDock = (p: SearchResult) =>
+    p.sportId === 1 && batSides[p.id] === 'L' && (roles[p.id]?.rate ?? 1) < 0.85 ? 0.9 : 1;
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
@@ -208,6 +215,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       * (injuries[p.id] ? 0.6 : 1)
       * ptDock(ptRisk[p.id])
       * jobSecurity(p)
+      * platoonDock(p)
       * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   };
   // Keeper value also takes a (softer) playing-time hit: a projection that
