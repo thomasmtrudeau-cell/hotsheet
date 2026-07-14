@@ -741,6 +741,8 @@ export default function Home() {
           loading={scoutingLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}
+          onFollow={follow}
+          groups={groups}
         />
       ) : players.length === 0 ? (
         <EmptyState />
