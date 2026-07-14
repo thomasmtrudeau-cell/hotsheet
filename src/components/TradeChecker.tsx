@@ -202,11 +202,22 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return Math.max(0, (w - 90) / 12) * ptRateOf(p); // bat rate × actual playing time
   };
   const DYN_W = 0.6; // weight of the dynamic production layer
-  // Lefty platoon risk: a lefty bat who's already NOT everyday is likely sitting
-  // vs LHP, so his playing-time floor is lower than a righty/switch guy in the
-  // same role. Only bites once the role dips (a full-time lefty faces LHP fine).
-  const platoonDock = (p: SearchResult) =>
-    p.sportId === 1 && batSides[p.id] === 'L' && (roles[p.id]?.rate ?? 1) < 0.85 ? 0.9 : 1;
+  // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
+  // sits against the tough-side arm — applies to lefties AND righties (Esteury
+  // Ruiz is a RHB platoon guy). But you can MASH your way out (a big wRC+ plays
+  // vs everyone) or GLOVE your way out (WAR/defense keeps you in the lineup vs
+  // the same-hand pitcher). So the dock scales down as bat and WAR rise, and only
+  // bites once the role has actually dipped. Lefties platooned a touch more often.
+  const platoonDock = (p: SearchResult) => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P') return 1;
+    const rate = roles[p.id]?.rate;
+    if (rate === undefined || rate >= 0.85) return 1; // everyday (or unknown) — no platoon dock
+    const wrc = metrics[p.id]?.peakWrcPlus ?? 100;
+    const war = metrics[p.id]?.war ?? 0;
+    const escape = Math.max(0, Math.min(1, (wrc - 95) / 40 + war / 5)); // mash or field your way out
+    const base = batSides[p.id] === 'L' ? 0.83 : 0.87;
+    return base + (1 - base) * escape;
+  };
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
