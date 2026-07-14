@@ -180,24 +180,18 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
   const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * proximityMultiplier(inp.level) * scar;
 
-  // ---- Present (win-now) value: WAR-driven ----
+  // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
+  // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
+  // downstream in the Trade Checker, where real game-log usage + park live — see
+  // its dynamic-present track. Format's prod weight is folded into that layer.
   const lvl = presentLevelFactor(inp.level);
   const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl;
-  let prod = 0;
-  if (inp.isPitcher) {
-    const e = inp.curEra20 ?? inp.era20;
-    if (e !== undefined) prod = Math.max(0, (4.8 - e) * 1.5);
-  } else {
-    const w = inp.curWrcPlus ?? inp.peakWrcPlus;
-    if (w !== undefined) prod = Math.max(0, (w - 85) / 10);
-  }
-  const prodPv = prod * lvl;
   const mkt = inp.marketBaseline ?? 0;
   // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
   // replace on your roster); win-now production is closer to position-agnostic
   // (a run's a run today), so present value only feels scarcity at half strength.
   const scarPresent = 1 + (scar - 1) * 0.5;
-  const present = (fmt.warW * warPv + fmt.mktW * mkt + fmt.prodW * prodPv) * scarPresent;
+  const present = (fmt.warW * warPv + fmt.mktW * mkt) * scarPresent;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };

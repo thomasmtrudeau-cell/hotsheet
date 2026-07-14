@@ -44,7 +44,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [metrics, setMetrics] = useState<Record<number, PremiumMetrics>>({});
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
-  const [roles, setRoles] = useState<Record<number, { label: string; factor: number }>>({}); // IL-aware playing-time role
+  const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
@@ -93,12 +93,12 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         const hasDnp = entries.some((e) => e.dnp);
         if (!hasDnp || entries.length < 10) return [p.id, null] as const;
         const rate = entries.filter((e) => !e.dnp).length / entries.length;
-        const role = rate >= 0.8 ? { label: 'Everyday', factor: 1 } : rate >= 0.5 ? { label: 'Part-time', factor: 0.85 } : { label: 'Bench', factor: 0.7 };
+        const role = { rate, label: rate >= 0.8 ? 'Everyday' : rate >= 0.5 ? 'Part-time' : 'Bench', factor: rate >= 0.8 ? 1 : rate >= 0.5 ? 0.85 : 0.7 };
         return [p.id, role] as const;
       } catch { return [p.id, null] as const; }
     })).then((pairs) => {
       if (!active) return;
-      const m: Record<number, { label: string; factor: number }> = {};
+      const m: Record<number, { label: string; factor: number; rate: number }> = {};
       for (const [id, role] of pairs) if (role) m[id] = role;
       setRoles(m);
     });
@@ -175,13 +175,41 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
     }, settings);
   };
-  const pvOf = (p: SearchResult) =>
-    baseValue(p).present
-    * (injuries[p.id] ? 0.6 : 1)
-    * ptDock(ptRisk[p.id])
-    * (roles[p.id]?.factor ?? 1)
-    * jobSecurity(p)
-    * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
+  // Actual playing-time rate (fraction of team games he's appeared in), from the
+  // game log — the DYNAMIC signal. Majors only; pitchers carry a normal workload;
+  // a hitter with no game-log read defaults to near-everyday.
+  const ptRateOf = (p: SearchResult) => {
+    if (p.sportId !== 1) return 1;
+    if (p.primaryPosition === 'P') return 1;
+    return roles[p.id]?.rate ?? 0.9;
+  };
+  // Dynamic present PRODUCTION: a park-neutral current-year rate projection scaled
+  // by ACTUAL recent playing time. This is the non-WAR, usage-responsive layer —
+  // it's what lets a DH/1B's live bat (or a slumping/benched guy's drop) move PV
+  // even when WAR is stale or positionally distorted. Majors only.
+  const dynProd = (p: SearchResult) => {
+    if (p.sportId !== 1) return 0;
+    const m = metrics[p.id];
+    if (!m) return 0;
+    if (p.primaryPosition === 'P') {
+      const e = m.curEra20 ?? m.era20;
+      return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2);
+    }
+    const w = m.curWrcPlus ?? m.peakWrcPlus;
+    if (w === undefined) return 0;
+    return Math.max(0, (w - 90) / 12) * ptRateOf(p); // bat rate × actual playing time
+  };
+  const DYN_W = 0.6; // weight of the dynamic production layer
+  const pvOf = (p: SearchResult) => {
+    // The WAR+market base assumes a full-time role, so it takes a mild continuous
+    // playing-time haircut; the dynamic layer already bakes in actual usage.
+    const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
+    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p))
+      * (injuries[p.id] ? 0.6 : 1)
+      * ptDock(ptRisk[p.id])
+      * jobSecurity(p)
+      * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
+  };
   // Keeper value also takes a (softer) playing-time hit: a projection that
   // assumes a full-time role is worth less if that role is tenuous — a returning/
   // pushing teammate (Arias behind Ramírez) or a part-time role now. Softer than
@@ -368,7 +396,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) is WAR-driven — WAR captures total value including an everyday role — anchored by the auction market (cross-position) and current-year form, then discounted for injury, a returning/pushing teammate, a part-time role, and job security (low-WAR bats carry a standing risk; 1B/DH who hit get slack). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade opens roster spots: name the actual <strong className="text-emerald-300">＋FA</strong>s you&apos;d add (their real value counts) or leave them as theoretical replacement (PV {PV_REPL.toFixed(1)}/spot; FV diminishes toward {FV_CAP.toFixed(1)}). Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade opens roster spots: name the actual <strong className="text-emerald-300">＋FA</strong>s you&apos;d add (their real value counts) or leave them as theoretical replacement (PV {PV_REPL.toFixed(1)}/spot; FV diminishes toward {FV_CAP.toFixed(1)}). Premium — a work in progress.
       </p>
     </div>
   );
