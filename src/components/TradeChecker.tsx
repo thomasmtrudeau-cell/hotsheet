@@ -18,14 +18,15 @@ const BUILD_KEY = 'hotsheet_build_lens';
 // win-now team shouldn't dump a young star for an old one — they'd flip him for
 // more. fvShare rises the more future-leaning the build is. Overall weights the
 // present most and decays outward; the team-build lenses re-center the window:
-// win-now = this season, contender = the next 2 seasons, retooling = next year and
-// the year after, rebuild = 3+ years out. band = the chart's highlighted window.
+// win-now = this season + next (front-spiked), contender = the next few seasons
+// (flatter), retooling EXCLUDES this season (you've conceded it), rebuild excludes
+// the next two (ramps in at +2, full from +3). band = the chart's highlighted window.
 const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; band?: [number, number] }[] = [
   { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45 },
-  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.3, 0.1, 0, 0, 0, 0], fvShare: 0.15, band: [0, 1] },
-  { key: 'contender', label: 'Contender', short: '2YR', weights: [1, 1, 0.5, 0.2, 0.1, 0, 0], fvShare: 0.3, band: [0, 2] },
-  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0.45, 1, 1, 0.55, 0.3, 0.15, 0.05], fvShare: 0.45, band: [1, 2] },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0.15, 0.3, 0.55, 1, 1, 0.9, 0.8], fvShare: 0.6, band: [3, 6] },
+  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15, band: [0, 1] },
+  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3, band: [0, 3] },
+  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45, band: [1, 3] },
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6, band: [2, 6] },
 ];
 
 interface TradeCheckerProps {
@@ -553,12 +554,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           ))}
           {/* Theoretical replacement for any opened spot you didn't name a FA for */}
           {showTheoretical && (
-            <div className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2" title="Opened roster spots you didn't name a free agent for — filled at theoretical replacement level.">
+            <div className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2" title="Giving up more players than you get back frees roster spots — each one lets you keep another player you'd otherwise have cut (or add a free agent). Valued at a rosterable replacement; tap ＋ name a free agent to use a real player instead.">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} consolidation keep</div>
+                <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} roster spot{theoreticalFill === 1 ? '' : 's'} freed <span className="not-italic text-[11px] text-zinc-500">— keep {theoreticalFill === 1 ? 'a player' : 'players'} you&apos;d have cut</span></div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {pvFill(theoreticalFill).toFixed(1)}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {fvFill(theoreticalFill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.short} {(theoreticalFill * keepLens).toFixed(1)}</span>
                 </div>
               </div>
             </div>
@@ -637,7 +639,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         return (
         <div className="mb-4">
           <div className="flex justify-center mb-2">
-            <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season, contender = next 2 years, retooling = next year + the year after, rebuild = 3+ years out).">
+            <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season + next, contender = the next few, retooling = next year onward, rebuild = 2–3+ years out).">
               {BUILDS.map((b) => (
                 <button key={b.key} onClick={() => updateBuild(b.key)}
                   className={`px-2.5 py-1 text-[11px] cursor-pointer ${buildKey === b.key ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
@@ -649,7 +651,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           <div className="text-center">
             <div className={`text-lg font-bold ${verdictColor}`}>{verdict}</div>
             <div className="text-[11px] text-zinc-500 mb-2">
-              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span> · {build.key === 'overall' ? 'present counts most, future decays out' : build.key === 'win-now' ? 'this season' : build.key === 'contender' ? 'the next 2 seasons' : build.key === 'retool' ? 'next year + the year after' : '3+ years out'}
+              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span> · {build.key === 'overall' ? 'present counts most, future decays out' : build.key === 'win-now' ? 'this season + next' : build.key === 'contender' ? 'the next few seasons' : build.key === 'retool' ? 'next year onward — this season conceded' : '2–3+ years out'}
             </div>
           </div>
           <div className="text-center text-sm flex flex-wrap justify-center gap-x-4">
@@ -703,7 +705,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) opens roster spots — a <strong>consolidation keep</strong>: you keep a player already on your roster, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues). Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season, <strong>Contender</strong> = the next 2, <strong>Retooling</strong> = next year + the year after, <strong>Rebuild</strong> = 3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens, and the <strong className="text-zinc-300">window chart</strong> plots each side&apos;s cumulative value season by season — so you can see <em>when</em> a future-heavy return overtakes a win-now one. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens, and the <strong className="text-zinc-300">window chart</strong> plots each side&apos;s cumulative value season by season — so you can see <em>when</em> a future-heavy return overtakes a win-now one. Premium — a work in progress.
       </p>
     </div>
   );
