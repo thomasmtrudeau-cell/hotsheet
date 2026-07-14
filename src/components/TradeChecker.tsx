@@ -222,13 +222,23 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const base = batSides[p.id] === 'L' ? 0.83 : 0.87;
     return base + (1 - base) * escape;
   };
+  // A returning/pushing teammate takes reps from the WEAKEST guy in the logjam,
+  // not a star — so the PT-threat dock is neutralized by the followed player's own
+  // WAR. Ceddanne Rafaela (3.6 WAR, elite glove) keeps his job when Roman Anthony
+  // returns; a fringe outfielder is the one who loses time.
+  const entrench = (p: SearchResult) => {
+    const war = metrics[p.id]?.war;
+    if (war === undefined) return 0;
+    return war >= 3.5 ? 1 : war >= 2.5 ? 0.7 : war >= 2.0 ? 0.4 : war >= 1.5 ? 0.2 : 0;
+  };
+  const ptDockEff = (p: SearchResult) => 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p));
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
     const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
     return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p))
       * (injuries[p.id] ? 0.6 : 1)
-      * ptDock(ptRisk[p.id])
+      * ptDockEff(p)
       * jobSecurity(p)
       * platoonDock(p)
       * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
@@ -238,7 +248,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // pushing teammate (Arias behind Ramírez) or a part-time role now. Softer than
   // the present-value dock since keeper horizons give the logjam time to resolve.
   const fvPtFactor = (p: SearchResult) => {
-    const risk = ptRisk[p.id] ? 0.85 : 1;
+    // Same entrenchment logic as PV — a star's keeper value isn't threatened by a
+    // returnee who'll bump a lesser teammate.
+    const risk = ptRisk[p.id] ? 1 - 0.15 * (1 - entrench(p)) : 1;
     const role = roles[p.id]?.factor;
     const roleF = role !== undefined && role < 1 ? 0.5 + 0.5 * role : 1; // half-weight the role dock for FV
     return risk * roleF;
@@ -303,7 +315,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={ptRisk[p.id]} role={roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -313,7 +325,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={ptRisk[p.id]} role={roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
