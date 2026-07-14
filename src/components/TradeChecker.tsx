@@ -240,6 +240,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // Actual playing-time rate (fraction of team games he's appeared in), from the
   // game log — the DYNAMIC signal. Majors only; pitchers carry a normal workload;
   // a hitter with no game-log read defaults to near-everyday.
+  // A PROVEN full-time bat — his recent game-log DNPs are noise (DH rest days,
+  // paternity/bereavement list, a rehab week), not a lost job. We don't rush to
+  // degrade a long-track-record regular to part-time off a two-week sample. Older
+  // vets qualify on a lower bar (the track record is longer); a young unproven
+  // part-timer (Ruiz) is NOT exempt — his low rate is a real signal.
+  const establishedRegular = (p: SearchResult) => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P') return false;
+    const m = metrics[p.id];
+    if (!m) return false;
+    const age = m.age ?? 26, wrc = m.peakWrcPlus ?? 0, war = m.war ?? 0;
+    return wrc >= 110 || war >= 2.5 || (age >= 30 && (wrc >= 100 || war >= 1.8));
+  };
   const ptRateOf = (p: SearchResult) => {
     if (p.sportId !== 1) return 1;
     if (p.primaryPosition === 'P') return 1;
@@ -247,6 +259,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // bench role. An everyday regular returns to everyday reps, so we don't read
     // the IL-polluted log as part-time (J-Rod/Story/Semien were being cratered).
     if (injuries[p.id]) return 1;
+    if (establishedRegular(p)) return 1; // rest/paternity noise ≠ part-time
     return roles[p.id]?.rate ?? 0.9;
   };
   // Dynamic present PRODUCTION: a park-neutral current-year rate projection scaled
@@ -278,6 +291,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const platoonDock = (p: SearchResult) => {
     if (p.sportId !== 1 || p.primaryPosition === 'P') return 1;
     if (injuries[p.id]) return 1; // IL DNPs aren't a platoon signal
+    if (establishedRegular(p)) return 1; // a proven regular isn't platooning off a rest week
     const rate = roles[p.id]?.rate;
     if (rate === undefined || rate >= 0.85) return 1; // everyday (or unknown) — no platoon dock
     const wrc = metrics[p.id]?.peakWrcPlus ?? 100;
@@ -338,7 +352,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     let roleF = 1;
     const rate = roles[p.id]?.rate;
     const rAge = metrics[p.id]?.age ?? 26;
-    if (rate !== undefined && rate < 0.8 && rAge <= 29) {
+    if (rate !== undefined && rate < 0.8 && rAge <= 29 && !establishedRegular(p)) {
       const def = metrics[p.id]?.def;
       const wrc = metrics[p.id]?.peakWrcPlus ?? 100;
       let odds = 0.88 - Math.max(0, rAge - 24) * 0.03;
@@ -490,7 +504,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -500,7 +514,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
