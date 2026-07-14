@@ -685,6 +685,7 @@ export default function Home() {
           <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
         </div>
       ) : isCallups ? (
+        !isPremium ? <PremiumTeaser context="callups" /> :
         <MoversList
           items={callups}
           onFollow={follow}
@@ -697,6 +698,7 @@ export default function Home() {
           isPremium={isPremium}
         />
       ) : isPromotions ? (
+        !isPremium ? <PremiumTeaser context="promotions" /> :
         <MoversList
           items={promotions}
           onFollow={follow}
