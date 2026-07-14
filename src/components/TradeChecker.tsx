@@ -12,16 +12,20 @@ const BUILD_KEY = 'hotsheet_build_lens';
 // Build lenses. Every player already has a per-season value projection (k=0 is THIS
 // season = his live PV; future seasons follow the age curve, injuries rebound,
 // prospects ramp in at arrival). A lens scores him as a weighted AVERAGE of those
-// seasons — so every lens reads on the same per-season scale as PV. Overall weights
-// the present most and decays outward; the team-build lenses re-center the window:
+// seasons (his production over that window) PLUS a market-premium share of FV —
+// because trade value is ASSET value: the market pays a real premium for ceiling +
+// control window (one Skenes fetches a deGrom+Wheeler+Freeman haul), and even a
+// win-now team shouldn't dump a young star for an old one — they'd flip him for
+// more. fvShare rises the more future-leaning the build is. Overall weights the
+// present most and decays outward; the team-build lenses re-center the window:
 // win-now = this season, contender = the next 2 seasons, retooling = next year and
 // the year after, rebuild = 3+ years out. band = the chart's highlighted window.
-const BUILDS: { key: string; label: string; short: string; weights: number[]; band?: [number, number] }[] = [
-  { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14] },
-  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.3, 0.1, 0, 0, 0, 0], band: [0, 1] },
-  { key: 'contender', label: 'Contender', short: '2YR', weights: [1, 1, 0.5, 0.2, 0.1, 0, 0], band: [0, 2] },
-  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0.45, 1, 1, 0.55, 0.3, 0.15, 0.05], band: [1, 2] },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0.15, 0.3, 0.55, 1, 1, 0.9, 0.8], band: [3, 6] },
+const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; band?: [number, number] }[] = [
+  { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45 },
+  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.3, 0.1, 0, 0, 0, 0], fvShare: 0.15, band: [0, 1] },
+  { key: 'contender', label: 'Contender', short: '2YR', weights: [1, 1, 0.5, 0.2, 0.1, 0, 0], fvShare: 0.3, band: [0, 2] },
+  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0.45, 1, 1, 0.55, 0.3, 0.15, 0.05], fvShare: 0.45, band: [1, 2] },
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0.15, 0.3, 0.55, 1, 1, 0.9, 0.8], fvShare: 0.6, band: [3, 6] },
 ];
 
 interface TradeCheckerProps {
@@ -495,12 +499,16 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // two sides through the active lens; PV and FV stay in the analysis untouched. ----
   const build = BUILDS.find((b) => b.key === buildKey) ?? BUILDS[0];
   const wSum = build.weights.reduce((a, b) => a + b, 0);
-  const lensOf = (p: SearchResult) => build.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / wSum;
-  const lensTitle = `${build.label} value — his projected per-season value averaged over the ${build.label.toLowerCase()} window`;
-  // A theoretical consolidation keep: worth PV_KEEP in the present, FV_KEEP over a
-  // keeper horizon — blend by how future-leaning the active lens is.
-  const futureShare = (wSum - build.weights[0]) / wSum;
-  const keepLens = (1 - futureShare) * PV_KEEP + futureShare * FV_KEEP;
+  // Production over the build's window (per-season scale) + the market premium the
+  // asset commands (fvShare of his keeper FV). The FV term is what makes a massive
+  // ceiling gap (J-Rod FV 17.8 vs Trout 6.5) surface in the verdict — production
+  // curves alone called Julio-for-Trout "fair," and nobody makes that trade.
+  const windowAvg = (p: SearchResult) => build.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / wSum;
+  const lensOf = (p: SearchResult) => (1 - build.fvShare) * windowAvg(p) + build.fvShare * fvOf(p);
+  const lensTitle = `${build.label} value — projected production over the ${build.label.toLowerCase()} window plus the market premium his keeper ceiling commands`;
+  // A theoretical consolidation keep gets the same blend: replacement production
+  // (PV_KEEP, flat) + the lens's market share of a keeper-worthy FV_KEEP.
+  const keepLens = (1 - build.fvShare) * PV_KEEP + build.fvShare * FV_KEEP;
   const sumLens = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + lensOf(p), 0);
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + lensOf(p), 0) + theoreticalFill * keepLens;
@@ -695,7 +703,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) opens roster spots — a <strong>consolidation keep</strong>: you keep a player already on your roster, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues). Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player by his projected seasons: <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season, <strong>Contender</strong> = the next 2, <strong>Retooling</strong> = next year + the year after, <strong>Rebuild</strong> = 3+ years out. The verdict compares both sides through your active lens, and the <strong className="text-zinc-300">window chart</strong> plots each side&apos;s cumulative value season by season — so you can see <em>when</em> a future-heavy return overtakes a win-now one. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) opens roster spots — a <strong>consolidation keep</strong>: you keep a player already on your roster, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues). Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season, <strong>Contender</strong> = the next 2, <strong>Retooling</strong> = next year + the year after, <strong>Rebuild</strong> = 3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens, and the <strong className="text-zinc-300">window chart</strong> plots each side&apos;s cumulative value season by season — so you can see <em>when</em> a future-heavy return overtakes a win-now one. Premium — a work in progress.
       </p>
     </div>
   );
