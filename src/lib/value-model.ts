@@ -12,9 +12,11 @@ export interface LeagueSettings {
   slots: Record<string, number>; // starting slots for ONE team, by position
 }
 
-// Standard starting slots for the baseline (Tom's) league.
+// Standard starting slots for the baseline (Tom's) league. CI = corner infield
+// (1B/3B), MI = middle infield (2B/SS) — flex spots that add demand to those
+// positions. P can be split SP/RP in other leagues.
 export const DEFAULT_SLOTS: Record<string, number> = {
-  C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, OF: 5, UTIL: 2, P: 9,
+  C: 1, '1B': 1, '2B': 1, '3B': 1, SS: 1, CI: 1, MI: 1, OF: 4, UTIL: 2, P: 9,
 };
 
 // The baseline the model was originally tuned against: 20-team, 28-keeper, OBP.
@@ -38,6 +40,7 @@ export interface ValueInputs {
   age?: number;
   level?: string;
   marketBaseline?: number; // (auction $ − role's FA line) / DIV, role-correct
+  catcherFlex?: boolean;   // catcher who also plays 1B/DH (bat can carry off the dish)
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -111,17 +114,25 @@ function slotBucket(pos: string): string {
   if (pos === 'SP' || pos === 'RP') return 'P';
   return pos;
 }
+// League-wide demand for a position, including flex slots that can hold it: CI
+// feeds 1B/3B, MI feeds 2B/SS. (UTIL is left general — it doesn't concentrate on
+// any one position.)
+function positionDemand(pos: string, slots: Record<string, number>): number {
+  const own = slots[slotBucket(pos)] ?? 0;
+  if (pos === '1B' || pos === '3B') return own + (slots.CI ?? 0);
+  if (pos === '2B' || pos === 'SS') return own + (slots.MI ?? 0);
+  return own;
+}
 // A position's scarcity premium grows when a league starts MORE of it than
-// standard (2-catcher leagues make catchers scarcer) and shrinks when it starts
-// fewer, relative to the default slot count for that bucket.
+// standard (2-catcher leagues make catchers scarcer; extra CI/MI deepen corner/
+// middle demand) and shrinks when it starts fewer.
 export function scarcityMult(pos: string | undefined, s: LeagueSettings): number {
   if (!pos) return 1;
   const prior = SCARCITY_PRIOR[pos] ?? 0;
   if (prior === 0) return 1;
-  const bucket = slotBucket(pos);
-  const std = DEFAULT_SLOTS[bucket] ?? 1;
-  const user = s.slots[bucket] ?? std;
-  const slotAdj = clamp(user / (std || 1), 0.5, 2.5);
+  const std = positionDemand(pos, DEFAULT_SLOTS) || 1;
+  const user = positionDemand(pos, s.slots);
+  const slotAdj = clamp(user / std, 0.5, 2.5);
   return clamp(1 + prior * slotAdj, 0.82, 1.24);
 }
 
@@ -136,10 +147,24 @@ const FORMAT: Record<ScoringFormat, FormatWeights> = {
   avg:    { warW: 0.58, mktW: 0.25, prodW: 0.17, wrcFan: 0.82, hrFan: 1.05, sbFan: 0.90 },
 };
 
+// WAR isn't fantasy value. Catcher WAR is inflated by framing/defense that
+// doesn't score, so it's haircut (less so for a flex catcher who can play 1B/DH,
+// since his bat carries off the dish). 1B/DH WAR is deflated by the positional
+// penalty even though their bat is the whole fantasy point, so we add it back —
+// a good-hitting low-WAR 1B (Schwarber-type) then clears the keeper bar on the
+// bat. Middle-infield/OF WAR translates roughly as-is (scarcity handles those).
+function fantasyWar(war: number, position?: string, catcherFlex?: boolean): number {
+  const p = position ?? '';
+  if (p === 'C') return war * (catcherFlex ? 0.92 : 0.80);
+  if (p === '1B' || p === 'DH') return war + 0.6;
+  return war;
+}
+
 export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number } {
   if (inp.war === undefined) return { present: 0, future: 0 };
   const fmt = FORMAT[s.format];
   const scar = scarcityMult(inp.position, s);
+  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex);
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
@@ -151,13 +176,13 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
     if (inp.hr !== undefined) fantasy += fmt.hrFan * (inp.hr / 25);
     if (inp.sb !== undefined) fantasy += fmt.sbFan * (inp.sb / 25);
   }
-  const warTerm = Math.max(0, inp.war - bar) * 3;
-  const fantasyTerm = fantasy * (inp.war > bar ? 1 : 0.15);
+  const warTerm = Math.max(0, fWar - bar) * 3;
+  const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
   const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) value: WAR-driven ----
   const lvl = presentLevelFactor(inp.level);
-  const warPv = Math.max(0, inp.war - replacementWar(s)) * 1.8 * lvl;
+  const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl;
   let prod = 0;
   if (inp.isPitcher) {
     const e = inp.curEra20 ?? inp.era20;

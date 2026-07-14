@@ -4,8 +4,9 @@ import { LeagueSettings, ScoringFormat, DEFAULT_SETTINGS, keeperBar, replacement
 
 const SLOT_KEYS: { key: string; label: string }[] = [
   { key: 'C', label: 'C' }, { key: '1B', label: '1B' }, { key: '2B', label: '2B' },
-  { key: '3B', label: '3B' }, { key: 'SS', label: 'SS' }, { key: 'OF', label: 'OF' },
-  { key: 'UTIL', label: 'UTIL' }, { key: 'P', label: 'P' },
+  { key: '3B', label: '3B' }, { key: 'SS', label: 'SS' }, { key: 'CI', label: 'CI' },
+  { key: 'MI', label: 'MI' }, { key: 'OF', label: 'OF' }, { key: 'UTIL', label: 'UTIL' },
+  { key: 'P', label: 'P' },
 ];
 const FORMATS: { key: ScoringFormat; label: string }[] = [
   { key: 'obp', label: 'OBP' }, { key: 'avg', label: 'AVG' }, { key: 'points', label: 'Points' },

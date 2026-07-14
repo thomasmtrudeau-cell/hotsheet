@@ -49,7 +49,7 @@ export default function ProjectionsView({ pitchers, hitters, loading, isPremium,
     return [...arr].sort((a, b) => (pitchSort === 'era' ? a.era - b.era : a.rank - b.rank));
   }, [pitchers, q, pitchSort]);
 
-  if (!isPremium) return <PremiumTeaser />;
+  if (!isPremium) return <PremiumTeaser context="projections" />;
 
   if (loading && pitchers.length === 0 && hitters.length === 0) {
     return (

@@ -72,7 +72,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing }: 
     .sort((a, b) => b.war - a.war)
     .slice(0, 200), [rows, minWar, levels, pos]);
 
-  if (!isPremium) return <PremiumTeaser />;
+  if (!isPremium) return <PremiumTeaser context="scouting" />;
   if (loading && rows.length === 0) {
     return <div className="flex justify-center py-16"><div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" /></div>;
   }

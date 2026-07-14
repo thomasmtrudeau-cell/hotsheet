@@ -24,7 +24,7 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
   // Default to 2+ WAR — climbers below that are rarely worth acting on.
   const [minWar, setMinWar] = useState(2);
   // Regular users get the premium preview, not the (empty) board.
-  if (!isPremium) return <PremiumTeaser />;
+  if (!isPremium) return <PremiumTeaser context="risers" />;
 
   const shown = risers.filter((r) => r.war >= minWar);
 

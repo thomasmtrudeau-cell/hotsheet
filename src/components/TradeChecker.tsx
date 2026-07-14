@@ -83,7 +83,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     let active = true;
     // IL-aware playing-time role per hitter (few players in a trade, so per-player
     // team-game-log fetches are fine). Docks PV for part-time / bench guys.
-    Promise.all(all.filter((p) => p.primaryPosition !== 'P' && isMLBSystem(p.sportId)).map(async (p) => {
+    // Playing-time role only applies in the majors — a minor leaguer's usage
+    // isn't a job-security signal (he's developing), so we never dock prospects.
+    Promise.all(all.filter((p) => p.primaryPosition !== 'P' && p.sportId === 1).map(async (p) => {
       try {
         const r = await fetch(`/api/stats/gamelog?playerId=${p.id}&sportId=${p.sportId}&pitcher=0&teamId=${p.currentTeam.id}`);
         const d = await r.json();
@@ -115,7 +117,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return () => { active = false; };
   }, [sideA, sideB, faFills]);
 
-  if (!isPremium) return <PremiumTeaser />;
+  if (!isPremium) return <PremiumTeaser context="trade" />;
 
   const inTrade = (id: number) => sideA.some((p) => p.id === id) || sideB.some((p) => p.id === id) || faFills.some((p) => p.id === id);
   const clearSearch = () => { setQuery(''); setResults([]); setOpen(false); };
@@ -141,6 +143,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // positionally deflated, so a good bat (high wRC+) secures the spot.
   const jobSecurity = (p: SearchResult) => {
     if (p.primaryPosition === 'P') return 1;
+    if (p.sportId !== 1) return 1; // job security is an MLB concept — never dock prospects
     const war = metrics[p.id]?.war;
     if (war === undefined) return 1;
     let f = war >= 2.0 ? 1.0 : war >= 1.5 ? 0.93 : war >= 1.0 ? 0.85 : 0.7;
@@ -179,7 +182,17 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     * (roles[p.id]?.factor ?? 1)
     * jobSecurity(p)
     * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
-  const fvOf = (p: SearchResult) => baseValue(p).future;
+  // Keeper value also takes a (softer) playing-time hit: a projection that
+  // assumes a full-time role is worth less if that role is tenuous — a returning/
+  // pushing teammate (Arias behind Ramírez) or a part-time role now. Softer than
+  // the present-value dock since keeper horizons give the logjam time to resolve.
+  const fvPtFactor = (p: SearchResult) => {
+    const risk = ptRisk[p.id] ? 0.85 : 1;
+    const role = roles[p.id]?.factor;
+    const roleF = role !== undefined && role < 1 ? 0.5 + 0.5 * role : 1; // half-weight the role dock for FV
+    return risk * roleF;
+  };
+  const fvOf = (p: SearchResult) => baseValue(p).future * fvPtFactor(p);
   // Freely-available replacement level: an unbalanced trade opens roster spots
   // you refill off the wire, so the side receiving FEWER players gets that many
   // theoretical replacements baked in. Present value is repeatable (there's

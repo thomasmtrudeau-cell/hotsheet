@@ -1,44 +1,51 @@
 'use client';
 
-// Shown to regular (non-premium) users where a premium feature would live.
-// It advertises the ScoutTheStatline data layer without exposing any of it, and
-// frames premium as something that could open up if there's enough interest.
-export default function PremiumTeaser() {
-  const features: { label: string; blurb: string }[] = [
-    {
-      label: 'Prospect Risers board',
-      blurb: 'A live leaderboard of the players whose peak projection is climbing fastest — before the industry catches on. Pick your window (7 / 14 / 30 days).',
-    },
-    {
-      label: 'Peak WAR',
-      blurb: 'A single forward-looking value grade for every hitter and pitcher, majors through the low minors.',
-    },
-    {
-      label: 'Peak wRC+',
-      blurb: 'Where a hitter’s bat projects to peak, on the same 100-is-average scale you already read.',
-    },
-    {
-      label: 'ERA / 20 TBF',
-      blurb: 'A rate-stable run-prevention grade for pitchers that holds up across small samples and level changes.',
-    },
-  ];
+// Shown to regular (non-premium) users where a premium feature would live. It
+// advertises the ScoutTheStatline data layer + the premium tools without exposing
+// any of it. Context-aware: the headline/lead and the top feature match the tab
+// the user is looking at (Trade, Regression, Scouting, …).
+export type TeaserContext = 'trade' | 'regression' | 'scouting' | 'risers' | 'projections' | 'default';
+
+interface Feature { key: string; label: string; blurb: string }
+
+const FEATURES: Feature[] = [
+  { key: 'trade', label: 'Trade Checker', blurb: 'Value any trade for both sides — win-now (PV) and keeper (FV) — tuned to your league (teams, keepers, format, roster slots), with injury, playing-time, park and free-agent-fill adjustments baked in.' },
+  { key: 'regression', label: 'SP Regression — sell-high / buy-low', blurb: 'Starters whose peak true-talent ERA/20 has drifted from their actual current-year ERA (live MLB + every MiLB level), with IL status and rotation-vs-bullpen role.' },
+  { key: 'scouting', label: 'Scouting board', blurb: 'Every projected player by peak WAR, filter by level from the majors down to rookie ball — surface 2+ WAR prospects before they pop.' },
+  { key: 'risers', label: 'Prospect Risers', blurb: 'A live board of whose peak projection is climbing fastest — before the industry catches on. Pick your window (7 / 14 / 30 days).' },
+  { key: 'projections', label: 'Weekly projections', blurb: 'Rest-of-season and weekly-rank projections layered onto the players you follow.' },
+  { key: 'war', label: 'Peak WAR, wRC+ & ERA/20', blurb: 'Forward-looking value + rate grades for every hitter and pitcher, majors through the low minors — plus speed / power / dual-threat and defense tool tags on every card.' },
+];
+
+const HEADS: Record<TeaserContext, { title: string; lead: string; top: string }> = {
+  trade: { title: 'Trade Checker — premium', lead: 'Grade any trade for both sides, tuned to your exact league. Powered by proprietary projections from', top: 'trade' },
+  regression: { title: 'SP Regression — premium', lead: 'Find sell-high and buy-low starters by comparing true-talent to actual results. Powered by proprietary projections from', top: 'regression' },
+  scouting: { title: 'Scouting board — premium', lead: 'Scout every projected player by peak WAR and level, majors through rookie ball. Powered by proprietary projections from', top: 'scouting' },
+  risers: { title: 'Prospect Risers — premium', lead: 'Catch the players whose projection is climbing fastest. Powered by proprietary projections from', top: 'risers' },
+  projections: { title: 'Weekly projections — premium', lead: 'Rest-of-season and weekly-rank projections on the players you follow. Powered by proprietary projections from', top: 'projections' },
+  default: { title: 'Scouting intelligence, built in', lead: 'Forward-looking grades layered onto the players you already follow. Powered by proprietary projections from', top: 'war' },
+};
+
+export default function PremiumTeaser({ context = 'default' }: { context?: TeaserContext }) {
+  const head = HEADS[context];
+  // Lead with the context's own feature, then the rest.
+  const ordered = [...FEATURES].sort((a, b) => (a.key === head.top ? -1 : b.key === head.top ? 1 : 0));
 
   return (
     <div className="max-w-xl mx-auto text-center py-10 px-4">
       <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-xs font-semibold mb-4">
         <span>🚀</span> Premium preview
       </div>
-      <h2 className="text-xl font-bold text-zinc-100 mb-2">Scouting intelligence, built in</h2>
+      <h2 className="text-xl font-bold text-zinc-100 mb-2">{head.title}</h2>
       <p className="text-sm text-zinc-400 leading-relaxed mb-6">
-        These are upcoming premium features powered by proprietary projections from{' '}
-        <span className="text-amber-300 font-medium">ScoutTheStatline.com</span> — the same forward-looking
-        grades used to evaluate talent, layered right onto the players you already follow. They’re not
-        live for everyone yet, but they could open up if there’s enough interest.
+        {head.lead}{' '}
+        <span className="text-amber-300 font-medium">ScoutTheStatline.com</span> — not live for everyone yet,
+        but it could open up if there’s enough interest.
       </p>
 
       <div className="text-left space-y-2.5 mb-7">
-        {features.map((f) => (
-          <div key={f.label} className="flex gap-2.5 px-3 py-2.5 bg-zinc-800/50 border border-zinc-700/40 rounded-lg">
+        {ordered.map((f, i) => (
+          <div key={f.key} className={`flex gap-2.5 px-3 py-2.5 rounded-lg border ${i === 0 && context !== 'default' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-800/50 border-zinc-700/40'}`}>
             <span className="text-amber-400 mt-0.5 shrink-0">✦</span>
             <div>
               <div className="text-sm font-semibold text-zinc-100">{f.label}</div>
@@ -57,7 +64,7 @@ export default function PremiumTeaser() {
           ThomasMTrudeau@gmail.com
         </a>
       </div>
-      <p className="text-[11px] text-zinc-600 mt-2">Tell us which metric you’d use most — demand decides what ships.</p>
+      <p className="text-[11px] text-zinc-600 mt-2">Tell us which tool you’d use most — demand decides what ships.</p>
     </div>
   );
 }

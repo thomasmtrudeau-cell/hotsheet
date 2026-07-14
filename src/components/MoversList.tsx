@@ -99,9 +99,9 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                     </>
                   )
                 ) : (
-                  <Tooltip text="Premium: WAR, peak wRC+ & ERA/20 TBF from ScoutTheStatline. Tap ✨ Premium to learn more.">
+                  <Tooltip text={`Premium: WAR & ${c.primaryPosition === 'P' ? 'ERA/20 TBF' : 'peak wRC+'} from ScoutTheStatline. Tap ✨ Premium to learn more.`}>
                     <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/10 border border-amber-500/25 text-amber-300/70 cursor-help">
-                      🔒 WAR · wRC+ · ERA/20
+                      🔒 WAR · {c.primaryPosition === 'P' ? 'ERA/20' : 'wRC+'}
                     </span>
                   </Tooltip>
                 )}

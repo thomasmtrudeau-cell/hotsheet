@@ -107,7 +107,7 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
     };
   }, [rows, eraCut, gap, levels]);
 
-  if (!isPremium) return <PremiumTeaser />;
+  if (!isPremium) return <PremiumTeaser context="regression" />;
   if (loading && rows.length === 0) {
     return (
       <div className="flex justify-center py-16">
