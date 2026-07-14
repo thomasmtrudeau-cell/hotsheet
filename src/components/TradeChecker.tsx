@@ -258,8 +258,22 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // Same entrenchment logic as PV — a star's keeper value isn't threatened by a
     // returnee who'll bump a lesser teammate.
     const risk = ptRisk[p.id] ? 1 - 0.15 * (1 - entrench(p)) : 1;
-    const role = roles[p.id]?.factor;
-    const roleF = role !== undefined && role < 1 ? 0.5 + 0.5 * role : 1; // half-weight the role dock for FV
+    // Role-attainment: a part-timer's FV ceiling assumes an everyday role he
+    // doesn't have. The odds of ever securing it FADE with age (a 27-yo part-timer
+    // is likelier "who he is" than a 22-yo) and poor defense (no glove to earn the
+    // reps), but a young / good-glove part-timer keeps most of the ceiling (the
+    // path is open). Esteury Ruiz (27, part-time, −D) gets docked; a 23-yo +D
+    // part-timer like Sanoja barely does.
+    let roleF = 1;
+    const rate = roles[p.id]?.rate;
+    if (rate !== undefined && rate < 0.8) {
+      const age = metrics[p.id]?.age ?? 26;
+      const def = metrics[p.id]?.def;
+      let odds = 0.88 - Math.max(0, age - 24) * 0.03;
+      if (def === 'minus' || def === 'double-minus') odds -= 0.08;
+      if (def === 'plus' || def === 'double-plus') odds += 0.06;
+      roleF = Math.max(0.6, Math.min(1, odds));
+    }
     return risk * roleF;
   };
   const fvOf = (p: SearchResult) => baseValue(p).future * fvPtFactor(p);
