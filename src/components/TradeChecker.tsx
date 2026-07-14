@@ -20,13 +20,13 @@ const BUILD_KEY = 'hotsheet_build_lens';
 // present most and decays outward; the team-build lenses re-center the window:
 // win-now = this season + next (front-spiked), contender = the next few seasons
 // (flatter), retooling EXCLUDES this season (you've conceded it), rebuild excludes
-// the next two (ramps in at +2, full from +3). band = the chart's highlighted window.
-const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; band?: [number, number] }[] = [
+// the next two (ramps in at +2, full from +3).
+const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number}[] = [
   { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45 },
-  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15, band: [0, 1] },
-  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3, band: [0, 3] },
-  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45, band: [1, 3] },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6, band: [2, 6] },
+  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15},
+  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3},
+  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45},
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6},
 ];
 
 interface TradeCheckerProps {
@@ -54,49 +54,6 @@ function Chips({ m, isPitcher, pv, fv, lens, injured, risk, role }: { m?: Premiu
       {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
       {m && !isPitcher && m.def && <span className={`${chip} ${m.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`}>🧤{m.def === 'double-plus' ? '++' : m.def === 'plus' ? '+' : m.def === 'double-minus' ? '−−' : '−'}</span>}
     </div>
-  );
-}
-
-// Cumulative-value-over-time chart. Each line is how much value a side has banked
-// through each season; where they cross is when the future-heavy side overtakes the
-// win-now side (Luke's competition-window idea — the deGrom-window risk made visible).
-function CrossoverChart({ cumA, cumB, crossover, horizon, band }: {
-  cumA: number[]; cumB: number[]; crossover: number; horizon: number; band?: [number, number];
-}) {
-  const W = 340, H = 148, padL = 6, padR = 6, padT = 10, padB = 20;
-  const max = Math.max(1, ...cumA, ...cumB);
-  const x = (k: number) => padL + (k / horizon) * (W - padL - padR);
-  const y = (v: number) => padT + (1 - v / max) * (H - padT - padB);
-  const path = (arr: number[]) => arr.map((v, k) => `${k === 0 ? 'M' : 'L'}${x(k).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
-  const labels = ['Now', ...Array.from({ length: horizon }, (_, i) => `+${i + 1}`)];
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 170 }} preserveAspectRatio="xMidYMid meet">
-      {/* your-window band — the seasons the active build cares about */}
-      {band && (
-        <>
-          <rect x={x(band[0])} y={padT} width={Math.max(2, x(band[1]) - x(band[0]))} height={H - padT - padB} fill="#f9731615" />
-          <text x={(x(band[0]) + x(band[1])) / 2} y={padT + 7} textAnchor="middle" className="fill-orange-400/70" style={{ fontSize: 8 }}>your window</text>
-        </>
-      )}
-      {/* axes */}
-      <line x1={padL} y1={H - padB} x2={W - padR} y2={H - padB} stroke="#3f3f46" strokeWidth={0.75} />
-      {labels.map((l, k) => (
-        <text key={k} x={x(k)} y={H - padB + 11} textAnchor="middle" className="fill-zinc-600" style={{ fontSize: 7.5 }}>{l}</text>
-      ))}
-      {/* lines */}
-      <path d={path(cumB)} fill="none" stroke="#a1a1aa" strokeWidth={1.75} />
-      <path d={path(cumA)} fill="none" stroke="#34d399" strokeWidth={1.75} />
-      {cumA.map((v, k) => <circle key={`a${k}`} cx={x(k)} cy={y(v)} r={1.4} fill="#34d399" />)}
-      {cumB.map((v, k) => <circle key={`b${k}`} cx={x(k)} cy={y(v)} r={1.4} fill="#a1a1aa" />)}
-      {/* crossover */}
-      {crossover > 0 && (
-        <>
-          <line x1={x(crossover)} y1={padT} x2={x(crossover)} y2={H - padB} stroke="#f472b6" strokeWidth={0.75} strokeDasharray="3 2" />
-          <circle cx={x(crossover)} cy={y(cumA[crossover])} r={2.6} fill="none" stroke="#f472b6" strokeWidth={1.25} />
-          <text x={x(crossover)} y={H - padB - 3} textAnchor={crossover > horizon / 2 ? 'end' : 'start'} className="fill-pink-400" style={{ fontSize: 8 }}>crossover</text>
-        </>
-      )}
-    </svg>
   );
 }
 
@@ -437,7 +394,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const edge = (d: number, unit: string) =>
     Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
-  // ---- Multi-year value projection (build lenses + the competition-window chart) ----
+  // ---- Multi-year value projection (feeds the build lenses) ----
   const HORIZON = 6; // seasons out to project (0 = this year … 6)
   const parkOf = (p: SearchResult) => homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   const arrivalYear = (lvl: string) => lvl.includes('AAA') ? 1 : lvl.includes('AA') ? 2 : 3;
@@ -472,28 +429,6 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const cur = abilityCurve(m.age, isP) || 1;
     return healthy * (abilityCurve((m.age ?? 27) + k, isP) / cur);
   };
-  const sideSeason = (players: SearchResult[], side: Side, k: number) => {
-    let t = players.reduce((acc, p) => acc + seasonValue(p, k), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + seasonValue(p, k), 0);
-    return t;
-  };
-  // Cumulative value each side has banked THROUGH each season.
-  const cumulative = (players: SearchResult[], side: Side) => {
-    const out: number[] = [];
-    let run = 0;
-    for (let k = 0; k <= HORIZON; k++) { run += sideSeason(players, side, k); out.push(run); }
-    return out;
-  };
-  const cumA = cumulative(sideA, 'A');
-  const cumB = cumulative(sideB, 'B');
-  // Crossover: first season where the side that trails early pulls even/ahead.
-  const leadsEarly = cumA[0] >= cumB[0] ? 'A' : 'B';
-  let crossover = -1;
-  for (let k = 1; k <= HORIZON; k++) {
-    const aAhead = cumA[k] >= cumB[k];
-    if ((leadsEarly === 'A') !== aAhead) { crossover = k; break; }
-  }
-
   // ---- Build-lens scoring: a player's lens value = weighted average of his
   // projected seasons over the active build's window (see BUILDS). Same per-season
   // scale as PV, so the chips read naturally next to it. The verdict compares the
@@ -667,26 +602,6 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         {renderColumn('B', sideB)}
       </div>
 
-      {/* Competition-window chart: cumulative value each side banks over time. */}
-      {sideA.length > 0 && sideB.length > 0 && (() => {
-        const cross = crossover > 0
-          ? `${leadsEarly === 'A' ? 'You get' : 'You give'} leads early; ${leadsEarly === 'A' ? 'you give' : 'you get'} pulls ahead at +${crossover}yr.`
-          : `${cumA[HORIZON] >= cumB[HORIZON] ? 'You get' : 'You give'} stays ahead the whole window.`;
-        return (
-          <div className="mt-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[11px] text-zinc-400">Value over your window</span>
-              <span className="text-[10px] flex gap-3">
-                <span className="text-emerald-400">● you get</span>
-                <span className="text-zinc-400">● you give</span>
-              </span>
-            </div>
-            <CrossoverChart cumA={cumA} cumB={cumB} crossover={crossover} horizon={HORIZON} band={build.band} />
-            <p className="text-[10px] text-zinc-500 mt-1">Cumulative value banked by each season (injured stars rebound next year; young bats ramp up; aging vets fade). {cross}</p>
-          </div>
-        );
-      })()}
-
       {/* FA adds that don't fit the opened spots yet — surfaced, not silently dropped. */}
       {faFills.length > usedFAs.length && (
         <div className="mt-3 rounded-lg border border-dashed border-amber-500/30 bg-amber-500/5 p-2.5 text-[11px] text-amber-300/90">
@@ -705,7 +620,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens, and the <strong className="text-zinc-300">window chart</strong> plots each side&apos;s cumulative value season by season — so you can see <em>when</em> a future-heavy return overtakes a win-now one. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens. Premium — a work in progress.
       </p>
     </div>
   );

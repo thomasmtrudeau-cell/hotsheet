@@ -129,13 +129,31 @@ export function presentMaturity(age?: number): number {
   return Math.max(0.5, Math.min(1, 1 - Math.max(0, 26 - age) * 0.06)); // 25→.94, 24→.88, 22→.76, 21→.70
 }
 
-// Fraction of PEAK ability at a given age — the maturation ramp (below prime) times
-// the aging decline (past prime), peaking ≈1.0 across 26–30. Used to project a
-// player's per-season value across a multi-year keeper horizon for the timeline
-// chart: a young guy's line rises toward peak, an old guy's declines.
+// Attrition: expected value must include the chance a player is still PLAYING at
+// a given age — stars don't glide to 45, careers end. Annual hazard of falling off
+// (retirement, release, chronic injury) rises through the 30s, steeper for
+// pitchers. survivalTo(a) = P(still producing at age a), anchored at 30; it's only
+// ever used as a ratio between two ages, so the anchor cancels. This is what stops
+// a 38-yo ace from projecting value at 44 (≈1% chance he's still pitching).
+function hazard(a: number, isPitcher: boolean): number {
+  const base = isPitcher ? 0.05 : 0.03;
+  const slope = isPitcher ? 0.045 : 0.035;
+  return Math.min(0.6, Math.max(0, base + slope * (a - 31)));
+}
+function survivalTo(a: number, isPitcher = false): number {
+  let s = 1;
+  for (let x = 31; x <= a; x++) s *= 1 - hazard(x, isPitcher);
+  return s;
+}
+
+// Fraction of PEAK expected value at a given age — the maturation ramp (below
+// prime) × the aging decline (past prime) × survival (the odds the career is still
+// going). Peaks ≈1.0 across 26–30. Used to project a player's per-season value
+// across a multi-year keeper horizon for the timeline chart: a young guy's line
+// rises toward peak, an old guy's fades and then falls off the career cliff.
 export function abilityCurve(age?: number, isPitcher = false): number {
   if (age === undefined) return 1;
-  return presentMaturity(age) * Math.min(1, ageRetention(age, isPitcher));
+  return presentMaturity(age) * Math.min(1, ageRetention(age, isPitcher)) * survivalTo(Math.round(age), isPitcher);
 }
 
 // Present value only fully counts in the majors.
