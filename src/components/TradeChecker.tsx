@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
-import { computeValue, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { computeValue, presentMaturity, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 
@@ -197,13 +197,16 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (p.sportId !== 1) return 0;
     const m = metrics[p.id];
     if (!m) return 0;
+    // Pre-peak guys don't produce their peak rate yet (and a newly-promoted guy's
+    // rate often falls back to the peak projection) — so age-discount here too.
+    const mat = presentMaturity(m.age);
     if (p.primaryPosition === 'P') {
       const e = m.curEra20 ?? m.era20;
-      return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2);
+      return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
     }
     const w = m.curWrcPlus ?? m.peakWrcPlus;
     if (w === undefined) return 0;
-    return Math.max(0, (w - 90) / 12) * ptRateOf(p); // bat rate × actual playing time
+    return Math.max(0, (w - 90) / 12) * ptRateOf(p) * mat; // bat rate × actual playing time × maturity
   };
   const DYN_W = 0.6; // weight of the dynamic production layer
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
@@ -227,9 +230,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // WAR. Ceddanne Rafaela (3.6 WAR, elite glove) keeps his job when Roman Anthony
   // returns; a fringe outfielder is the one who loses time.
   const entrench = (p: SearchResult) => {
-    const war = metrics[p.id]?.war;
-    if (war === undefined) return 0;
-    return war >= 3.5 ? 1 : war >= 2.5 ? 0.7 : war >= 2.0 ? 0.4 : war >= 1.5 ? 0.2 : 0;
+    const m = metrics[p.id];
+    if (m?.war === undefined) return 0;
+    // Base it on CURRENT ability (peak × maturity), not the peak ceiling — a
+    // newly-promoted 21-yo with a 3.5 peak isn't a lineup lock yet (Lara), while
+    // an established 25-yo star is (Rafaela).
+    const cur = m.war * presentMaturity(m.age);
+    return cur >= 3.3 ? 1 : cur >= 2.5 ? 0.7 : cur >= 2.0 ? 0.4 : cur >= 1.5 ? 0.2 : 0;
   };
   const ptDockEff = (p: SearchResult) => 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p));
   const pvOf = (p: SearchResult) => {

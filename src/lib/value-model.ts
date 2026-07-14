@@ -102,6 +102,15 @@ export function maturityFactor(age?: number, level?: string, isPitcher?: boolean
   return Math.max(0.45, 1 - discount);
 }
 
+// How much of a player's PEAK ability he's producing NOW, by age — the peak WAR
+// is his age-26/27 ceiling, so a pre-peak guy's current (win-now) value is below
+// it. Gentle: near-peak by 25-26, tapering for the young (21 → ~.70). Used only
+// for present value; keeper value banks the full ceiling.
+export function presentMaturity(age?: number): number {
+  if (age === undefined) return 1;
+  return Math.max(0.5, Math.min(1, 1 - Math.max(0, 26 - age) * 0.06)); // 25→.94, 24→.88, 22→.76, 21→.70
+}
+
 // Present value only fully counts in the majors.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -213,7 +222,11 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // downstream in the Trade Checker, where real game-log usage + park live — see
   // its dynamic-present track. Format's prod weight is folded into that layer.
   const lvl = presentLevelFactor(inp.level);
-  const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl;
+  // A pre-peak player isn't producing his PEAK WAR yet — his current ability is
+  // below the ceiling, so the peak-WAR component of PRESENT value is discounted by
+  // age (a 21-yo's win-now value ≠ his age-27 projection). FV keeps the full
+  // ceiling; this only touches what he's worth NOW.
+  const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl * presentMaturity(inp.age);
   const mkt = inp.marketBaseline ?? 0;
   // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
   // replace on your roster); win-now production is closer to position-agnostic
