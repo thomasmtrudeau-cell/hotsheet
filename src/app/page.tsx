@@ -124,7 +124,7 @@ export default function Home() {
   const [risers, setRisers] = useState<Riser[]>([]);
   const [risersWindow, setRisersWindow] = useState(7);
   const [risersLoading, setRisersLoading] = useState(false);
-  const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[] }>({ pitchers: [], hitters: [] });
+  const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[]; week?: string }>({ pitchers: [], hitters: [] });
   const [oopsyLoading, setOopsyLoading] = useState(false);
   const [regression, setRegression] = useState<RegressionRow[]>([]);
   const [regressionLoading, setRegressionLoading] = useState(false);
@@ -146,7 +146,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW || activeGroup === REGRESSION_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW || activeGroup === REGRESSION_VIEW || activeGroup === SCOUTING_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -344,7 +344,7 @@ export default function Home() {
     setOopsyLoading(true);
     fetch('/api/oopsy')
       .then((r) => r.json())
-      .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [] }))
+      .then((d) => setOopsy({ pitchers: Array.isArray(d?.pitchers) ? d.pitchers : [], hitters: Array.isArray(d?.hitters) ? d.hitters : [], week: typeof d?.week === 'string' ? d.week : undefined }))
       .catch(() => setOopsy({ pitchers: [], hitters: [] }))
       .finally(() => setOopsyLoading(false));
   }, [loaded]);
@@ -631,7 +631,7 @@ export default function Home() {
             : isRisers
             ? `${risers.length} riser${risers.length !== 1 ? 's' : ''}`
             : isProjections
-            ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections`
+            ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections${oopsy.week ? ` · week of ${oopsy.week}` : ''}`
             : isTrade
             ? 'Trade checker'
             : isRegression
@@ -721,6 +721,7 @@ export default function Home() {
         <ProjectionsView
           pitchers={showPremium ? oopsy.pitchers : []}
           hitters={showPremium ? oopsy.hitters : []}
+          week={oopsy.week}
           loading={oopsyLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}

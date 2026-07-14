@@ -7,6 +7,7 @@ import PremiumTeaser from './PremiumTeaser';
 interface ProjectionsViewProps {
   pitchers: OopsyPitcher[];
   hitters: OopsyHitter[];
+  week?: string; // e.g. "Jul 13–19" — read from the OOPSY sheet's tab names
   loading: boolean;
   isPremium: boolean;
   isFollowing: (name: string) => boolean; // "in your list" name match
@@ -26,7 +27,7 @@ function Th({ label, active, onClick, className = '' }: { label: string; active?
   );
 }
 
-export default function ProjectionsView({ pitchers, hitters, loading, isPremium, isFollowing }: ProjectionsViewProps) {
+export default function ProjectionsView({ pitchers, hitters, week, loading, isPremium, isFollowing }: ProjectionsViewProps) {
   const [side, setSide] = useState<'hitting' | 'pitching'>('hitting');
   const [q, setQ] = useState('');
   const [hitSort, setHitSort] = useState<HitKey>('rank');
@@ -61,6 +62,13 @@ export default function ProjectionsView({ pitchers, hitters, loading, isPremium,
 
   return (
     <div>
+      {/* What these are + which week — projections are weekly, not season-long. */}
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1 mb-2">
+        <span className="text-sm font-semibold text-zinc-200">
+          Weekly projections{week ? <> — week of <span className="text-blue-300">{week}</span></> : ''}
+        </span>
+        <span className="text-[11px] text-zinc-500">OOPSY · refreshed weekly for the new fantasy week — check back for next week&apos;s slate.</span>
+      </div>
       <div className="flex flex-wrap items-center gap-3 mb-3">
         <div className="flex rounded-lg overflow-hidden border border-zinc-700">
           {(['hitting', 'pitching'] as const).map((s) => (
@@ -79,7 +87,7 @@ export default function ProjectionsView({ pitchers, hitters, loading, isPremium,
           placeholder="Filter by name…"
           className="flex-1 min-w-[140px] max-w-xs px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-blue-500"
         />
-        <span className="text-[11px] text-zinc-600">OOPSY weekly projections · premium</span>
+        <span className="text-[11px] text-zinc-600">this week&apos;s slate · premium</span>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-zinc-800">
