@@ -152,7 +152,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // security keys on wRC+ for them, not the WAR tier.
     if (p.primaryPosition === '1B' || p.primaryPosition === 'DH') {
       const wrc = metrics[p.id]?.peakWrcPlus ?? 0;
-      const batSecure = wrc >= 115 ? 1.0 : wrc >= 105 ? 0.96 : wrc >= 95 ? 0.9 : wrc >= 85 ? 0.82 : 0.72;
+      const batSecure = wrc >= 105 ? 1.0 : wrc >= 95 ? 0.95 : wrc >= 85 ? 0.85 : 0.75;
       f = Math.max(f, batSecure);
     }
     return f;
@@ -311,7 +311,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {isOpened && openedSpots > 0 && (
             <button onClick={() => { setAddingFa(true); searchRef.current?.focus(); }}
               className="w-full mt-1 text-[11px] text-emerald-300/80 hover:text-emerald-200 border border-dashed border-emerald-500/30 rounded py-1 cursor-pointer">
-              ＋ name a free agent for a spot
+              ＋ name a free agent ({theoreticalFill} spot{theoreticalFill === 1 ? '' : 's'} open)
             </button>
           )}
         </div>

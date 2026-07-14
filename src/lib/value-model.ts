@@ -180,7 +180,11 @@ const FORMAT: Record<ScoringFormat, FormatWeights> = {
 function fantasyWar(war: number, position?: string, catcherFlex?: boolean): number {
   const p = position ?? '';
   if (p === 'C') return war * (catcherFlex ? 0.92 : 0.80);
-  if (p === '1B' || p === 'DH') return war + 0.6;
+  // Add back the full positional penalty — a 1B/DH's fantasy value IS the bat, so
+  // WAR unfairly deducts ~1-1.25 wins for the spot. A good-hitting 1B thus reads
+  // like the everyday masher he is rather than a low-WAR guy.
+  if (p === 'DH') return war + 1.2;
+  if (p === '1B') return war + 1.0;
   return war;
 }
 
