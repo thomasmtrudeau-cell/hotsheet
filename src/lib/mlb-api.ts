@@ -1427,14 +1427,17 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
 // real starter. That WAR gate needs the premium sheet; without it we fall back
 // to IL-return detection only (no gate), which is the conservative case.
 // MLB hitters only; team rosters cached ~1h.
-// Playing time is position-specific: a returning 2B doesn't take a 3B's job.
-// We match on EXACT position (a direct threat) or a realistic neighbor on the
-// defensive spectrum (a positional logjam that could shuffle reps). Corners and
-// middle infield are adjacent; 2B and 3B are NOT (across the diamond), so e.g.
-// a returning Marcelo Mayer (2B) won't flag Caleb Durbin (3B), but a returning
-// SS or a promoted infielder still would.
+// Playing time is position-specific, and the threat direction is ASYMMETRIC: a
+// player only takes reps at a spot he can actually play. A 3B can slide to 1B
+// (so a returning 3B threatens a 1B), but a 1B/DH can't man the dirt infield
+// (so Willson Contreras 1B does NOT threaten Caleb Durbin 3B). Keyed by the
+// FOLLOWED player, each list = positions whose returnee could take his reps.
 const POS_ADJ: Record<string, string[]> = {
-  '1B': ['3B', 'DH'], '3B': ['1B', 'SS'], SS: ['2B', '3B'], '2B': ['SS'], DH: ['1B'],
+  '1B': ['3B', 'DH'],   // a 3B slides to 1B; a DH competes for the bat
+  '3B': ['SS'],          // only a SS slides over — NOT 1B/DH (can't man the dirt) or 2B (across the diamond)
+  SS: ['2B', '3B'],      // up-the-middle / left-side infield interchange
+  '2B': ['SS'],
+  DH: ['1B'],
   LF: ['CF', 'RF', 'OF'], CF: ['LF', 'RF', 'OF'], RF: ['LF', 'CF', 'OF'], OF: ['LF', 'CF', 'RF'],
   C: [],
 };
