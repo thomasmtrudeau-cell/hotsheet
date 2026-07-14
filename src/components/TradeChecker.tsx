@@ -159,11 +159,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     }
     return f;
   };
-  // Playing-time dock: a direct (same-position) IL return is the most imminent
-  // hit; a minors pusher is slower; a positional logjam (adjacent spot) is the
-  // lightest touch.
+  // Playing-time dock on PRESENT value: a returning/pushing teammate directly
+  // imperils the current reps that win-now value is built on, so it bites harder
+  // than a keeper-horizon logjam. Direct (same-position) IL return is the most
+  // imminent; a minors pusher next; a positional logjam (adjacent) the lightest —
+  // but an unproven, threatened everyday role (Heriberto) still gives real value back.
   const ptDock = (r?: { kind?: 'il' | 'depth'; adjacent?: boolean }) =>
-    !r ? 1 : r.adjacent ? 0.95 : r.kind === 'depth' ? 0.9 : 0.8;
+    !r ? 1 : r.adjacent ? 0.88 : r.kind === 'depth' ? 0.82 : 0.75;
   // Base PV/FV recomputed live from raw inputs against the user's league
   // settings (keeper depth, format, positional slots), then PV gets the dynamic
   // discounts layered on top.
