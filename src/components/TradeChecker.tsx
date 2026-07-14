@@ -21,12 +21,17 @@ const BUILD_KEY = 'hotsheet_build_lens';
 // win-now = this season + next (front-spiked), contender = the next few seasons
 // (flatter), retooling EXCLUDES this season (you've conceded it), rebuild excludes
 // the next two (ramps in at +2, full from +3).
-const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number}[] = [
-  { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45 },
-  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15},
-  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3},
-  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45},
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6},
+const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
+  { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45,
+    blurb: 'This season counts most; each season out counts ~28% less. 45% of the score is the keeper-ceiling premium.' },
+  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15,
+    blurb: 'Production weighting: ~60% this season, ~30% next, almost nothing beyond. Only 15% ceiling premium — pay for wins today.' },
+  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3,
+    blurb: 'Production spread across the next ~3 seasons (next year weighted most). 30% ceiling premium.' },
+  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45,
+    blurb: 'This season ignored — you’ve conceded it. The next two seasons carry ~60% of the production weight. 45% ceiling premium.' },
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6,
+    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight. 60% ceiling premium — youth and upside rule.' },
 ];
 
 interface TradeCheckerProps {
@@ -585,9 +590,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           </div>
           <div className="text-center">
             <div className={`text-lg font-bold ${verdictColor}`}>{verdict}</div>
-            <div className="text-[11px] text-zinc-500 mb-2">
-              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span> · {build.key === 'overall' ? 'present counts most, future decays out' : build.key === 'win-now' ? 'this season + next' : build.key === 'contender' ? 'the next few seasons' : build.key === 'retool' ? 'next year onward — this season conceded' : '2–3+ years out'}
+            <div className="text-[11px] text-zinc-500">
+              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span>
             </div>
+            <div className="text-[11px] text-zinc-600 max-w-xl mx-auto mb-2">{build.blurb}</div>
           </div>
           <div className="text-center text-sm flex flex-wrap justify-center gap-x-4">
             <span className="text-blue-200 font-semibold">{edge(pvDiff, 'Now')}</span>
