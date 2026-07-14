@@ -73,6 +73,19 @@ export function keeperAgeFactor(age?: number, isPitcher = false): number {
   return sum / KEEPER_NORM;
 }
 
+// The keeper ceiling's premium over the bar (peak WAR ×3) is a GROWTH/upside reward
+// — it assumes the player will still reach/exceed this peak. A player past peak has
+// no growth ahead, so the premium fades with age: pitchers hold it latest (onset
+// 32), bat-only corners (1B/DH) erode earliest (onset 28), everyone else at 30.
+// This is what drops a declining vet's FV below his PV.
+export function growthPremium(age?: number, isPitcher = false, position?: string): number {
+  if (age === undefined) return 3;
+  const corner = position === '1B' || position === 'DH';
+  const onset = isPitcher ? 32 : corner ? 28 : 30;
+  const slope = corner ? 0.2 : 0.15;
+  return Math.max(1.5, 3 - Math.max(0, age - onset) * slope);
+}
+
 // Distance from the majors discounts a keeper ceiling.
 export function proximityMultiplier(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -218,8 +231,13 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
     if (inp.hr !== undefined) fantasy += fmt.hrFan * (inp.hr / 25);
     if (inp.sb !== undefined) fantasy += fmt.sbFan * (inp.sb / 25);
   }
-  const warTerm = Math.max(0, fWar - bar) * 3;
-  const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15);
+  // Growth premium fades with age (see growthPremium). An aging hitter's counting
+  // stats erode alongside, so his fantasy credit fades on the same schedule; a
+  // pitcher's ERA-based fantasy holds (run prevention ages more gracefully).
+  const growth = growthPremium(inp.age, inp.isPitcher, inp.position);
+  const fantasyFade = inp.isPitcher ? 1 : growth / 3;
+  const warTerm = Math.max(0, fWar - bar) * growth;
+  const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15) * fantasyFade;
   const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.

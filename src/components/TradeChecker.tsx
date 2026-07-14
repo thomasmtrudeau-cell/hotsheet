@@ -21,7 +21,7 @@ function Chips({ m, isPitcher, pv, fv, injured, risk, role }: { m?: PremiumMetri
     <div className="flex flex-wrap gap-1 mt-0.5">
       <span className={`${chip} bg-blue-500/25 text-blue-200`} title="Present value — win-now">PV {pv.toFixed(1)}</span>
       <span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`} title="Future value — keeper/dynasty">FV {fv.toFixed(1)}</span>
-      {role && role.factor < 1 && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
+      {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
@@ -187,6 +187,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const ptRateOf = (p: SearchResult) => {
     if (p.sportId !== 1) return 1;
     if (p.primaryPosition === 'P') return 1;
+    // A player on the IL racks up game-log DNPs — but that's his injury, not a
+    // bench role. An everyday regular returns to everyday reps, so we don't read
+    // the IL-polluted log as part-time (J-Rod/Story/Semien were being cratered).
+    if (injuries[p.id]) return 1;
     return roles[p.id]?.rate ?? 0.9;
   };
   // Dynamic present PRODUCTION: a park-neutral current-year rate projection scaled
@@ -217,6 +221,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // bites once the role has actually dipped. Lefties platooned a touch more often.
   const platoonDock = (p: SearchResult) => {
     if (p.sportId !== 1 || p.primaryPosition === 'P') return 1;
+    if (injuries[p.id]) return 1; // IL DNPs aren't a platoon signal
     const rate = roles[p.id]?.rate;
     if (rate === undefined || rate >= 0.85) return 1; // everyday (or unknown) — no platoon dock
     const wrc = metrics[p.id]?.peakWrcPlus ?? 100;
@@ -243,8 +248,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
     const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
+    // Injury dock scales with entrenchment: a fringe guy's IL stint threatens his
+    // job (heavy dock), but an entrenched everyday star (J-Rod, big contract, played
+    // every day pre-injury) returns to his role — his trade/keeper value is his
+    // healthy value minus only a light "currently out" hedge, not a role loss.
+    const injuryMult = injuries[p.id] ? 0.6 + 0.35 * entrench(p) : 1;
     return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p))
-      * (injuries[p.id] ? 0.6 : 1)
+      * injuryMult
       * ptDockEff(p)
       * jobSecurity(p)
       * platoonDock(p)
@@ -292,7 +302,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // ceiling already exceeds this. Park + current form flow in via PV, so a
     // pitcher's durable park edge counts here too. FV dips below PV only as age
     // fades the keeperAgeFactor below 1 (~30+), which is the clean FV<PV crossover.
-    const sustained = pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P');
+    // GATED to genuine everyday talent (WAR ≥ 2.0): a low-WAR bat-only guy about to
+    // expire (Burger, 1.5 WAR) doesn't get his production floored forward — his FV
+    // is the age-faded ceiling, which lands below his PV, as it should.
+    const war = metrics[p.id]?.war ?? 0;
+    const sustained = war >= 2.0 ? pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P') : 0;
     return Math.max(ceiling, sustained);
   };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
