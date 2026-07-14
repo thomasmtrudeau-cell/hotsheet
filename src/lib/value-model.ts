@@ -129,6 +129,15 @@ export function presentMaturity(age?: number): number {
   return Math.max(0.5, Math.min(1, 1 - Math.max(0, 26 - age) * 0.06)); // 25→.94, 24→.88, 22→.76, 21→.70
 }
 
+// Fraction of PEAK ability at a given age — the maturation ramp (below prime) times
+// the aging decline (past prime), peaking ≈1.0 across 26–30. Used to project a
+// player's per-season value across a multi-year keeper horizon for the timeline
+// chart: a young guy's line rises toward peak, an old guy's declines.
+export function abilityCurve(age?: number, isPitcher = false): number {
+  if (age === undefined) return 1;
+  return presentMaturity(age) * Math.min(1, ageRetention(age, isPitcher));
+}
+
 // Present value only fully counts in the majors.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
