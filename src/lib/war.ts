@@ -161,7 +161,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     if (defIdx >= 0) {
       const d = parseFloat(cells[defIdx]);
       if (Number.isFinite(d)) {
-        m.def = d >= 8 ? 'double-plus' : d >= 4 ? 'plus' : d <= -9 ? 'double-minus' : d <= -5 ? 'minus' : undefined;
+        m.def = d >= 6 ? 'double-plus' : d >= 2 ? 'plus' : d <= -6 ? 'double-minus' : d <= -2 ? 'minus' : undefined;
       }
     }
     const age = ageIdx >= 0 ? parseFloat(cells[ageIdx]) : NaN;
@@ -433,7 +433,7 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
       dual = combined >= 40 ? 'double-plus' : combined >= 30 ? 'plus' : undefined;
     }
     const defGrade: DefGrade | undefined = Number.isFinite(def)
-      ? (def >= 8 ? 'double-plus' : def >= 4 ? 'plus' : def <= -9 ? 'double-minus' : def <= -5 ? 'minus' : undefined)
+      ? (def >= 6 ? 'double-plus' : def >= 2 ? 'plus' : def <= -6 ? 'double-minus' : def <= -2 ? 'minus' : undefined)
       : undefined;
     byKey.set(key, {
       nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, isPitcher, war,
