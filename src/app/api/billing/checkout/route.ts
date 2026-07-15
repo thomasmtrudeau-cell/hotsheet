@@ -34,8 +34,8 @@ export async function POST(request: NextRequest) {
       if (rc && rc.user_id !== user.id) discounts = [{ promotion_code: rc.promo_id }];
     }
 
-    const session = await stripe.checkout.sessions.create({
-      mode: 'subscription',
+    const params = {
+      mode: 'subscription' as const,
       line_items: [{ price, quantity: 1 }],
       client_reference_id: user.id,
       customer_email: user.email ?? undefined,
@@ -46,7 +46,18 @@ export async function POST(request: NextRequest) {
       automatic_tax: { enabled: true },
       success_url: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/?billing=cancelled`,
-    });
+    };
+    let session;
+    try {
+      session = await stripe.checkout.sessions.create(params);
+    } catch (e) {
+      // Stripe Tax requires a head-office address in the dashboard; a missing
+      // address must never block a sale — retry without tax and log it.
+      if (e instanceof Error && /head office|automatic tax/i.test(e.message)) {
+        console.warn('automatic_tax unavailable (set the head-office address in Stripe → Settings → Tax):', e.message);
+        session = await stripe.checkout.sessions.create({ ...params, automatic_tax: { enabled: false } });
+      } else throw e;
+    }
     return NextResponse.json({ url: session.url });
   } catch (error) {
     console.error('checkout error:', error);
