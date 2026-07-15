@@ -17,7 +17,7 @@ export const LEVEL_LABELS: Record<number, string> = {
   1: 'MLB',
   11: 'AAA',
   12: 'AA',
-  13: 'High-A',
+  13: 'A+', // industry convention (FG/BR/MLB) — was 'High-A'
   14: 'A',
   16: 'Rk',
   100: 'NPB',
