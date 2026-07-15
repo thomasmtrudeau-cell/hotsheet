@@ -89,6 +89,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
   const [savesPace, setSavesPace] = useState<Record<number, number>>({}); // MLB pitchers: projected full-season saves
+  const [bullpen, setBullpen] = useState<Array<{ nameKey: string; team?: string; role?: string; peakEra20: number; currentEra20: number }> | null>(null); // all RPs w/ projected+actual ERA (lazy)
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
@@ -194,6 +195,17 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     })).then((pairs) => {
       if (!mountedRef.current) return;
       setSavesPace((prev) => { const m = { ...prev }; for (const [id, sv] of pairs) if (sv > 0) m[id] = sv; return m; });
+      // A closer is in the trade — pull the league bullpen picture once, for the
+      // better-setup-man job-risk dock.
+      if (pairs.some(([, sv]) => sv > 0)) {
+        setBullpen((cur) => {
+          if (cur !== null) return cur;
+          fetch('/api/regression?pool=all').then((r) => r.json()).then((d) => {
+            if (mountedRef.current && Array.isArray(d?.rows)) setBullpen(d.rows);
+          }).catch(() => {});
+          return []; // sentinel: fetch in flight
+        });
+      }
     });
     fetch('/api/players/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: fresh.map((p) => ({ ...p, followedAt: '' })) }) })
       .then((r) => r.json())
@@ -362,7 +374,20 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       ? 0.5 * m.era20 + 0.5 * m.curEra20 // current-year struggles raise the risk
       : m?.era20;
     const security = era === undefined ? 0.8 : Math.max(0.5, Math.min(1, 1 - Math.max(0, era - 3.4) * 0.25));
-    return Math.min(5, pace / 8) * security;
+    // Bullpen competition (modest): a teammate reliever with a BETTER projection
+    // is a threat to the role (×0.9); worse still if he's also outpitching him
+    // this year on actual ERA (×0.8).
+    let competition = 1;
+    const norm = (x: string) => x.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z ]/g, ' ').replace(/\s+/g, ' ').trim();
+    if (bullpen && bullpen.length && m?.era20 !== undefined) {
+      const myKey = norm(p.fullName);
+      const rivals = bullpen.filter((r) => r.team === p.currentTeam.name && r.role === 'RP' && r.nameKey !== myKey && r.peakEra20 <= m.era20! - 0.3);
+      if (rivals.length) {
+        const alsoBetterNow = m.curEra20 !== undefined && rivals.some((r) => r.currentEra20 <= m.curEra20! - 0.3);
+        competition = alsoBetterNow ? 0.8 : 0.9;
+      }
+    }
+    return Math.min(5, pace / 8) * security * competition;
   };
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous

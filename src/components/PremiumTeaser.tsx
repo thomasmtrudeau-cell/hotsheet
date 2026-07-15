@@ -67,18 +67,7 @@ export default function PremiumTeaser({ context = 'default' }: { context?: Tease
         but it could open up if there’s enough interest.
       </p>
 
-      <div className="text-left space-y-2.5 mb-7">
-        {ordered.map((f, i) => (
-          <div key={f.key} className={`flex gap-2.5 px-3 py-2.5 rounded-lg border ${i === 0 && context !== 'default' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-800/50 border-zinc-700/40'}`}>
-            <span className="text-amber-400 mt-0.5 shrink-0">✦</span>
-            <div>
-              <div className="text-sm font-semibold text-zinc-100">{f.label}</div>
-              <div className="text-[12px] text-zinc-400 leading-snug">{f.blurb}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-
+      <div className="mb-7">
       <div className="flex flex-col sm:flex-row gap-2 justify-center mb-3">
         <button onClick={() => startCheckout('monthly', setMsg)}
           className="px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold cursor-pointer">
@@ -91,6 +80,20 @@ export default function PremiumTeaser({ context = 'default' }: { context?: Tease
       </div>
       {msg && <p className="text-[12px] text-amber-300/90 mb-2">{msg}</p>}
       <p className="text-[11px] text-zinc-500">Have a referral code? Enter it at checkout for 20% off your first payment.</p>
+      </div>
+
+      <div className="text-left space-y-2.5 mb-7">
+        {ordered.map((f, i) => (
+          <div key={f.key} className={`flex gap-2.5 px-3 py-2.5 rounded-lg border ${i === 0 && context !== 'default' ? 'bg-amber-500/10 border-amber-500/30' : 'bg-zinc-800/50 border-zinc-700/40'}`}>
+            <span className="text-amber-400 mt-0.5 shrink-0">✦</span>
+            <div>
+              <div className="text-sm font-semibold text-zinc-100">{f.label}</div>
+              <div className="text-[12px] text-zinc-400 leading-snug">{f.blurb}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+
       <div className="text-[12px] text-zinc-500 mt-3">
         Questions?{' '}
         <a href="mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20premium" className="text-amber-300/90 hover:text-amber-200 underline underline-offset-2">ThomasMTrudeau@gmail.com</a>

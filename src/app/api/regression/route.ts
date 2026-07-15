@@ -1,11 +1,11 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getSpRegression, getHitterRegression } from '@/lib/war';
 import { getInjuryStatusForTeams, getIlDetailsForTeams } from '@/lib/mlb-api';
 
 // SP sell-high / buy-low regression — PREMIUM ONLY. Returns empty sets for
 // non-premium / unconfigured so the client shows the teaser.
-export async function GET() {
+export async function GET(request: NextRequest) {
   const empty = { rows: [], hitters: [] };
   try {
     const sheetId = process.env.WAR_SHEET_ID;
@@ -18,7 +18,8 @@ export async function GET() {
     const { data: profile } = await supabase.from('profiles').select('tier').eq('id', user.id).single();
     if (profile?.tier !== 'premium') return NextResponse.json(empty);
 
-    const [{ rows }, { rows: hitters }] = await Promise.all([getSpRegression(sheetId), getHitterRegression(sheetId)]);
+    const pool = request.nextUrl.searchParams.get('pool') === 'all'; // full pitcher pool (incl. relievers) for bullpen-competition checks
+    const [{ rows }, { rows: hitters }] = await Promise.all([getSpRegression(sheetId, pool), getHitterRegression(sheetId)]);
     // Flag who's on the IL + the real when/why (roster note + transaction date) —
     // context behind a small-sample / anomalous line. Batched by team, cached.
     const teamIds = [...new Set(rows.map((r) => r.teamId).filter((id): id is number => typeof id === 'number'))];

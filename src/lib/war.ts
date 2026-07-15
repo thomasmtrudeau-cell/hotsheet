@@ -354,7 +354,7 @@ async function fetchActualPitcherStats(season: number): Promise<Map<string, Actu
 // also drops guys who haven't actually pitched. Level = where he's actually
 // throwing. The client applies the ERA / level / gap filters. Premium.
 const REGRESSION_MIN_IP = 20;
-export async function getSpRegression(sheetId: string): Promise<{ rows: RegressionRow[] }> {
+export async function getSpRegression(sheetId: string, includeRelievers = false): Promise<{ rows: RegressionRow[] }> {
   const csv = await fetchCsvTab(sheetId, PIT_TAB);
   const rows = parseCsv(csv);
   if (rows.length < 2) return { rows: [] };
@@ -376,7 +376,7 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
     const peak = parseFloat(c[peakI]);
     const ipg = ipgI >= 0 ? parseFloat(c[ipgI]) : NaN;
     if (!Number.isFinite(peak)) continue;
-    if (Number.isFinite(ipg) && ipg < 3.5) continue; // starters only (SP + SP prospects)
+    if (!includeRelievers && Number.isFinite(ipg) && ipg < 3.5) continue; // starters only (SP + SP prospects) unless the full pitcher pool was requested
     const key = normalizeName(name);
     const a = actual.get(key);
     if (!a || a.ip < REGRESSION_MIN_IP) continue; // must have real current-year innings
