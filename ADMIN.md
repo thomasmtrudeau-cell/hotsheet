@@ -17,6 +17,19 @@ app's tier in sync automatically, so there is no separate admin UI to maintain.
 - **Create a sale / promo code**: Stripe → Products → Coupons → New (then create
   a Promotion Code on it). Checkout has the promo box enabled.
 
+### Tax & Invoicing
+- **Tax**: checkout runs with `automatic_tax` enabled — Stripe collects nothing
+  until you add a registration (Dashboard → Tax → Registrations →
+  https://dashboard.stripe.com/tax/registrations). Add your home state when you
+  have nexus; Stripe's threshold monitoring tells you when other states matter.
+- **Invoicing**: subscriptions auto-generate invoices. Turn on customer emails
+  (receipt + invoice PDFs) at Settings → Billing → Subscriptions and emails →
+  https://dashboard.stripe.com/settings/billing/automatic
+- **Security**: for LIVE mode, prefer a Restricted API Key (rk_…, Developers →
+  API keys → Create restricted key) over the full secret key — grant write on
+  Checkout Sessions, Customers, Subscriptions, Coupons, Promotion Codes, Billing
+  Portal, and Customer Balance Transactions.
+
 ### One-time setup (do once, ~10 min)
 1. Create the Stripe account → https://dashboard.stripe.com/register
 2. Product: "Hot Sheet Premium" with two recurring prices:

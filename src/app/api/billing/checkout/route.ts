@@ -41,7 +41,10 @@ export async function POST(request: NextRequest) {
       customer_email: user.email ?? undefined,
       ...(discounts ? { discounts } : { allow_promotion_codes: true }),
       subscription_data: { metadata: { user_id: user.id } },
-      success_url: `${origin}/?billing=success`,
+      // Stripe Tax: safe to enable before any registrations exist — no tax is
+      // collected until a registration is active (Dashboard → Tax → Registrations).
+      automatic_tax: { enabled: true },
+      success_url: `${origin}/?billing=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/?billing=cancelled`,
     });
     return NextResponse.json({ url: session.url });
