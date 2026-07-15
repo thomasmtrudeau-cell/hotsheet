@@ -41,7 +41,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   if (pending) {
     // Values are still being priced — pulse placeholders instead of misleading 0.0s.
@@ -60,7 +60,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role
       <Tooltip text="FV — future/keeper value: his peak ceiling × age × distance to the majors, on the same scale as PV. Aging vets fade below their PV; young stars carry big FV."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
       {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
       {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
-      {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
+      {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — ARM injury (shoulder/elbow family): keeper value faded, not just current availability.' : 'On the injured list'}>{armRisk ? 'IL·arm' : 'IL'}</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.kind === 'crowd' ? 'reps are split while both are healthy' : risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
@@ -362,6 +362,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // a light "currently out" hedge, not a role loss. Shared by PV and the timeline
   // projection (which un-docks it for future healthy seasons).
   const injuryMultOf = (p: SearchResult) => (injuries[p.id] ? 0.6 + 0.35 * entrench(p) : 1);
+  // Pitcher ARM injuries (shoulder/elbow family) are a different species of risk
+  // than a hamstring — they threaten the arm itself, so they fade KEEPER value,
+  // not just current availability (Crochet problem: elite projection, shoulder
+  // injury, model shrugged). Keyword match on the roster's real injury note +
+  // severity from the IL type. Hitters and non-arm injuries: unchanged.
+  const ARM_RX = /elbow|ucl|tommy john|shoulder|rotator|labrum|\blat\b|forearm|flexor|biceps|triceps/i;
+  const armRiskOf = (p: SearchResult) => {
+    const inj = injuries[p.id];
+    if (!inj || p.primaryPosition !== 'P') return 1;
+    if (!ARM_RX.test(inj.note ?? '')) return 1;
+    return inj.code === 'D60' || /60/.test(inj.label) ? 0.7 : 0.85;
+  };
   // Saves premium, risk-adjusted: the ninth-inning role carries value the
   // WAR/rate model can't see — but a closer with a POOR run-prevention
   // projection is a blown-save streak from losing the job (or getting traded
@@ -395,7 +407,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // playing-time haircut; the dynamic layer already bakes in actual usage.
     const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
     return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPremium(p))
-      * injuryMultOf(p)
+      * injuryMultOf(p) * (armRiskOf(p) === 1 ? 1 : 0.93)
       * ptDockEff(p)
       * jobSecurity(p)
       * platoonDock(p)
@@ -451,7 +463,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // Closer keeper credit: the saves role is year-to-year volatile, so FV only
     // banks ~45% of the (risk-adjusted) premium, faded by pitcher aging.
     const savesFv = savesPremium(p) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
-    return Math.max(ceiling, sustained) + savesFv;
+    return (Math.max(ceiling, sustained) + savesFv) * armRiskOf(p);
   };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
@@ -589,7 +601,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -599,7 +611,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
