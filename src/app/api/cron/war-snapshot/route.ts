@@ -53,9 +53,14 @@ export async function GET(request: NextRequest) {
       if (error) throw error;
     }
 
-    // Prune captures older than 35 days (30-day window + slack).
-    const cutoff = new Date(Date.now() - 35 * 86_400_000).toISOString();
+    // Retention: the WAR Trends tab charts long-run movement, so keep ~2 seasons
+    // (was 35 days when risers was the only consumer). To bound growth, captures
+    // older than 45 days are THINNED to one per day via thin_war_snapshots()
+    // (earliest capture of the day survives) rather than deleted outright.
+    const cutoff = new Date(Date.now() - 730 * 86_400_000).toISOString();
     await sb.from('war_snapshots').delete().lt('captured_at', cutoff);
+    const { error: thinErr } = await sb.rpc('thin_war_snapshots', { before_ts: new Date(Date.now() - 45 * 86_400_000).toISOString() });
+    if (thinErr) console.error('thin_war_snapshots:', thinErr.message); // non-fatal hygiene
 
     return NextResponse.json({ capturedAt, inserted: records.length });
   } catch (error) {

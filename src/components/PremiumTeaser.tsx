@@ -4,7 +4,7 @@
 // advertises the ScoutTheStatline data layer + the premium tools without exposing
 // any of it. Context-aware: the headline/lead and the top feature match the tab
 // the user is looking at (Trade, Regression, Scouting, …).
-export type TeaserContext = 'trade' | 'regression' | 'scouting' | 'risers' | 'projections' | 'callups' | 'promotions' | 'default';
+export type TeaserContext = 'trade' | 'regression' | 'scouting' | 'risers' | 'projections' | 'callups' | 'promotions' | 'trends' | 'default';
 
 interface Feature { key: string; label: string; blurb: string }
 
@@ -13,6 +13,7 @@ const FEATURES: Feature[] = [
   { key: 'regression', label: 'SP Regression — sell-high / buy-low', blurb: 'Starters whose peak true-talent ERA/20 has drifted from their actual current-year ERA (live MLB + every MiLB level), with IL status and rotation-vs-bullpen role.' },
   { key: 'scouting', label: 'Scouting board', blurb: 'Every projected player by peak WAR, filter by level from the majors down to rookie ball — surface 2+ WAR prospects before they pop.' },
   { key: 'risers', label: 'Prospect Risers', blurb: 'A live board of whose peak projection is climbing fastest — before the industry catches on. Pick your window (7 / 14 / 30 days).' },
+  { key: 'trends', label: 'WAR Trends', blurb: 'Chart any player\u2019s peak-WAR projection over time — spot risers and faders the moment the projection moves, and compare up to 8 players.' },
   { key: 'callups', label: 'Call-Ups feed', blurb: 'Every MLB call-up of the last 7 days with peak WAR and rate grades attached — know instantly which debuts matter for your league.' },
   { key: 'promotions', label: 'Promotions feed', blurb: 'Every MiLB level-jump of the last 7 days, graded — catch the org moves that signal a prospect is arriving ahead of schedule.' },
   { key: 'projections', label: 'Weekly projections', blurb: 'Rest-of-season and weekly-rank projections layered onto the players you follow.' },
@@ -20,11 +21,12 @@ const FEATURES: Feature[] = [
 ];
 
 const HEADS: Record<TeaserContext, { title: string; lead: string; top: string }> = {
-  trade: { title: 'Trade Checker — premium', lead: 'Grade any trade for both sides, tuned to your exact league. Powered by proprietary projections from', top: 'trade' },
+  trade: { title: 'Trade Checker — premium · experimental', lead: 'Grade any trade for both sides, tuned to your exact league. Powered by proprietary projections from', top: 'trade' },
   regression: { title: 'SP Regression — premium', lead: 'Find sell-high and buy-low starters by comparing true-talent to actual results. Powered by proprietary projections from', top: 'regression' },
   scouting: { title: 'Scouting board — premium', lead: 'Scout every projected player by peak WAR and level, majors through rookie ball. Powered by proprietary projections from', top: 'scouting' },
   risers: { title: 'Prospect Risers — premium', lead: 'Catch the players whose projection is climbing fastest. Powered by proprietary projections from', top: 'risers' },
   projections: { title: 'Weekly projections — premium', lead: 'Rest-of-season and weekly-rank projections on the players you follow. Powered by proprietary projections from', top: 'projections' },
+  trends: { title: 'WAR Trends — premium', lead: 'Chart projection movement over time and catch breakouts early. Powered by proprietary projections from', top: 'trends' },
   callups: { title: 'Call-Ups — premium', lead: 'Every MLB call-up of the last week, with value grades attached. Powered by proprietary projections from', top: 'callups' },
   promotions: { title: 'Promotions — premium', lead: 'Every MiLB level-jump of the last week, graded. Powered by proprietary projections from', top: 'promotions' },
   default: { title: 'Scouting intelligence, built in', lead: 'Forward-looking grades layered onto the players you already follow. Powered by proprietary projections from', top: 'war' },

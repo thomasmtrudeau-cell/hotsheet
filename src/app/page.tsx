@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, ScoutingRow, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, TRENDS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, ScoutingRow, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -24,6 +24,7 @@ import ProjectionsView from '@/components/ProjectionsView';
 import TradeChecker from '@/components/TradeChecker';
 import RegressionView from '@/components/RegressionView';
 import ScoutingView from '@/components/ScoutingView';
+import TrendsView from '@/components/TrendsView';
 import { TipRotator } from '@/components/Tip';
 
 // Where the Feedback button points. Swap to a Google Form URL anytime — it just
@@ -146,7 +147,7 @@ export default function Home() {
 
   // If the active group was deleted, fall back to All Players.
   useEffect(() => {
-    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW || activeGroup === REGRESSION_VIEW || activeGroup === SCOUTING_VIEW;
+    const special = activeGroup === ALL_PLAYERS_GROUP || activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW || activeGroup === RISERS_VIEW || activeGroup === PROJECTIONS_VIEW || activeGroup === TRADE_VIEW || activeGroup === REGRESSION_VIEW || activeGroup === SCOUTING_VIEW || activeGroup === TRENDS_VIEW;
     if (!special && !groups.some((g) => g.id === activeGroup)) {
       setActiveGroup(ALL_PLAYERS_GROUP);
     }
@@ -366,7 +367,8 @@ export default function Home() {
   const isTrade = activeGroup === TRADE_VIEW;
   const isRegression = activeGroup === REGRESSION_VIEW;
   const isScouting = activeGroup === SCOUTING_VIEW;
-  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression || isScouting;
+  const isTrends = activeGroup === TRENDS_VIEW;
+  const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression || isScouting || isTrends;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = Object.keys(premiumMap).length > 0;
@@ -633,11 +635,13 @@ export default function Home() {
             : isProjections
             ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections${oopsy.week ? ` · week of ${oopsy.week}` : ''}`
             : isTrade
-            ? 'Trade checker'
+            ? 'Trade checker · experimental'
             : isRegression
             ? 'SP regression'
             : isScouting
             ? 'Scouting'
+            : isTrends
+            ? 'WAR Trends'
             : isRange
             ? `${filteredRange.length} player${filteredRange.length !== 1 ? 's' : ''} with games`
             : `${sortedStats.length} player${sortedStats.length !== 1 ? 's' : ''}${filteredStats.length !== currentStats.length ? ` (${currentStats.length} total)` : ''}`}
@@ -746,6 +750,8 @@ export default function Home() {
           onFollow={follow}
           groups={groups}
         />
+      ) : isTrends ? (
+        <TrendsView isPremium={isPremium} isFollowing={(name) => isFollowingName(name)} />
       ) : players.length === 0 ? (
         <EmptyState />
       ) : isRange ? (

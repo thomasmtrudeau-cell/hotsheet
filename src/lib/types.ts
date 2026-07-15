@@ -322,6 +322,25 @@ export const PROJECTIONS_VIEW = 'projections';
 export const TRADE_VIEW = 'trade';
 export const REGRESSION_VIEW = 'regression';
 export const SCOUTING_VIEW = 'scouting';
+export const TRENDS_VIEW = 'trends';
+
+// WAR Trends: charted movement of a player's peak WAR across sheet captures.
+// Pitcher history begins 2026-07-13 (earlier captures used the wrong sheet
+// column and were purged); hitters go back to the first capture. Premium.
+export interface TrendIndexRow {
+  nameKey: string;
+  player: string;
+  isPitcher: boolean;
+  level?: string;
+  war: number; // latest
+}
+export interface TrendPoint { at: string; war: number }
+export interface TrendSeries {
+  nameKey: string;
+  player: string;
+  isPitcher: boolean;
+  points: TrendPoint[];
+}
 
 // A starter's peak (true-talent) ERA/20 vs current-year ERA/20 — the gap flags
 // sell-highs (overperforming) and buy-lows (underperforming). Premium.

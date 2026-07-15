@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW } from '@/lib/types';
+import { Group, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, TRENDS_VIEW } from '@/lib/types';
 
 const SHOW_ROSTER_IMPORT = false; // hidden until we have a clean paste source
 
@@ -130,9 +130,9 @@ export default function GroupBar({
         className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
           activeGroup === TRADE_VIEW ? 'bg-fuchsia-600 text-white' : 'bg-fuchsia-500/10 text-fuchsia-300 hover:bg-fuchsia-500/20'
         }`}
-        title="Trade checker (premium)"
+        title="Trade checker (premium · experimental)"
       >
-        🔀 Trade
+        🔀 Trade <span className="opacity-70 text-[9px] align-middle uppercase tracking-wide">exp</span>
       </button>
       <button
         onClick={() => onSelect(REGRESSION_VIEW)}
@@ -151,6 +151,15 @@ export default function GroupBar({
         title="Scout prospects by peak WAR & level (premium)"
       >
         🔭 Scouting
+      </button>
+      <button
+        onClick={() => onSelect(TRENDS_VIEW)}
+        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
+          activeGroup === TRENDS_VIEW ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
+        }`}
+        title="WAR movement over time (premium)"
+      >
+        📊 Trends
       </button>
 
       {creating ? (
