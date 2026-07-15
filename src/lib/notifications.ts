@@ -256,19 +256,43 @@ function saveNotifications(items: HotNotification[]): void {
   localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(items.slice(0, MAX_STORED)));
 }
 
+// Fired-key ledger, SEPARATE from the visible list. Dedupe used to rely on keys
+// still being present in the stored notifications — but that list caps at
+// MAX_STORED (a busy day of lineup alerts pushed yesterday's rehab entry out and
+// the same event re-fired) and "Clear all" wiped it (everything re-fired). The
+// ledger records every key that ever fired, pruned to the dedupe window, and
+// survives both truncation and Clear all.
+const FIRED_KEYS_KEY = 'hotsheet_notification_fired';
+function getFiredKeys(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(FIRED_KEYS_KEY);
+    const obj = raw ? JSON.parse(raw) : {};
+    return obj && typeof obj === 'object' ? obj : {};
+  } catch { return {}; }
+}
+function saveFiredKeys(m: Record<string, number>): void {
+  try { localStorage.setItem(FIRED_KEYS_KEY, JSON.stringify(m)); } catch { /* ignore */ }
+}
+
 // Prepends new notifications, skipping any whose dedupe key already fired
 // within the window. Returns the updated stored list.
 export function addNotifications(items: HotNotification[]): HotNotification[] {
   const existing = getNotifications();
   const cutoff = Date.now() - DEDUPE_WINDOW_MS;
-  const recentKeys = new Set(
-    existing.filter((n) => new Date(n.createdAt).getTime() > cutoff).map((n) => n.key)
-  );
+  const fired = getFiredKeys();
+  for (const k of Object.keys(fired)) if (fired[k] < cutoff) delete fired[k]; // prune
+  // Legacy migration: keys of currently-stored notifications count as fired.
+  for (const n of existing) {
+    const t = new Date(n.createdAt).getTime();
+    if (t > cutoff && fired[n.key] === undefined) fired[n.key] = t;
+  }
+  const now = Date.now();
   const fresh = items.filter((n) => {
-    if (recentKeys.has(n.key)) return false;
-    recentKeys.add(n.key); // also dedupe within this batch
+    if (fired[n.key] !== undefined) return false;
+    fired[n.key] = now; // also dedupes within this batch
     return true;
   });
+  saveFiredKeys(fired);
   if (fresh.length === 0) return existing;
   const updated = [...fresh, ...existing];
   saveNotifications(updated);
