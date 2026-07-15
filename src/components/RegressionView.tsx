@@ -238,8 +238,8 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         <button onClick={() => setRegSide('sell')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'sell' ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬆️ Sell high</button>
       </div>
       {regSide === 'sell'
-        ? <HitList title="⬆️ Sell high" subtitle="Hitting over their peak projection — running hot" rows={hotBats} tone="sell" isFollowing={isFollowing} />
-        : <HitList title="⬇️ Buy low" subtitle="Hitting under their peak projection — room to climb (mind the pre-peak tag)" rows={coldBats} tone="buy" isFollowing={isFollowing} />}
+        ? <HitList title="⬆️ Sell high" subtitle="His current wRC+ is running ABOVE what his skills project — hitting over his head. Sell while the line looks great." rows={hotBats} tone="sell" isFollowing={isFollowing} />
+        : <HitList title="⬇️ Buy low" subtitle="His current wRC+ is BELOW what his skills project — the bat is better than the results so far (mind the pre-peak tag on young guys)." rows={coldBats} tone="buy" isFollowing={isFollowing} />}
       </>
       ) : (
       <>
@@ -275,8 +275,8 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         <button onClick={() => setRegSide('sell')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'sell' ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬆️ Sell high</button>
       </div>
       {regSide === 'sell'
-        ? <List title="⬆️ Sell high" subtitle="Pitching under their projection — regression up looms" rows={sellHighs} tone="sell" isFollowing={isFollowing} />
-        : <List title="⬇️ Buy low" subtitle="Pitching over their projection — bounce-back candidates" rows={buyLows} tone="buy" isFollowing={isFollowing} />}
+        ? <List title="⬆️ Sell high" subtitle="His actual ERA is BETTER than his rest-of-season talent projection — results this good usually don't last. Trade him while the surface stats shine." rows={sellHighs} tone="sell" isFollowing={isFollowing} />
+        : <List title="⬇️ Buy low" subtitle="His actual ERA is WORSE than his rest-of-season talent projection — the skills say he's better than the results. Acquire while the price is down." rows={buyLows} tone="buy" isFollowing={isFollowing} />}
       </>
       )}
     </div>
