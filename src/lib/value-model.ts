@@ -233,17 +233,20 @@ const FORMAT: Record<ScoringFormat, FormatWeights> = {
 // penalty even though their bat is the whole fantasy point, so we add it back —
 // a good-hitting low-WAR 1B (Schwarber-type) then clears the keeper bar on the
 // bat. Middle-infield/OF WAR translates roughly as-is (scarcity handles those).
-function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRuns?: number): number {
+function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRuns?: number, defKeep = 0.3): number {
   const p = position ?? '';
-  // Principled rule (when the sheet's raw DEF is available): fantasy pays for
-  // NOTHING on defense — WAR = offense + BsR + DEF, so strip DEF (runs, incl.
-  // positional adjustment) at 9.774 runs/win. One rule replaces the old special
-  // cases: framing-rich catchers (Kirk/Raleigh) deflate, bad-glove mashers and
-  // 1B/DH inflate, exactly as a fantasy league experiences them. Positional
-  // scarcity is handled separately by the league's roster slots. Catchers keep
-  // a small extra haircut for the games-played reality of the position.
+  // Defense in fantasy (when the sheet's raw DEF is available): it produces no
+  // stats, but it IS insurance — a plus glove holds the everyday job and extends
+  // the career; a minus glove is a slump from a platoon. So DEF (runs, incl.
+  // positional adj, at 9.774 runs/win) is only PARTIALLY stripped — `defKeep` is
+  // the insurance share retained (present ~0.30 = playing-time safety; keeper
+  // ~0.40 = longevity/role retention). Symmetric by construction: framing-rich
+  // catchers deflate but not to zero, bad-glove mashers inflate but their PT
+  // risk tempers it. Replaces the old C/1B/DH special cases; positional scarcity
+  // stays with the roster-slot model. Catchers keep a small extra haircut for
+  // the games-played reality of the position.
   if (defRuns !== undefined) {
-    const offWar = war - defRuns / 9.774;
+    const offWar = war - (defRuns / 9.774) * (1 - defKeep);
     return p === 'C' ? offWar * (catcherFlex ? 0.97 : 0.93) : offWar;
   }
   // Legacy fallbacks when DEF isn't known (e.g. older cached payloads).
@@ -262,7 +265,10 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // most of the ceiling (an elite RP arm is a rotation-conversion lottery
   // ticket; the trade view's saves premium adds closer value back on top).
   const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01;
-  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns);
+  // Two defense-insurance rates: present keeps 30% of DEF (playing-time safety),
+  // keeper keeps 40% (longevity + role retention over the horizon).
+  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns, 0.3);
+  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns, 0.4);
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
@@ -279,8 +285,8 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // pitcher's ERA-based fantasy holds (run prevention ages more gracefully).
   const growth = growthPremium(inp.age, inp.isPitcher, inp.position);
   const fantasyFade = inp.isPitcher ? 1 : growth / 3;
-  const warTerm = Math.max(0, fWar - bar) * growth;
-  const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15) * fantasyFade;
+  const warTerm = Math.max(0, fWarKeeper - bar) * growth;
+  const fantasyTerm = fantasy * (fWarKeeper > bar ? 1 : 0.15) * fantasyFade;
   const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
