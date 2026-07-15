@@ -1,5 +1,7 @@
 'use client';
 
+import { useState } from 'react';
+
 // Shown to regular (non-premium) users where a premium feature would live. It
 // advertises the ScoutTheStatline data layer + the premium tools without exposing
 // any of it. Context-aware: the headline/lead and the top feature match the tab
@@ -32,7 +34,23 @@ const HEADS: Record<TeaserContext, { title: string; lead: string; top: string }>
   default: { title: 'Scouting intelligence, built in', lead: 'Forward-looking grades layered onto the players you already follow. Powered by proprietary projections from', top: 'war' },
 };
 
+// Kick off Stripe checkout. Gracefully degrades: 503 = billing not configured
+// yet (fall back to the email CTA), 401 = needs sign-in.
+async function startCheckout(plan: 'monthly' | 'yearly', setMsg: (m: string) => void) {
+  setMsg('');
+  try {
+    const ref = localStorage.getItem('hotsheet_ref') ?? undefined;
+    const res = await fetch('/api/billing/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ plan, ref }) });
+    const d = await res.json();
+    if (res.ok && d?.url) { window.location.href = d.url; return; }
+    if (res.status === 401) setMsg('Sign in first, then subscribe.');
+    else if (res.status === 503) setMsg('Subscriptions are almost ready — email us below and we\u2019ll flip it on for you the day they open.');
+    else setMsg('Something went wrong starting checkout — try again or email us below.');
+  } catch { setMsg('Something went wrong starting checkout — try again or email us below.'); }
+}
+
 export default function PremiumTeaser({ context = 'default' }: { context?: TeaserContext }) {
+  const [msg, setMsg] = useState('');
   const head = HEADS[context];
   // Lead with the context's own feature, then the rest.
   const ordered = [...FEATURES].sort((a, b) => (a.key === head.top ? -1 : b.key === head.top ? 1 : 0));
@@ -61,16 +79,22 @@ export default function PremiumTeaser({ context = 'default' }: { context?: Tease
         ))}
       </div>
 
-      <div className="text-sm text-zinc-400">
-        Want in, or want to learn more?{' '}
-        <a
-          href="mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20premium%20interest"
-          className="text-amber-300 font-medium hover:text-amber-200 underline underline-offset-2"
-        >
-          ThomasMTrudeau@gmail.com
-        </a>
+      <div className="flex flex-col sm:flex-row gap-2 justify-center mb-3">
+        <button onClick={() => startCheckout('monthly', setMsg)}
+          className="px-4 py-2.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-sm font-semibold cursor-pointer">
+          $19.99 / month <span className="block text-[11px] font-normal opacity-80">cancel anytime — access through your billing month</span>
+        </button>
+        <button onClick={() => startCheckout('yearly', setMsg)}
+          className="px-4 py-2.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 border border-amber-500/40 text-amber-200 text-sm font-semibold cursor-pointer">
+          $149.99 / year <span className="block text-[11px] font-normal opacity-80">~37% off — two months+ free</span>
+        </button>
       </div>
-      <p className="text-[11px] text-zinc-600 mt-2">Tell us which tool you’d use most — demand decides what ships.</p>
+      {msg && <p className="text-[12px] text-amber-300/90 mb-2">{msg}</p>}
+      <p className="text-[11px] text-zinc-500">Have a referral code? Enter it at checkout for 20% off your first payment.</p>
+      <div className="text-[12px] text-zinc-500 mt-3">
+        Questions?{' '}
+        <a href="mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20premium" className="text-amber-300/90 hover:text-amber-200 underline underline-offset-2">ThomasMTrudeau@gmail.com</a>
+      </div>
     </div>
   );
 }

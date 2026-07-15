@@ -339,6 +339,36 @@ export default function Home() {
       .catch(() => setPremiumMap({}));
   }, [loaded, players]);
 
+  // Referral capture: a friend's share link (?ref=HS-XXXX) sticks until checkout.
+  useEffect(() => {
+    try {
+      const ref = new URLSearchParams(window.location.search).get('ref');
+      if (ref) localStorage.setItem('hotsheet_ref', ref.toUpperCase());
+    } catch { /* ignore */ }
+  }, []);
+
+  const openBilling = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' });
+      const d = await res.json();
+      if (res.ok && d?.url) { window.location.href = d.url; return; }
+      alert(res.status === 400 ? 'No subscription on this account (comped premium has nothing to manage).' : 'Billing portal unavailable — subscriptions may not be live yet.');
+    } catch { alert('Billing portal unavailable.'); }
+  }, []);
+  const referFriend = useCallback(async () => {
+    try {
+      const res = await fetch('/api/billing/referral');
+      const d = await res.json();
+      if (res.ok && d?.code) {
+        const link = `${window.location.origin}/?ref=${d.code}`;
+        await navigator.clipboard.writeText(link);
+        alert(`Your referral link is copied!\n${link}\n\nFriends get 20% off their first payment — you get $5 off your next bill for each one who subscribes.`);
+        return;
+      }
+      alert(res.status === 503 ? 'Referral codes open up when subscriptions go live.' : 'Could not create a referral code.');
+    } catch { alert('Could not create a referral code.'); }
+  }, []);
+
   // Who am I (tier) — so premium tabs can show a SPINNER while premium data
   // loads instead of flashing the upsell teaser at paying users.
   useEffect(() => {
@@ -586,12 +616,22 @@ export default function Home() {
           <PushToggle />
           <div className="flex flex-col items-end">
             <span className="text-xs text-zinc-500 hidden sm:block max-w-[180px] truncate">{user.email}</span>
-            <button
-              onClick={handleLogout}
-              className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
-            >
-              Log out
-            </button>
+            <div className="flex items-center gap-2">
+              {isPremium && (
+                <>
+                  <button onClick={referFriend} title="Copy your referral link — friends get 20% off their first payment, you get $5 off your next bill per subscriber."
+                    className="text-[11px] text-amber-400/80 hover:text-amber-300 transition-colors cursor-pointer">🎁 Refer</button>
+                  <button onClick={openBilling} title="Manage your subscription — payment method, plan, cancel."
+                    className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer">Billing</button>
+                </>
+              )}
+              <button
+                onClick={handleLogout}
+                className="text-[11px] text-zinc-600 hover:text-zinc-400 transition-colors cursor-pointer"
+              >
+                Log out
+              </button>
+            </div>
           </div>
         </div>
       </div>
