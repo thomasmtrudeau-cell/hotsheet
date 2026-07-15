@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, TRENDS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, ScoutingRow, isMiLB } from '@/lib/types';
+import { ViewTab, LevelFilter, DailyPlayerStats, SeasonPlayerStats, LeagueAverages, ALL_PLAYERS_GROUP, CALLUPS_VIEW, PROMOTIONS_VIEW, RISERS_VIEW, PROJECTIONS_VIEW, TRADE_VIEW, REGRESSION_VIEW, SCOUTING_VIEW, TRENDS_VIEW, RangePlayerStats, RangeSortKey, CallUp, Riser, PremiumMetrics, OopsyPitcher, OopsyHitter, RegressionRow, HitterRegressionRow, ScoutingRow, isMiLB } from '@/lib/types';
 import { rehabNotifications, lineupNotifications, closerNotifications, twoStartNotifications } from '@/lib/notifications';
 import { useFollowedPlayers } from '@/hooks/useFollowedPlayers';
 import { useAutoRefresh } from '@/hooks/useAutoRefresh';
@@ -115,6 +115,7 @@ export default function Home() {
   const [rangeData, setRangeData] = useState<Record<number, RangePlayerStats[]>>({});
   const [rangeSort, setRangeSort] = useState<RangeSortKey>('wrcPlus');
   const [premiumMap, setPremiumMap] = useState<Record<number, PremiumMetrics>>({}); // WAR + peak wRC+ / ERA-20TBF, premium only
+  const [tier, setTier] = useState<string | null>(null); // 'premium' | 'free' | null = still loading
   const [showPremium, setShowPremium] = useState(true); // premium toggle (for clean screenshots)
   const [showPremiumInfo, setShowPremiumInfo] = useState(false); // teaser modal for non-premium users
   const [showImport, setShowImport] = useState(false); // roster import modal
@@ -129,6 +130,7 @@ export default function Home() {
   const [oopsy, setOopsy] = useState<{ pitchers: OopsyPitcher[]; hitters: OopsyHitter[]; week?: string }>({ pitchers: [], hitters: [] });
   const [oopsyLoading, setOopsyLoading] = useState(false);
   const [regression, setRegression] = useState<RegressionRow[]>([]);
+  const [regressionHitters, setRegressionHitters] = useState<HitterRegressionRow[]>([]);
   const [regressionLoading, setRegressionLoading] = useState(false);
   const [scouting, setScouting] = useState<ScoutingRow[]>([]);
   const [scoutingLoading, setScoutingLoading] = useState(false);
@@ -181,8 +183,8 @@ export default function Home() {
       setRegressionLoading(true);
       fetch('/api/regression')
         .then((r) => r.json())
-        .then((d) => setRegression(Array.isArray(d?.rows) ? d.rows : []))
-        .catch(() => setRegression([]))
+        .then((d) => { setRegression(Array.isArray(d?.rows) ? d.rows : []); setRegressionHitters(Array.isArray(d?.hitters) ? d.hitters : []); })
+        .catch(() => { setRegression([]); setRegressionHitters([]); })
         .finally(() => setRegressionLoading(false));
     } else if (activeGroup === SCOUTING_VIEW) {
       setScoutingLoading(true);
@@ -339,6 +341,16 @@ export default function Home() {
       .catch(() => setPremiumMap({}));
   }, [loaded, players]);
 
+  // Who am I (tier) — so premium tabs can show a SPINNER while premium data
+  // loads instead of flashing the upsell teaser at paying users.
+  useEffect(() => {
+    if (!loaded) return;
+    fetch('/api/me')
+      .then((r) => r.json())
+      .then((d) => setTier(typeof d?.tier === 'string' ? d.tier : 'free'))
+      .catch(() => setTier('free'));
+  }, [loaded]);
+
   // OOPSY weekly projections loaded once for the whole app (premium), so cards
   // can show a per-player snapshot — not just the Projections tab.
   useEffect(() => {
@@ -372,7 +384,10 @@ export default function Home() {
   const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression || isScouting || isTrends;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
-  const isPremium = Object.keys(premiumMap).length > 0;
+  const isPremium = tier === 'premium' || Object.keys(premiumMap).length > 0;
+  // Tier unknown and no premium data yet — don't show the teaser to someone who
+  // may well be premium; the discovery views render a spinner instead.
+  const premiumPending = tier === null && Object.keys(premiumMap).length === 0;
 
   // Name-based "already in your list" check for discovery lists that carry no
   // player id (risers come from the WAR sheet by name only).
@@ -689,6 +704,8 @@ export default function Home() {
         <div className="flex justify-center py-16">
           <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
         </div>
+      ) : isDiscovery && premiumPending ? (
+        <div className="flex justify-center py-16"><div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" /></div>
       ) : isCallups ? (
         !isPremium ? <PremiumTeaser context="callups" /> :
         <MoversList
@@ -742,6 +759,7 @@ export default function Home() {
       ) : isRegression ? (
         <RegressionView
           rows={showPremium ? regression : []}
+          hitters={showPremium ? regressionHitters : []}
           loading={regressionLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}

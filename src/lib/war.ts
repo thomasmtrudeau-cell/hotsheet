@@ -1,4 +1,4 @@
-import { FollowedPlayer, PremiumMetrics, RegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
+import { FollowedPlayer, PremiumMetrics, RegressionRow, HitterRegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
 import { AUCTION_VALUES, AuctionRole } from './auction-values';
 import { computeValue, DEFAULT_SETTINGS } from './value-model';
 
@@ -391,6 +391,64 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
 // Scouting: every projected player with a peak-WAR ceiling + level, age, and the
 // headline metric/tool tags — so the client can filter prospects by a WAR slider
 // and level (incl. rookie ball). Reads both tabs; dedupes per (name, role). Premium.
+
+// Hitter regression (EXPERIMENTAL): both sides come from the sheet — the peak
+// wRC+ projection vs the sheet's own current-year wRC+ (park-adjusted by nature
+// of wRC+). delta = current − peak: positive = running over the peak projection
+// (sell-high), negative = under it (buy-low… or just a pre-peak kid developing,
+// which is why the UI carries age). Premium.
+export async function getHitterRegression(sheetId: string): Promise<{ rows: HitterRegressionRow[] }> {
+  const csv = await fetchCsvTab(sheetId, HIT_TAB);
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return { rows: [] };
+  const h = rows[0].map((x) => x.trim());
+  const pi = h.findIndex((x) => x.toLowerCase() === 'name');
+  const peakI = h.findIndex((x) => x === 'wRC+');
+  const curI = h.findIndex((x) => x === 'wRC+ - current year only');
+  const idI = h.findIndex((x) => x.toLowerCase() === 'id');
+  const sbI = h.findIndex((x) => x === 'SB/600');
+  const hrI = h.findIndex((x) => x === 'HR');
+  const defI = h.findIndex((x) => x === 'DEF');
+  let ageI = h.findIndex((x) => x.toLowerCase() === 'max age');
+  if (ageI < 0) ageI = h.findIndex((x) => x.toLowerCase() === 'age');
+  const lvlI = h.findIndex((x) => x.toLowerCase() === 'highest level');
+  if (pi < 0 || peakI < 0 || curI < 0) return { rows: [] };
+
+  const byKey = new Map<string, HitterRegressionRow>();
+  const keptStale = new Map<string, boolean>();
+  for (let r = 1; r < rows.length; r++) {
+    const c = rows[r];
+    const name = c[pi]?.trim();
+    if (!name) continue;
+    const peak = parseFloat(c[peakI]);
+    const cur = parseFloat(c[curI]);
+    if (!Number.isFinite(peak) || !Number.isFinite(cur)) continue; // needs real current-year PA
+    const key = normalizeName(name);
+    const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
+    if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
+    const sb = sbI >= 0 ? parseFloat(c[sbI]) : NaN;
+    const hr = hrI >= 0 ? parseFloat(c[hrI]) : NaN;
+    const def = defI >= 0 ? parseFloat(c[defI]) : NaN;
+    const age = ageI >= 0 ? parseFloat(c[ageI]) : NaN;
+    const speed: ToolGrade | undefined = Number.isFinite(sb) ? (sb >= 34 ? 'double-plus' : sb >= 24 ? 'plus' : undefined) : undefined;
+    const power: ToolGrade | undefined = Number.isFinite(hr) ? (hr >= 30 ? 'double-plus' : hr >= 22 ? 'plus' : undefined) : undefined;
+    let dual: ToolGrade | undefined;
+    if (Number.isFinite(sb) && Number.isFinite(hr) && sb >= 12 && hr >= 12) {
+      const combined = sb + hr;
+      dual = combined >= 40 ? 'double-plus' : combined >= 30 ? 'plus' : undefined;
+    }
+    const defG: DefGrade | undefined = Number.isFinite(def) ? (def >= 6 ? 'double-plus' : def >= 2 ? 'plus' : def <= -6 ? 'double-minus' : def <= -2 ? 'minus' : undefined) : undefined;
+    byKey.set(key, {
+      nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI]?.trim() : undefined,
+      age: Number.isFinite(age) ? age : undefined,
+      peakWrc: Math.round(peak), curWrc: Math.round(cur), delta: Math.round(cur - peak),
+      speed, power, dual, def: defG,
+    });
+    keptStale.set(key, stale);
+  }
+  return { rows: Array.from(byKey.values()) };
+}
+
 function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): ScoutingRow[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) return [];

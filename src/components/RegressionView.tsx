@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { RegressionRow } from '@/lib/types';
+import { RegressionRow, HitterRegressionRow } from '@/lib/types';
 import { HOME_PARK_PF } from '@/lib/parks';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
@@ -19,6 +19,7 @@ function ilTooltip(r: RegressionRow): string {
 
 interface RegressionViewProps {
   rows: RegressionRow[];
+  hitters: HitterRegressionRow[];
   loading: boolean;
   isPremium: boolean;
   isFollowing: (name: string) => boolean;
@@ -81,9 +82,61 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
   );
 }
 
-export default function RegressionView({ rows, loading, isPremium, isFollowing }: RegressionViewProps) {
+
+function HitTools({ r }: { r: HitterRegressionRow }) {
+  const chip = 'px-1 py-0.5 rounded text-[9px] font-bold';
+  return (
+    <span className="inline-flex gap-1">
+      {r.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡💪{r.dual === 'double-plus' ? '40+' : '30+'}</span>}
+      {!r.dual && r.power && <span className={`${chip} bg-amber-500/20 text-amber-200`}>💪{r.power === 'double-plus' ? '++' : '+'}</span>}
+      {!r.dual && r.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡{r.speed === 'double-plus' ? '++' : '+'}</span>}
+      {r.def && <span className={`${chip} ${r.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`}>🧤{r.def === 'double-plus' ? '++' : r.def === 'plus' ? '+' : r.def === 'double-minus' ? '−−' : '−'}</span>}
+    </span>
+  );
+}
+
+function HitList({ title, subtitle, rows, tone, isFollowing }: { title: string; subtitle: string; rows: HitterRegressionRow[]; tone: 'sell' | 'buy'; isFollowing: (name: string) => boolean }) {
+  const accent = tone === 'sell' ? 'text-red-300' : 'text-emerald-300';
+  return (
+    <div className="flex-1 min-w-0 rounded-lg border border-zinc-800 p-3">
+      <div className={`text-sm font-semibold ${accent}`}>{title}</div>
+      <div className="text-[11px] text-zinc-500 mb-2">{subtitle}</div>
+      {rows.length === 0 ? (
+        <p className="text-[11px] text-zinc-600 py-4 text-center">Nothing matches these filters.</p>
+      ) : (
+        <div className="space-y-1">
+          {rows.map((r) => (
+            <div key={r.nameKey} className="flex items-center justify-between gap-2 text-xs px-1 py-1">
+              <div className="min-w-0 flex items-center gap-1.5">
+                <span className="text-zinc-100 truncate">{r.player}</span>
+                <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
+                {r.age !== undefined && <span className="text-[10px] text-zinc-600">{Math.round(r.age)}yo</span>}
+                {r.age !== undefined && r.age <= 24 && r.delta < 0 && (
+                  <Tooltip text="Pre-peak: the projection is his PEAK — running under it at his age is development, not decline. Don't read this gap as a fade.">
+                    <span className="text-[10px] px-1 rounded bg-sky-500/20 text-sky-300 cursor-help">pre-peak</span>
+                  </Tooltip>
+                )}
+                <HitTools r={r} />
+                {isFollowing(r.player) && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
+              </div>
+              <div className="flex items-center gap-2 whitespace-nowrap font-mono">
+                <span className={accent}>{r.delta > 0 ? '+' : ''}{r.delta}</span>
+                <span className="text-zinc-500">{r.curWrc} now · <Tooltip text="Peak wRC+ projection — his ceiling season, not necessarily this season."><span className="underline decoration-dotted decoration-zinc-700">{r.peakWrc} peak</span></Tooltip></span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function RegressionView({ rows, hitters, loading, isPremium, isFollowing }: RegressionViewProps) {
+  const [mode, setMode] = useState<'pitchers' | 'hitters'>('pitchers');
   const [eraCut, setEraCut] = useState(4.3);
   const [gap, setGap] = useState(0.3);
+  const [wrcCut, setWrcCut] = useState(100);  // hitters: peak wRC+ ≥
+  const [wGap, setWGap] = useState(10);       // hitters: min |current − peak|
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
 
   useEffect(() => {
@@ -97,12 +150,18 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
         if (typeof s.gap === 'number') setGap(s.gap);
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (Array.isArray(s.levels) && s.levels.length) setLevels(new Set(s.levels));
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (typeof s.wrcCut === 'number') setWrcCut(s.wrcCut);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (typeof s.wGap === 'number') setWGap(s.wGap);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (s.mode === 'pitchers' || s.mode === 'hitters') setMode(s.mode);
       }
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, levels: [...levels] })); } catch { /* ignore */ }
-  }, [eraCut, gap, levels]);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, wrcCut, wGap, mode, levels: [...levels] })); } catch { /* ignore */ }
+  }, [eraCut, gap, wrcCut, wGap, mode, levels]);
 
   const toggleLevel = (l: Level) => setLevels((prev) => {
     const next = new Set(prev);
@@ -118,6 +177,14 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
     };
   }, [rows, eraCut, gap, levels]);
 
+  const { hotBats, coldBats } = useMemo(() => {
+    const inScope = hitters.filter((r) => r.peakWrc >= wrcCut && levels.has(levelBucket(r.level)));
+    return {
+      hotBats: inScope.filter((r) => r.delta >= wGap).sort((a, b) => b.delta - a.delta).slice(0, 60),
+      coldBats: inScope.filter((r) => r.delta <= -wGap).sort((a, b) => a.delta - b.delta).slice(0, 60),
+    };
+  }, [hitters, wrcCut, wGap, levels]);
+
   if (!isPremium) return <PremiumTeaser context="regression" />;
   if (loading && rows.length === 0) {
     return (
@@ -129,6 +196,47 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
 
   return (
     <div>
+      <div className="flex rounded-lg overflow-hidden border border-zinc-700 w-fit mb-3">
+        <button onClick={() => setMode('pitchers')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${mode === 'pitchers' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>Pitchers</button>
+        <button onClick={() => setMode('hitters')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${mode === 'hitters' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>Bats <span className="text-[9px] uppercase tracking-wide opacity-70 align-middle">exp</span></button>
+      </div>
+
+      {mode === 'hitters' ? (
+      <>
+      <p className="text-[11px] text-zinc-500 mb-3">
+        <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold mr-1.5">EXPERIMENTAL</span>
+        Hitters whose <span className="text-zinc-300">current-year wRC+</span> has drifted from their{' '}
+        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's peak wRC+ projection — his ceiling season. A pre-peak player normally runs UNDER it; that's development, not decline.">peak wRC+ projection</span>.
+        Note the projection is <span className="text-zinc-300">peak</span>, so young pre-peak bats may not project this well right now (they get a <span className="text-sky-300">pre-peak</span> tag). Rest-of-season OOPSY projections may come later.
+      </p>
+
+      <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
+        <label className="flex items-center gap-2 text-zinc-400">
+          Peak wRC+ ≥ <span className="font-mono font-bold text-zinc-100 w-8">{wrcCut}</span>
+          <input type="range" min={80} max={140} step={1} value={wrcCut} onChange={(e) => setWrcCut(parseInt(e.target.value, 10))} className="accent-emerald-500 w-32 cursor-pointer" />
+        </label>
+        <label className="flex items-center gap-2 text-zinc-400">
+          Min gap <span className="font-mono font-bold text-zinc-100 w-8">{wGap}</span>
+          <input type="range" min={5} max={40} step={1} value={wGap} onChange={(e) => setWGap(parseInt(e.target.value, 10))} className="accent-emerald-500 w-32 cursor-pointer" />
+        </label>
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-500">Levels</span>
+          {LEVELS.map((l) => (
+            <button key={l} onClick={() => toggleLevel(l)}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${levels.has(l) ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+              {l}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-3">
+        <HitList title="⬆️ Sell high" subtitle="Hitting over their peak projection — running hot" rows={hotBats} tone="sell" isFollowing={isFollowing} />
+        <HitList title="⬇️ Buy low" subtitle="Hitting under their peak projection — room to climb (mind the pre-peak tag)" rows={coldBats} tone="buy" isFollowing={isFollowing} />
+      </div>
+      </>
+      ) : (
+      <>
       <p className="text-[11px] text-zinc-500 mb-3">
         Starters (SP &amp; SP prospects) whose <span className="text-zinc-300">actual current-year ERA</span> (live from the MLB/MiLB API, min {' '}20 IP) has drifted from their{' '}
         <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload. (ERA/20 runs ~0.2 above traditional ERA, so on-talent arms sit slightly negative.)">peak (true-talent) ERA/20 projection</span> <span className="text-zinc-500">(park-neutral — 🏟 flags pitchers whose actual ERA is park-flattered/inflated)</span>
@@ -160,6 +268,8 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
         <List title="⬆️ Sell high" subtitle="Pitching under their projection — regression up looms" rows={sellHighs} tone="sell" isFollowing={isFollowing} />
         <List title="⬇️ Buy low" subtitle="Pitching over their projection — bounce-back candidates" rows={buyLows} tone="buy" isFollowing={isFollowing} />
       </div>
+      </>
+      )}
     </div>
   );
 }

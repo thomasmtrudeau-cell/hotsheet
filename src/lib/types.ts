@@ -379,6 +379,22 @@ export interface RegressionRow {
   team?: string;         // current team name (for the home-park badge)
 }
 
+// Hitter regression (EXPERIMENTAL): the sheet's peak wRC+ projection vs its
+// current-year wRC+. Peak means pre-peak guys naturally run under it. Premium.
+export interface HitterRegressionRow {
+  nameKey: string;
+  player: string;
+  level?: string;
+  age?: number;
+  peakWrc: number;
+  curWrc: number;
+  delta: number; // current − peak; positive = running over his peak projection
+  speed?: ToolGrade;
+  power?: ToolGrade;
+  dual?: ToolGrade;
+  def?: DefGrade;
+}
+
 // OOPSY weekly projections (premium). Read from a separate published sheet.
 export interface OopsyPitcher {
   nameKey: string;

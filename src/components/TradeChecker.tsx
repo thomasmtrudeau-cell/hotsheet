@@ -76,7 +76,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
-  const [buildKey, setBuildKey] = useState('overall'); // active build lens (Overall / Win-now / Contender / Retooling / Rebuild)
+  const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
+  const [buildKey, setBuildKey] = useState('overall'); // YOUR build lens (Overall / Win-now / Contender / Retooling / Rebuild)
+  const [theirKey, setTheirKey] = useState('overall'); // THEIR build — view the same trade from the other side's posture
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -89,6 +91,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         const s = JSON.parse(raw);
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setSettings({ ...DEFAULT_SETTINGS, ...s, slots: { ...DEFAULT_SETTINGS.slots, ...(s.slots ?? {}) } });
+      } else {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSettingsCustomized(false); // never saved settings — nudge them to set their league
       }
     } catch { /* ignore */ }
   }, []);
@@ -97,6 +102,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const updateBuild = useCallback((k: string) => setBuildKey(k), []);
   const updateSettings = useCallback((s: LeagueSettings) => {
     setSettings(s);
+    setSettingsCustomized(true);
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
   }, []);
 
@@ -454,6 +460,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const lensA = sumLens(sideA, 'A');
   const lensB = sumLens(sideB, 'B');
   const lensDiff = lensA - lensB;
+  // THEIR perspective: score BOTH sides through their build. They receive what you
+  // give (side B) and give up what you get (side A) — their gain is the mirror.
+  const theirBuild = BUILDS.find((b) => b.key === theirKey) ?? BUILDS[0];
+  const theirWSum = theirBuild.weights.reduce((a, b) => a + b, 0);
+  const theirWindowAvg = (p: SearchResult) => theirBuild.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / theirWSum;
+  const theirLensOf = (p: SearchResult) => (1 - theirBuild.fvShare) * theirWindowAvg(p) + theirBuild.fvShare * fvOf(p);
+  const theirKeep = (1 - theirBuild.fvShare) * PV_KEEP + theirBuild.fvShare * FV_KEEP;
+  const sumTheirLens = (ps: SearchResult[], side: Side) => {
+    let t = ps.reduce((acc, p) => acc + theirLensOf(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + theirLensOf(p), 0) + theoreticalFill * theirKeep;
+    return t;
+  };
+  const theirDiff = sumTheirLens(sideB, 'B') - sumTheirLens(sideA, 'A'); // positive = good for THEM
 
   const renderColumn = (side: Side, players: SearchResult[]) => {
     const isOpened = side === openedSide;
@@ -520,6 +539,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
 
   return (
     <div>
+      {/* Prominent experimental notice — this tool's values are actively being calibrated. */}
+      <div className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-[12px] text-amber-200 flex items-start gap-2">
+        <span className="text-sm leading-none mt-0.5">🧪</span>
+        <span><strong>Experimental</strong> — the value model is being actively calibrated and numbers can shift week to week. Treat verdicts as a second opinion, not gospel.</span>
+      </div>
       <div className="relative max-w-xl mb-4">
         <input
           ref={searchRef}
@@ -564,10 +588,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       </div>
 
       <div className="mb-3">
-        <button onClick={() => setShowSettings((v) => !v)}
-          className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer">
-          ⚙ League settings — {settings.teams}-team · {settings.keepers} keepers · {settings.format.toUpperCase()} {showSettings ? '▲' : '▼'}
-        </button>
+        {settingsCustomized ? (
+          <button onClick={() => setShowSettings((v) => !v)}
+            className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer">
+            ⚙ League settings — {settings.teams}-team · {settings.keepers} keepers · {settings.format.toUpperCase()} {showSettings ? '▲' : '▼'}
+          </button>
+        ) : (
+          <button onClick={() => setShowSettings(true)}
+            className="w-full sm:w-auto rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 px-3 py-2 text-left cursor-pointer">
+            <span className="text-sm font-semibold text-orange-300">⚙ Set up YOUR league first</span>
+            <span className="block text-[11px] text-zinc-400 mt-0.5">Values below assume the default {settings.teams}-team · {settings.keepers}-keeper · {settings.format.toUpperCase()} league — set your real teams, keepers, format and roster slots so PV/FV fit <em>your</em> league. {showSettings ? '' : 'Tap to open ▾'}</span>
+          </button>
+        )}
       </div>
       {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
@@ -590,15 +622,30 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           const fair = Math.abs(lensDiff) < 0.08 * bigger || Math.abs(lensDiff) < 0.5;
           const verdictColor = fair ? 'text-zinc-200' : lensDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
           const verdict = fair ? 'Fair trade' : lensDiff > 0 ? `Favors you +${lensDiff.toFixed(1)}` : `Favors them +${(-lensDiff).toFixed(1)}`;
+          const tBig = Math.max(sumTheirLens(sideA, 'A'), sumTheirLens(sideB, 'B'), 0.1);
+          const tFair = Math.abs(theirDiff) < 0.08 * tBig || Math.abs(theirDiff) < 0.5;
+          const winWin = !fair && !tFair && lensDiff > 0 && theirDiff > 0;
           return (
           <div className="text-center mt-2">
-            <div className={`text-lg font-bold ${verdictColor}`}>{verdict}</div>
-            <div className="text-[11px] text-zinc-500 mb-1">
-              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span>
+            <div className={`text-2xl font-bold ${verdictColor}`}>{verdict}</div>
+            {/* The lens totals ARE the fairness basis — most prominent line. */}
+            <div className="text-base font-semibold text-zinc-300 mt-0.5">
+              {build.label} <span className="text-orange-300">{lensA.toFixed(1)}</span> <span className="text-zinc-500">vs</span> <span className="text-orange-200/80">{lensB.toFixed(1)}</span>
             </div>
-            <div className="text-sm flex flex-wrap justify-center gap-x-4">
-              <span className="text-blue-200 font-semibold">{edge(pvDiff, 'Now')}</span>
-              <span className="text-fuchsia-200 font-semibold">{edge(fvDiff, 'Keeper')}</span>
+            <div className="text-[12px] mt-1 flex flex-wrap justify-center items-center gap-x-2">
+              <span className="text-zinc-500">From their side, scored as</span>
+              <select value={theirKey} onChange={(e) => setTheirKey(e.target.value)}
+                className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[11px] text-zinc-200 cursor-pointer">
+                {BUILDS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
+              </select>
+              <span className={tFair ? 'text-zinc-300' : theirDiff > 0 ? 'text-emerald-300' : 'text-rose-300'}>
+                {tFair ? 'fair' : theirDiff > 0 ? `they gain +${theirDiff.toFixed(1)}` : `they lose ${theirDiff.toFixed(1)}`}
+              </span>
+              {winWin && <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold" title="Each side comes out ahead through its own build — the trades that actually get accepted.">🤝 win-win by builds</span>}
+            </div>
+            <div className="text-[11px] mt-1.5 flex flex-wrap justify-center gap-x-4 text-zinc-500">
+              <span className="text-blue-200/80">{edge(pvDiff, 'Now')}</span>
+              <span className="text-fuchsia-200/80">{edge(fvDiff, 'Keeper')}</span>
             </div>
           </div>
           );

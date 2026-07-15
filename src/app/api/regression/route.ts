@@ -1,12 +1,12 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
-import { getSpRegression } from '@/lib/war';
+import { getSpRegression, getHitterRegression } from '@/lib/war';
 import { getInjuryStatusForTeams, getIlDetailsForTeams } from '@/lib/mlb-api';
 
 // SP sell-high / buy-low regression — PREMIUM ONLY. Returns empty sets for
 // non-premium / unconfigured so the client shows the teaser.
 export async function GET() {
-  const empty = { rows: [] };
+  const empty = { rows: [], hitters: [] };
   try {
     const sheetId = process.env.WAR_SHEET_ID;
     if (!sheetId) return NextResponse.json(empty);
@@ -18,7 +18,7 @@ export async function GET() {
     const { data: profile } = await supabase.from('profiles').select('tier').eq('id', user.id).single();
     if (profile?.tier !== 'premium') return NextResponse.json(empty);
 
-    const { rows } = await getSpRegression(sheetId);
+    const [{ rows }, { rows: hitters }] = await Promise.all([getSpRegression(sheetId), getHitterRegression(sheetId)]);
     // Flag who's on the IL + the real when/why (roster note + transaction date) —
     // context behind a small-sample / anomalous line. Batched by team, cached.
     const teamIds = [...new Set(rows.map((r) => r.teamId).filter((id): id is number => typeof id === 'number'))];
@@ -38,7 +38,7 @@ export async function GET() {
         playerId: undefined, teamId: undefined, // drop join-only fields from the payload
       };
     });
-    return NextResponse.json({ rows: enriched });
+    return NextResponse.json({ rows: enriched, hitters });
   } catch (error) {
     console.error('Regression route error:', error);
     return NextResponse.json(empty);
