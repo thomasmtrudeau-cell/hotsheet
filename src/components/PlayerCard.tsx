@@ -587,7 +587,7 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
         <>
           {stats.playingTimeRisk && (
             <div className="mt-2 text-[11px] text-amber-300/90" title="A same-area teammate could reclaim playing time">
-              ⚠ PT watch: <span className="text-zinc-200">{stats.playingTimeRisk.name}</span> ({stats.playingTimeRisk.position}) {stats.playingTimeRisk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — {stats.playingTimeRisk.adjacent ? 'a positional logjam.' : 'could reclaim reps.'}
+              ⚠ PT watch: <span className="text-zinc-200">{stats.playingTimeRisk.name}</span> ({stats.playingTimeRisk.position}) {stats.playingTimeRisk.kind === 'crowd' ? 'shares the spot on the active roster' : stats.playingTimeRisk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — {stats.playingTimeRisk.kind === 'crowd' ? 'reps are split.' : stats.playingTimeRisk.adjacent ? 'a positional logjam.' : 'could reclaim reps.'}
             </div>
           )}
           {oopsy && (oopsy.hitter || oopsy.pitcher) && <OopsyRow o={oopsy} />}

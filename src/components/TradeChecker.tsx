@@ -41,7 +41,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   if (pending) {
     // Values are still being priced — pulse placeholders instead of misleading 0.0s.
@@ -61,7 +61,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role
       {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
       {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
-      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
+      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.kind === 'crowd' ? 'reps are split while both are healthy' : risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
@@ -84,7 +84,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [faFills, setFaFills] = useState<SearchResult[]>([]); // real free agents you'd add back into opened roster spots
   const [metrics, setMetrics] = useState<Record<number, PremiumMetrics>>({});
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
-  const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
+  const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' | 'crowd' } | undefined>>({});
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
@@ -251,8 +251,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // than a keeper-horizon logjam. Direct (same-position) IL return is the most
   // imminent; a minors pusher next; a positional logjam (adjacent) the lightest —
   // but an unproven, threatened everyday role (Heriberto) still gives real value back.
-  const ptDock = (r?: { kind?: 'il' | 'depth'; adjacent?: boolean }) =>
-    !r ? 1 : r.adjacent ? 0.88 : r.kind === 'depth' ? 0.82 : 0.75;
+  const ptDock = (r?: { kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }) =>
+    !r ? 1 : r.kind === 'crowd' ? 0.85 : r.adjacent ? 0.88 : r.kind === 'depth' ? 0.82 : 0.75;
   // Base PV/FV recomputed live from raw inputs against the user's league
   // settings (keeper depth, format, positional slots), then PV gets the dynamic
   // discounts layered on top.

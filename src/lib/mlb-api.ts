@@ -1448,7 +1448,7 @@ function posRelevance(myPos: string, matePos: string): 'exact' | 'adjacent' | nu
   if (myPos === matePos) return 'exact';
   return (POS_ADJ[myPos] ?? []).includes(matePos) ? 'adjacent' : null;
 }
-type RiskInfo = { name: string; position: string; kind: 'il' | 'depth'; adjacent?: boolean };
+type RiskInfo = { name: string; position: string; kind: 'il' | 'depth' | 'crowd'; adjacent?: boolean };
 export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, RiskInfo>> {
   const out = new Map<number, RiskInfo>();
   const hitters = players.filter((p) => p.sportId === 1 && p.primaryPosition !== 'P' && playablePos(p.primaryPosition));
@@ -1469,13 +1469,15 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
     } catch { /* skip this team */ }
   }));
 
-  // Candidate threats per followed hitter: same position group, not himself,
-  // and either returning from the IL or a non-active (optioned) roster-mate.
+  // Candidate threats per followed hitter: same position group, not himself —
+  // an IL returnee, a non-active (optioned) roster-mate, or an ACTIVE teammate
+  // sharing the spot (roster crowd: Volpe and Caballero both playing SS impact
+  // each other; the WAR gate below keeps scrub backups from flagging anyone).
   const candidates = new Map<number, Mate[]>();
   const threatNames = new Set<string>();
   for (const p of hitters) {
     const roster = rosterByTeam.get(p.currentTeam.id) ?? [];
-    const c = roster.filter((e) => e.kind !== 'active' && e.id !== p.id && e.name && posRelevance(p.primaryPosition, e.pos) !== null);
+    const c = roster.filter((e) => e.id !== p.id && e.name && posRelevance(p.primaryPosition, e.pos) !== null);
     if (c.length) { candidates.set(p.id, c); c.forEach((e) => threatNames.add(e.name)); }
   }
   if (candidates.size === 0) return out;
@@ -1512,16 +1514,19 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
       if (gated) {
         // Only a genuine threat: at least as good as the guy (0.3 WAR grace).
         if (w === undefined || w < myWar - 0.3) continue;
-      } else if (mate.kind !== 'il') {
-        // No WAR data → conservative: IL returns only (skip minors pushers).
-        continue;
+        // Active roster-crowd threats carry a higher bar — an everyday-caliber
+        // teammate (2.0+) sharing the spot, not just any warm body.
+        if (mate.kind === 'active' && w < 2.0) continue;
+      } else {
+        // No WAR data → conservative: IL returns only (skip pushers + crowds).
+        if (mate.kind !== 'il') continue;
       }
       const adjacent = posRelevance(p.primaryPosition, mate.pos) === 'adjacent';
       // Prefer a direct (same-position) threat over a positional logjam, then WAR.
       const score = (adjacent ? 0 : 100) + (w ?? 0);
       if (!best || score > best.score) best = { mate, score, adjacent };
     }
-    if (best) out.set(p.id, { name: best.mate.name, position: best.mate.pos, kind: best.mate.kind === 'il' ? 'il' : 'depth', adjacent: best.adjacent || undefined });
+    if (best) out.set(p.id, { name: best.mate.name, position: best.mate.pos, kind: best.mate.kind === 'il' ? 'il' : best.mate.kind === 'active' ? 'crowd' : 'depth', adjacent: best.adjacent || undefined });
   }
   return out;
 }
