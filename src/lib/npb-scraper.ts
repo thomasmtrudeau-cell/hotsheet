@@ -152,7 +152,7 @@ function parseBattingRows(rows: string[][], league: string): NPBBatter[] {
     const so = parseInt(r[o + 18]) || 0;
     const slg = r[o + 20] || '.000';
     const obp = r[o + 21] || '.000';
-    const opsVal = (parseFloat(slg) + parseFloat(obp)).toFixed(3);
+    const opsVal = (parseFloat(slg) + parseFloat(obp)).toFixed(3).replace(/^0\./, '.');
 
     batters.push({
       name, team, league, avg, g, pa, ab, h, doubles, triples, hr,

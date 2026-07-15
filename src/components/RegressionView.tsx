@@ -52,15 +52,15 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
       ) : (
         <div className="space-y-1">
           {rows.map((r) => (
-            <div key={r.nameKey} className="flex items-center justify-between gap-2 text-xs px-1 py-1">
-              <div className="min-w-0 flex items-center gap-1.5">
+            <div key={r.nameKey} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs px-1 py-1">
+              <div className="min-w-0 flex-1 basis-[200px] flex items-center gap-1.5">
                 <span className="text-zinc-100 truncate">{r.player}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
                 {r.role && <span className={`text-[10px] ${r.role === 'RP' ? 'text-purple-300/80' : 'text-zinc-500'}`} title={r.role === 'RP' ? 'Pitching in relief this year' : 'In the rotation'}>{r.role}</span>}
                 {r.il && <Tooltip text={ilTooltip(r)}><span className="text-[10px] px-1 rounded bg-red-500/20 text-red-400 cursor-help">IL</span></Tooltip>}
                 {isFollowing(r.player) && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
               </div>
-              <div className="flex items-center gap-2 whitespace-nowrap font-mono">
+              <div className="flex items-center gap-2 whitespace-nowrap font-mono ml-auto">
                 {(() => {
                   const pf = r.team ? HOME_PARK_PF[r.team] : undefined;
                   if (pf === undefined || Math.abs(pf - 100) < 3) return null;
@@ -106,8 +106,8 @@ function HitList({ title, subtitle, rows, tone, isFollowing }: { title: string; 
       ) : (
         <div className="space-y-1">
           {rows.map((r) => (
-            <div key={r.nameKey} className="flex items-center justify-between gap-2 text-xs px-1 py-1">
-              <div className="min-w-0 flex items-center gap-1.5">
+            <div key={r.nameKey} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs px-1 py-1">
+              <div className="min-w-0 flex-1 basis-[200px] flex items-center gap-1.5">
                 <span className="text-zinc-100 truncate">{r.player}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
                 {r.age !== undefined && <span className="text-[10px] text-zinc-600">{Math.round(r.age)}yo</span>}
@@ -119,7 +119,7 @@ function HitList({ title, subtitle, rows, tone, isFollowing }: { title: string; 
                 <HitTools r={r} />
                 {isFollowing(r.player) && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
               </div>
-              <div className="flex items-center gap-2 whitespace-nowrap font-mono">
+              <div className="flex items-center gap-2 whitespace-nowrap font-mono ml-auto">
                 <span className={accent}>{r.delta > 0 ? '+' : ''}{r.delta}</span>
                 <span className="text-zinc-500">{r.curWrc} now · <Tooltip text="Peak wRC+ projection — his ceiling season, not necessarily this season."><span className="underline decoration-dotted decoration-zinc-700">{r.peakWrc} peak</span></Tooltip></span>
               </div>

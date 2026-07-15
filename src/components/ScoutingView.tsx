@@ -153,8 +153,8 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
             const st = rowState[rowKey];
             const followed = isFollowing(r.player);
             return (
-            <div key={rowKey} className="flex items-center justify-between gap-2 px-3 py-1.5 text-xs">
-              <div className="min-w-0 flex items-center gap-1.5">
+            <div key={rowKey} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-xs">
+              <div className="min-w-0 flex-1 basis-[240px] flex items-center gap-1.5">
                 <span className="text-zinc-100 truncate">{r.player}</span>
                 <span className="text-[10px] text-zinc-500">{r.isPitcher ? 'P' : 'H'}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
@@ -162,7 +162,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
                 {followed && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
                 <Tools r={r} />
               </div>
-              <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
+              <div className="flex items-center gap-2 whitespace-nowrap shrink-0 ml-auto">
                 <span className="font-mono inline-flex items-center gap-2">
                   {r.isPitcher
                     ? (r.era20 !== undefined && <span className="text-zinc-500">{r.era20.toFixed(2)} ERA/20</span>)

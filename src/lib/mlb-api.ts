@@ -1740,12 +1740,14 @@ interface PitAgg { sid: number; g: number; er: number; ip: number; k: number; bb
 
 const LEVEL_RANK: Record<number, number> = { 1: 0, 11: 1, 12: 2, 13: 3, 14: 4, 16: 5 };
 
+// Baseball convention: rate stats show no leading zero (.263, not 0.263).
+const f3 = (n: number) => n.toFixed(3).replace(/^0\./, '.');
 function buildHitterLine(a: HitAgg, lg: LeagueAverages | null, saberStat?: Record<string, unknown>): SeasonLevelLine {
-  const avg = a.ab > 0 ? (a.h / a.ab).toFixed(3) : '.000';
+  const avg = a.ab > 0 ? f3(a.h / a.ab) : '.000';
   const obpDen = a.ab + a.bb + a.hbp + a.sf;
-  const obp = obpDen > 0 ? ((a.h + a.bb + a.hbp) / obpDen).toFixed(3) : '.000';
-  const slg = a.ab > 0 ? (a.tb / a.ab).toFixed(3) : '.000';
-  const ops = (parseFloat(obp) + parseFloat(slg)).toFixed(3);
+  const obp = obpDen > 0 ? f3((a.h + a.bb + a.hbp) / obpDen) : '.000';
+  const slg = a.ab > 0 ? f3(a.tb / a.ab) : '.000';
+  const ops = f3(parseFloat(obp) + parseFloat(slg));
 
   const wobaNum = computeWoba({ ab: a.ab, h: a.h, doubles: a.d, triples: a.t, hr: a.hr, bb: a.bb, ibb: a.ibb, hbp: a.hbp, sf: a.sf });
   // FanGraphs rescales MiLB wOBA so league wOBA == league OBP. Match that convention
@@ -1755,7 +1757,7 @@ function buildHitterLine(a: HitAgg, lg: LeagueAverages | null, saberStat?: Recor
   if (wobaNum !== null) {
     const lgObp = lg ? parseFloat(lg.lgOBP) : NaN;
     const scaleK = lg?.lgWoba && lg.lgWoba > 0 && isFinite(lgObp) ? lgObp / lg.lgWoba : 1;
-    woba = (wobaNum * scaleK).toFixed(3);
+    woba = f3(wobaNum * scaleK);
   }
   let wrcPlus: number | undefined;
   let wrcPlusEst: number | undefined;
@@ -1764,7 +1766,7 @@ function buildHitterLine(a: HitAgg, lg: LeagueAverages | null, saberStat?: Recor
   if (a.sid === 1 && saberStat) {
     const realWrc = (saberStat.wRcPlus ?? saberStat.wrcPlus) as number | undefined;
     const realWoba = saberStat.woba as number | undefined;
-    if (realWoba !== undefined) woba = realWoba.toFixed(3);
+    if (realWoba !== undefined) woba = f3(realWoba);
     if (realWrc !== undefined) wrcPlus = Math.round(realWrc);
   }
   if (wrcPlus === undefined && wobaNum !== null) {
