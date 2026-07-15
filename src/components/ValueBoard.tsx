@@ -59,7 +59,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const graded = useMemo(() => {
     return rows.map((r) => {
       const inputs = {
-        isPitcher: r.isPitcher, position: undefined,
+        isPitcher: r.isPitcher, position: r.pos,
         war: r.war, peakWrcPlus: r.peakWrcPlus, era20: r.era20, hr: r.hr, sb: r.sb,
         curWrcPlus: r.curWrcPlus, curEra20: r.curEra20,
         age: r.age, level: r.level, marketBaseline: r.marketBaseline,
@@ -186,7 +186,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
               <tr key={r.nameKey + (r.isPitcher ? 'p' : 'h')} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
                 <td className="px-2 py-1 text-zinc-600 font-mono">{i + 1}</td>
                 <td className="px-2 py-1 text-zinc-100 whitespace-nowrap">
-                  {r.player} <span className="text-zinc-600">{r.isPitcher ? (r.ipg !== undefined && r.ipg < 2.01 ? 'RP' : 'P') : 'H'}</span>
+                  {r.player} <span className="text-zinc-600">{r.isPitcher ? (r.ipg !== undefined && r.ipg < 2.01 ? 'RP' : 'P') : (r.pos ?? 'H')}</span>
                   {isFollowing(r.player) && <span className="text-blue-300" title="In your list"> ★</span>}
                 </td>
                 <td className="px-2 py-1 text-amber-400/80">{r.bucket}</td>

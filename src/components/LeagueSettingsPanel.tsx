@@ -44,10 +44,6 @@ export default function LeagueSettingsPanel({ settings, onChange }: { settings: 
             ))}
           </div>
         </div>
-        <label className="flex items-center gap-1.5 text-zinc-400 cursor-pointer" title="Rebuilder mode values young upside regardless of how far off peak is — turns off the time-to-peak discount on keeper value.">
-          <input type="checkbox" checked={Boolean(settings.rebuilder)} onChange={(e) => set({ rebuilder: e.target.checked })} className="accent-orange-500 cursor-pointer" />
-          Rebuilder
-        </label>
         <button onClick={() => onChange({ ...DEFAULT_SETTINGS, slots: { ...DEFAULT_SETTINGS.slots } })}
           className="text-[11px] text-zinc-500 hover:text-zinc-300 underline cursor-pointer ml-auto">Reset</button>
       </div>
@@ -62,7 +58,7 @@ export default function LeagueSettingsPanel({ settings, onChange }: { settings: 
       </div>
 
       <p className="text-[11px] text-zinc-500 mt-3 pt-2 border-t border-zinc-800">
-        {total.toLocaleString()} total keepers · keeper bar <span className="text-fuchsia-300 font-semibold">{keeperBar(settings).toFixed(1)} WAR</span> · replacement <span className="text-blue-300 font-semibold">{replacementWar(settings).toFixed(1)} WAR</span>
+        ✓ saves automatically to this device · {total.toLocaleString()} total keepers · keeper bar <span className="text-fuchsia-300 font-semibold">{keeperBar(settings).toFixed(1)} WAR</span> · replacement <span className="text-blue-300 font-semibold">{replacementWar(settings).toFixed(1)} WAR</span>
         {settings.format !== 'obp' && <> · {settings.format === 'points' ? 'points: playing time weighted up, SB down' : 'AVG: walk-driven value down'}</>}
       </p>
     </div>

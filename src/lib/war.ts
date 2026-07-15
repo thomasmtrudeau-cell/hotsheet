@@ -179,6 +179,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     const mkt = marketBaselineFor(idIdx >= 0 ? cells[idIdx] : undefined);
     if (mkt !== undefined) m.marketBaseline = mkt;
     if (defIdx >= 0) { const dv = parseFloat(cells[defIdx]); if (Number.isFinite(dv)) m.defRuns = dv; }
+    if (!isPitcher && idIdx >= 0) { const ap = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()]?.pos; if (ap) m.pos = ap; }
     if (ipgIdx >= 0) { const iv = parseFloat(cells[ipgIdx]); if (Number.isFinite(iv)) m.ipg = iv; }
     // Bake a DEFAULT-settings PV/FV as the payload fallback (position unknown at
     // parse time, so scarcity is neutral here; the client refines it).
@@ -487,7 +488,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
       war: round(m.war), peakWrcPlus: m.peakWrcPlus, era20: round(m.era20),
       hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
       age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
-      defRuns: round(m.defRuns), ipg: round(m.ipg),
+      defRuns: round(m.defRuns), ipg: round(m.ipg), pos: m.pos,
     });
   }
   boardCache.set(ck, { at: Date.now(), rows });

@@ -247,7 +247,9 @@ function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRu
   // the games-played reality of the position.
   if (defRuns !== undefined) {
     const offWar = war - (defRuns / 9.774) * (1 - defKeep);
-    return p === 'C' ? offWar * (catcherFlex ? 0.97 : 0.93) : offWar;
+    // Catchers actually take ~15% fewer PA than other regulars (rest days,
+    // day-after-night) — their per-600 rates overstate real seasonal volume.
+    return p === 'C' ? offWar * (catcherFlex ? 0.92 : 0.85) : offWar;
   }
   // Legacy fallbacks when DEF isn't known (e.g. older cached payloads).
   if (p === 'C') return war * (catcherFlex ? 0.92 : 0.80);
@@ -302,6 +304,8 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // pitcher's ERA-based fantasy holds (run prevention ages more gracefully).
   const growth = growthPremium(inp.age, inp.isPitcher, inp.position);
   const fantasyFade = inp.isPitcher ? 1 : growth / 3;
+  // Catcher counting stats shrink with catcher PA volume too.
+  if (inp.position === 'C') fantasy *= 0.8;
   const warTerm = Math.max(0, fWarKeeper - bar) * growth;
   const fantasyTerm = fantasy * (fWarKeeper > bar ? 1 : 0.15) * fantasyFade;
   const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
