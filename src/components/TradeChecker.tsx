@@ -31,8 +31,8 @@ export const BUILDS: { key: string; label: string; short: string; weights: numbe
     blurb: 'Production spread across the next ~3 seasons (next year weighted most). 30% ceiling premium.' },
   { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45,
     blurb: 'This season ignored — you’ve conceded it. The next two seasons carry ~60% of the production weight. 45% ceiling premium.' },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.6,
-    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight. 60% ceiling premium — youth and upside rule.' },
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.7,
+    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight. 70% ceiling premium — youth and upside rule (a rebuilder can always flip the asset).' },
 ];
 
 interface TradeCheckerProps {

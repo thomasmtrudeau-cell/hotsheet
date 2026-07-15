@@ -38,6 +38,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [minWar, setMinWar] = useState(1.5);
   const [sort, setSort] = useState<SortKey>('OV');
+  const [hiddenBuilds, setHiddenBuilds] = useState<Set<string>>(new Set()); // lens columns the user doesn't care about
 
   const [pitchersLoading, setPitchersLoading] = useState(false);
   useEffect(() => {
@@ -119,10 +120,17 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
     RTL: 'Retooling build — this season conceded; next two seasons carry the weight, 45% ceiling premium.',
     RBD: 'Rebuild build — first two seasons ignored, seasons +3 to +6 rule, 60% ceiling premium.',
   };
+  const shownLenses = lenses.filter((l) => !hiddenBuilds.has(l.short));
   const cols: { key: SortKey; label: string }[] = [
     { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' }, { key: 'PV', label: 'PV' }, { key: 'FV', label: 'FV' },
-    ...lenses.map((l) => ({ key: l.short, label: l.short })),
+    ...shownLenses.map((l) => ({ key: l.short, label: l.short })),
   ];
+  const toggleBuild = (short: string) => setHiddenBuilds((prev) => {
+    const next = new Set(prev);
+    if (next.has(short)) next.delete(short); else next.add(short);
+    if (sort === short && next.has(short)) setSort('OV'); // don't sort by a hidden column
+    return next;
+  });
 
   if (loading && rows.length === 0) {
     return (
@@ -156,6 +164,16 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
           {LEVELS.map((l) => (
             <button key={l} onClick={() => toggleLevel(l)}
               className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${levels.has(l) ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>{l}</button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-zinc-500">Builds</span>
+          {lenses.map((l) => (
+            <button key={l.short} onClick={() => toggleBuild(l.short)}
+              title={hiddenBuilds.has(l.short) ? `Show the ${l.label} column` : `Hide the ${l.label} column`}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${!hiddenBuilds.has(l.short) ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
+              {l.label}
+            </button>
           ))}
         </div>
         <label className="flex items-center gap-2 text-zinc-400">
@@ -195,7 +213,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
                 <td className={`px-2 py-1 text-right font-mono ${sort === 'FAN' ? 'text-orange-300 font-bold' : 'text-teal-200/80'}`}>{r.grades.FAN.toFixed(1)}</td>
                 <td className="px-2 py-1 text-right font-mono text-blue-200">{r.grades.PV.toFixed(1)}</td>
                 <td className="px-2 py-1 text-right font-mono text-fuchsia-200">{r.grades.FV.toFixed(1)}</td>
-                {lenses.map((l) => (
+                {shownLenses.map((l) => (
                   <td key={l.short} className={`px-2 py-1 text-right font-mono ${sort === l.short ? 'text-orange-300 font-bold' : 'text-zinc-300'}`}>{r.grades[l.short].toFixed(1)}</td>
                 ))}
               </tr>
