@@ -7,6 +7,7 @@ import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, LeagueSet
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
+import ValueBoard from './ValueBoard';
 
 const SETTINGS_KEY = 'hotsheet_league_settings';
 // Build lenses. Every player already has a per-season value projection (k=0 is THIS
@@ -21,7 +22,7 @@ const SETTINGS_KEY = 'hotsheet_league_settings';
 // win-now = this season + next (front-spiked), contender = the next few seasons
 // (flatter), retooling EXCLUDES this season (you've conceded it), rebuild excludes
 // the next two (ramps in at +2, full from +3).
-const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
+export const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
   { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45,
     blurb: 'This season counts most; each season out counts ~28% less. 45% of the score is the keeper-ceiling premium.' },
   { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15,
@@ -40,7 +41,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, pending, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   if (pending) {
     // Values are still being priced — pulse placeholders instead of misleading 0.0s.
@@ -65,6 +66,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, injured, risk, role }: { m
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
+      {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected full-season saves at his current pace — the ninth-inning role carries fantasy value on its own.">🧯 ~{saves} SV</span>}
       {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡💪{m.dual === 'double-plus' ? '40+' : '30+'}</span>}
       {m && !isPitcher && !m.dual && m.power && <span className={`${chip} bg-amber-500/20 text-amber-200`}>💪{m.power === 'double-plus' ? '++' : '+'}</span>}
       {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
@@ -86,9 +88,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
+  const [savesPace, setSavesPace] = useState<Record<number, number>>({}); // MLB pitchers: projected full-season saves
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
+  const [tool, setTool] = useState<'trade' | 'board'>('trade'); // trade checker vs bulk value board
   const [buildKey, setBuildKey] = useState('overall'); // YOUR build lens (Overall / Win-now / Contender / Retooling / Rebuild)
   const [theirKey, setTheirKey] = useState('overall'); // THEIR build — view the same trade from the other side's posture
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
@@ -138,7 +142,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const all = [...sideA, ...sideB, ...faFills];
     if (all.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); setLoadedIds(new Set());
+      setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); setLoadedIds(new Set()); setSavesPace({});
       fetchedRef.current = new Set();
       return;
     }
@@ -174,6 +178,23 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         setLoadedIds((prev) => new Set([...prev, ...fresh.map((p) => p.id)]));
       })
       .catch(() => mountedRef.current && setLoadedIds((prev) => new Set([...prev, ...fresh.map((p) => p.id)])));
+    // Closers: saves are a ROLE stat the WAR/rate model can't see (Jansen read
+    // PV 0.0). Pull actual saves and project to a full-season pace.
+    Promise.all(fresh.filter((p) => p.primaryPosition === 'P' && p.sportId === 1).map(async (p) => {
+      try {
+        const yr = new Date().getFullYear();
+        const r = await fetch(`https://statsapi.mlb.com/api/v1/people/${p.id}/stats?stats=season&group=pitching&season=${yr}`);
+        const d = await r.json();
+        const sv = parseInt(d?.stats?.[0]?.splits?.[0]?.stat?.saves, 10) || 0;
+        if (sv < 3) return [p.id, 0] as const; // not in the saves mix
+        // Season fraction from opening day (~Mar 27) over a ~186-day season.
+        const frac = Math.min(1, Math.max(0.15, (Date.now() - new Date(yr, 2, 27).getTime()) / (186 * 86_400_000)));
+        return [p.id, Math.round(sv / frac)] as const;
+      } catch { return [p.id, 0] as const; }
+    })).then((pairs) => {
+      if (!mountedRef.current) return;
+      setSavesPace((prev) => { const m = { ...prev }; for (const [id, sv] of pairs) if (sv > 0) m[id] = sv; return m; });
+    });
     fetch('/api/players/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: fresh.map((p) => ({ ...p, followedAt: '' })) }) })
       .then((r) => r.json())
       .then((d) => {
@@ -332,7 +353,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
     const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
-    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p))
+    // Saves premium: the ninth-inning ROLE carries fantasy value the WAR/rate
+    // model can't see. ~40-save pace ≈ +5 (an elite closer's auction slice);
+    // fades linearly below.
+    const savesPv = Math.min(5, (savesPace[p.id] ?? 0) / 8);
+    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPv)
       * injuryMultOf(p)
       * ptDockEff(p)
       * jobSecurity(p)
@@ -386,7 +411,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // is the age-faded ceiling, which lands below his PV, as it should.
     const war = metrics[p.id]?.war ?? 0;
     const sustained = war >= 2.0 ? pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P') : 0;
-    return Math.max(ceiling, sustained);
+    // Closer keeper credit: the saves role is year-to-year volatile, so FV only
+    // banks ~45% of the premium, faded by pitcher aging.
+    const savesFv = Math.min(5, (savesPace[p.id] ?? 0) / 8) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
+    return Math.max(ceiling, sustained) + savesFv;
   };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
@@ -524,7 +552,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -534,7 +562,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
@@ -572,6 +600,26 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         <span className="text-sm leading-none mt-0.5">🧪</span>
         <span><strong>Experimental</strong> — the value model is being actively calibrated and numbers can shift week to week. Treat verdicts as a second opinion, not gospel.</span>
       </div>
+      <div className="flex justify-center mb-3">
+        <div className="inline-flex rounded-md overflow-hidden border border-zinc-700">
+          <button onClick={() => setTool('trade')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'trade' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>🔀 Trade checker</button>
+          <button onClick={() => setTool('board')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'board' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>📋 Value board</button>
+        </div>
+      </div>
+
+      {tool === 'board' ? (
+        <>
+          <div className="mb-3">
+            <button onClick={() => setShowSettings((v) => !v)}
+              className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer">
+              ⚙ League settings — {settings.teams}-team · {settings.keepers} keepers · {settings.format.toUpperCase()} {showSettings ? '▲' : '▼'}
+            </button>
+          </div>
+          {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
+          <ValueBoard settings={settings} lenses={BUILDS} isFollowing={() => false} />
+        </>
+      ) : (
+      <>
       <div className="relative max-w-xl mb-4">
         <input
           ref={searchRef}
@@ -705,6 +753,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       <p className="text-[11px] text-zinc-600 mt-3">
         <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens. Premium — a work in progress.
       </p>
+      </>
+      )}
     </div>
   );
 }

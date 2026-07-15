@@ -449,6 +449,35 @@ export async function getHitterRegression(sheetId: string): Promise<{ rows: Hitt
   return { rows: Array.from(byKey.values()) };
 }
 
+
+// Value Board: every projected player's raw model inputs + display name, so the
+// client can compute PV/FV/lens grades in bulk against the user's league
+// settings (same computeValue the Trade Checker uses — minus live layers).
+let boardCache: { sheetId: string; at: number; rows: ValueBoardRow[] } | null = null;
+export type ValueBoardRow = { player: string; nameKey: string; isPitcher: boolean } & PremiumMetrics;
+export async function getValueBoardInputs(sheetId: string): Promise<{ rows: ValueBoardRow[] }> {
+  if (boardCache && boardCache.sheetId === sheetId && Date.now() - boardCache.at < 5 * 60_000) {
+    return { rows: boardCache.rows };
+  }
+  const [hitCsv, pitCsv] = await Promise.all([fetchCsvTab(sheetId, HIT_TAB), fetchCsvTab(sheetId, PIT_TAB)]);
+  const rows: ValueBoardRow[] = [];
+  for (const [csv, nameHeader, isPitcher] of [[hitCsv, 'name', false], [pitCsv, 'player', true]] as const) {
+    const metrics = parseTab(csv, nameHeader, isPitcher);
+    // parseTab keys by normalized name — recover the display spelling.
+    const raw = parseCsv(csv);
+    const h = raw[0]?.map((x) => x.trim()) ?? [];
+    const pi = h.findIndex((x) => x.toLowerCase() === nameHeader);
+    const names = new Map<string, string>();
+    if (pi >= 0) for (let r = 1; r < raw.length; r++) {
+      const n = raw[r][pi]?.trim();
+      if (n) { const k = normalizeName(n); if (!names.has(k)) names.set(k, n); }
+    }
+    for (const [key, m] of metrics) rows.push({ player: names.get(key) ?? key, nameKey: key, isPitcher, ...m });
+  }
+  boardCache = { sheetId, at: Date.now(), rows };
+  return { rows };
+}
+
 function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): ScoutingRow[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) return [];
