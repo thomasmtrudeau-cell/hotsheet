@@ -67,7 +67,7 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
                   const friendly = pf < 100; // low run factor = pitcher park
                   return (
                     <Tooltip text={`${r.team} plays ${friendly ? 'pitcher' : 'hitter'}-friendly (park factor ${pf}). His ACTUAL ERA is ${friendly ? 'flattered' : 'inflated'} by the park — the projection is park-neutral, so read the gap with that in mind.`}>
-                      <span className={`text-[10px] px-1 rounded font-sans cursor-help ${friendly ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>🏟{friendly ? '+' : '−'}</span>
+                      <span className={`text-[10px] px-1 rounded font-sans cursor-help ${friendly ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>park{friendly ? '+' : '−'}</span>
                     </Tooltip>
                   );
                 })()}
@@ -133,6 +133,7 @@ function HitList({ title, subtitle, rows, tone, isFollowing }: { title: string; 
 
 export default function RegressionView({ rows, hitters, loading, isPremium, isFollowing }: RegressionViewProps) {
   const [mode, setMode] = useState<'pitchers' | 'hitters'>('pitchers');
+  const [regSide, setRegSide] = useState<'sell' | 'buy'>('buy'); // one full-width list at a time — room for badges
   const [eraCut, setEraCut] = useState(4.3);
   const [gap, setGap] = useState(0.3);
   const [wrcCut, setWrcCut] = useState(100);  // hitters: peak wRC+ ≥
@@ -156,12 +157,14 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         if (typeof s.wGap === 'number') setWGap(s.wGap);
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (s.mode === 'pitchers' || s.mode === 'hitters') setMode(s.mode);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (s.regSide === 'sell' || s.regSide === 'buy') setRegSide(s.regSide);
       }
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, wrcCut, wGap, mode, levels: [...levels] })); } catch { /* ignore */ }
-  }, [eraCut, gap, wrcCut, wGap, mode, levels]);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, wrcCut, wGap, mode, regSide, levels: [...levels] })); } catch { /* ignore */ }
+  }, [eraCut, gap, wrcCut, wGap, mode, regSide, levels]);
 
   const toggleLevel = (l: Level) => setLevels((prev) => {
     const next = new Set(prev);
@@ -230,10 +233,13 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-3">
-        <HitList title="⬆️ Sell high" subtitle="Hitting over their peak projection — running hot" rows={hotBats} tone="sell" isFollowing={isFollowing} />
-        <HitList title="⬇️ Buy low" subtitle="Hitting under their peak projection — room to climb (mind the pre-peak tag)" rows={coldBats} tone="buy" isFollowing={isFollowing} />
+      <div className="flex rounded-lg overflow-hidden border border-zinc-700 w-fit mb-3">
+        <button onClick={() => setRegSide('buy')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'buy' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬇️ Buy low</button>
+        <button onClick={() => setRegSide('sell')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'sell' ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬆️ Sell high</button>
       </div>
+      {regSide === 'sell'
+        ? <HitList title="⬆️ Sell high" subtitle="Hitting over their peak projection — running hot" rows={hotBats} tone="sell" isFollowing={isFollowing} />
+        : <HitList title="⬇️ Buy low" subtitle="Hitting under their peak projection — room to climb (mind the pre-peak tag)" rows={coldBats} tone="buy" isFollowing={isFollowing} />}
       </>
       ) : (
       <>
@@ -264,10 +270,13 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         </div>
       </div>
 
-      <div className="flex flex-col md:flex-row gap-3">
-        <List title="⬆️ Sell high" subtitle="Pitching under their projection — regression up looms" rows={sellHighs} tone="sell" isFollowing={isFollowing} />
-        <List title="⬇️ Buy low" subtitle="Pitching over their projection — bounce-back candidates" rows={buyLows} tone="buy" isFollowing={isFollowing} />
+      <div className="flex rounded-lg overflow-hidden border border-zinc-700 w-fit mb-3">
+        <button onClick={() => setRegSide('buy')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'buy' ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬇️ Buy low</button>
+        <button onClick={() => setRegSide('sell')} className={`px-3 py-1.5 text-sm font-medium cursor-pointer ${regSide === 'sell' ? 'bg-red-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>⬆️ Sell high</button>
       </div>
+      {regSide === 'sell'
+        ? <List title="⬆️ Sell high" subtitle="Pitching under their projection — regression up looms" rows={sellHighs} tone="sell" isFollowing={isFollowing} />
+        : <List title="⬇️ Buy low" subtitle="Pitching over their projection — bounce-back candidates" rows={buyLows} tone="buy" isFollowing={isFollowing} />}
       </>
       )}
     </div>
