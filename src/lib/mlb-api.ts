@@ -2235,3 +2235,31 @@ export async function getTeamGameLog(
       : { date: g.date, opponent: g.opponent, statLine: 'DNP', dnp: true };
   });
 }
+
+// Bulk player → position map across MLB + every MiLB level, from MLB's public
+// players endpoint (same data the free tier already serves). Lets the Value
+// Board show real positions for PROSPECTS that aren't in the MLB auction export
+// (which only covers big-league-relevant guys). Cached 6h — positions are stable.
+let positionCache: { at: number; list: Array<{ name: string; pos: string }> } | null = null;
+export async function getBulkPositions(): Promise<Array<{ name: string; pos: string }>> {
+  if (positionCache && Date.now() - positionCache.at < 6 * 3600_000) return positionCache.list;
+  const season = new Date().getUTCFullYear();
+  const sportIds = [1, 11, 12, 13, 14, 16];
+  const out: Array<{ name: string; pos: string }> = [];
+  await Promise.all(sportIds.map(async (sid) => {
+    try {
+      const d = await cachedFetch<{ people?: Array<{ fullName?: string; primaryPosition?: { abbreviation?: string } }> }>(
+        `${MLB_API}/sports/${sid}/players?season=${season}`, 6 * 3600_000
+      );
+      for (const p of d.people ?? []) {
+        const name = p.fullName;
+        let pos = p.primaryPosition?.abbreviation;
+        if (!name || !pos || pos === 'P') continue;           // pitchers handled elsewhere
+        if (pos === 'LF' || pos === 'CF' || pos === 'RF') pos = 'OF';
+        out.push({ name, pos });
+      }
+    } catch { /* skip this level */ }
+  }));
+  positionCache = { at: Date.now(), list: out };
+  return out;
+}
