@@ -130,6 +130,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   let ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
   if (ageIdx < 0) ageIdx = header.findIndex((h) => h.toLowerCase() === 'age');
   const levelIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
+  const ipgIdx = isPitcher ? header.findIndex((h) => h === 'IP/G') : -1;
   const curWrcIdx = isPitcher ? -1 : header.findIndex((h) => h === 'wRC+ - current year only');
   const curEraIdx = isPitcher ? header.findIndex((h) => h === 'era 20 tbf/g - current year') : -1;
   if (nameIdx < 0) return out;
@@ -177,6 +178,8 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     if (Number.isFinite(age)) m.age = age;
     const mkt = marketBaselineFor(idIdx >= 0 ? cells[idIdx] : undefined);
     if (mkt !== undefined) m.marketBaseline = mkt;
+    if (defIdx >= 0) { const dv = parseFloat(cells[defIdx]); if (Number.isFinite(dv)) m.defRuns = dv; }
+    if (ipgIdx >= 0) { const iv = parseFloat(cells[ipgIdx]); if (Number.isFinite(iv)) m.ipg = iv; }
     // Bake a DEFAULT-settings PV/FV as the payload fallback (position unknown at
     // parse time, so scarcity is neutral here; the client refines it).
     if (m.war !== undefined) {
@@ -484,6 +487,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
       war: round(m.war), peakWrcPlus: m.peakWrcPlus, era20: round(m.era20),
       hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
       age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
+      defRuns: round(m.defRuns), ipg: round(m.ipg),
     });
   }
   boardCache.set(ck, { at: Date.now(), rows });

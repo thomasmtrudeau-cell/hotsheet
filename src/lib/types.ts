@@ -75,6 +75,8 @@ export interface PremiumMetrics {
   sb?: number;
   curWrcPlus?: number;     // current-year wRC+ (hitters)
   curEra20?: number;       // current-year ERA/20 TBF (pitchers)
+  defRuns?: number;        // hitters — raw sheet DEF (runs incl. positional adj) — fantasy strips it from WAR
+  ipg?: number;            // pitchers — sheet IP/G; < 2.01 = reliever role (Jordan's threshold)
   level?: string;          // highest level (for proximity / present-level factor)
   marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
 }

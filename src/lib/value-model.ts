@@ -42,6 +42,8 @@ export interface ValueInputs {
   level?: string;
   marketBaseline?: number; // (auction $ − role's FA line) / DIV, role-correct
   catcherFlex?: boolean;   // catcher who also plays 1B/DH (bat can carry off the dish)
+  defRuns?: number;      // hitters — raw sheet DEF runs (strip from WAR for fantasy)
+  ipg?: number;          // pitchers — sheet IP/G (< 2.01 = reliever role)
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -231,12 +233,21 @@ const FORMAT: Record<ScoringFormat, FormatWeights> = {
 // penalty even though their bat is the whole fantasy point, so we add it back —
 // a good-hitting low-WAR 1B (Schwarber-type) then clears the keeper bar on the
 // bat. Middle-infield/OF WAR translates roughly as-is (scarcity handles those).
-function fantasyWar(war: number, position?: string, catcherFlex?: boolean): number {
+function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRuns?: number): number {
   const p = position ?? '';
+  // Principled rule (when the sheet's raw DEF is available): fantasy pays for
+  // NOTHING on defense — WAR = offense + BsR + DEF, so strip DEF (runs, incl.
+  // positional adjustment) at 9.774 runs/win. One rule replaces the old special
+  // cases: framing-rich catchers (Kirk/Raleigh) deflate, bad-glove mashers and
+  // 1B/DH inflate, exactly as a fantasy league experiences them. Positional
+  // scarcity is handled separately by the league's roster slots. Catchers keep
+  // a small extra haircut for the games-played reality of the position.
+  if (defRuns !== undefined) {
+    const offWar = war - defRuns / 9.774;
+    return p === 'C' ? offWar * (catcherFlex ? 0.97 : 0.93) : offWar;
+  }
+  // Legacy fallbacks when DEF isn't known (e.g. older cached payloads).
   if (p === 'C') return war * (catcherFlex ? 0.92 : 0.80);
-  // Add back the full positional penalty — a 1B/DH's fantasy value IS the bat, so
-  // WAR unfairly deducts ~1-1.25 wins for the spot. A good-hitting 1B thus reads
-  // like the everyday masher he is rather than a low-WAR guy.
   if (p === 'DH') return war + 1.2;
   if (p === '1B') return war + 1.0;
   return war;
@@ -246,7 +257,12 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   if (inp.war === undefined) return { present: 0, future: 0 };
   const fmt = FORMAT[s.format];
   const scar = scarcityMult(inp.position, s);
-  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex);
+  // Reliever role: limited innings cap fantasy production regardless of rate
+  // quality (Mason Miller problem) — win-now docked hard, keeper value keeps
+  // most of the ceiling (an elite RP arm is a rotation-conversion lottery
+  // ticket; the trade view's saves premium adds closer value back on top).
+  const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01;
+  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns);
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
@@ -265,7 +281,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const fantasyFade = inp.isPitcher ? 1 : growth / 3;
   const warTerm = Math.max(0, fWar - bar) * growth;
   const fantasyTerm = fantasy * (fWar > bar ? 1 : 0.15) * fantasyFade;
-  const future = (warTerm + fantasyTerm) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
@@ -276,7 +292,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // below the ceiling, so the peak-WAR component of PRESENT value is discounted by
   // age (a 21-yo's win-now value ≠ his age-27 projection). FV keeps the full
   // ceiling; this only touches what he's worth NOW.
-  const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl * presentMaturity(inp.age);
+  const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl * presentMaturity(inp.age) * (isRp ? 0.55 : 1);
   const mkt = inp.marketBaseline ?? 0;
   // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
   // replace on your roster); win-now production is closer to position-agnostic

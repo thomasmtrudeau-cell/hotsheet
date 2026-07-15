@@ -276,6 +276,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
+      defRuns: m.defRuns, ipg: m.ipg,
     }, settings);
   };
   // Actual playing-time rate (fraction of team games he's appeared in), from the
