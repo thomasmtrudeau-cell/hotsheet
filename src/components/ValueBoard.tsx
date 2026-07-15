@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { computeValue, abilityCurve, LeagueSettings } from '@/lib/value-model';
+import { computeValue, abilityCurve, fantasyRate, LeagueSettings } from '@/lib/value-model';
+import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
 type BoardRow = { player: string; nameKey: string; isPitcher: boolean } & PremiumMetrics;
@@ -78,7 +79,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
         const peakAnnual = computeValue({ ...inputs, age: 27, level: 'MLB' }, settings).present;
         for (let k = 0; k <= 6; k++) seasons.push(k < arr ? 0 : peakAnnual * abilityCurve(age + k, r.isPitcher));
       }
-      const grades: Record<string, number> = { PV: base.present, FV: base.future };
+      const grades: Record<string, number> = { FAN: fantasyRate(inputs, settings), PV: base.present, FV: base.future };
       for (const l of lenses) {
         const wSum = l.weights.reduce((a, b) => a + b, 0);
         const wa = l.weights.reduce((acc, w, k) => acc + w * (seasons[k] ?? 0), 0) / wSum;
@@ -107,8 +108,19 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
     return next.size ? next : prev;
   });
 
+  const COL_HELP: Record<string, string> = {
+    war: 'Peak WAR projection (ScoutTheStatline) — his ceiling season, all-around value.',
+    FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and OV disagree, the gap is the playing-time/asset story.',
+    PV: 'Present value — what he is worth THIS season (base model: WAR + market + level/age).',
+    FV: 'Future/keeper value — peak ceiling × age × distance to the majors.',
+    OV: 'Overall — one asset number: this season counts most, each season out counts less, plus a 45% keeper-ceiling premium. The default ranking.',
+    NOW: 'Win-now build — this season + next, only 15% ceiling premium. Pay for wins today.',
+    CTD: 'Contender build — production over the next ~3 seasons, 30% ceiling premium.',
+    RTL: 'Retooling build — this season conceded; next two seasons carry the weight, 45% ceiling premium.',
+    RBD: 'Rebuild build — first two seasons ignored, seasons +3 to +6 rule, 60% ceiling premium.',
+  };
   const cols: { key: SortKey; label: string }[] = [
-    { key: 'war', label: 'WAR' }, { key: 'PV', label: 'PV' }, { key: 'FV', label: 'FV' },
+    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' }, { key: 'PV', label: 'PV' }, { key: 'FV', label: 'FV' },
     ...lenses.map((l) => ({ key: l.short, label: l.short })),
   ];
 
@@ -164,7 +176,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
               {cols.map((c) => (
                 <th key={c.key} onClick={() => setSort(c.key)}
                   className={`px-2 py-1.5 text-right text-[10px] uppercase tracking-wider cursor-pointer hover:text-zinc-200 ${sort === c.key ? 'text-orange-300' : 'text-zinc-500'}`}>
-                  {c.label}{sort === c.key ? ' ↓' : ''}
+                  <Tooltip text={COL_HELP[c.key] ?? c.label}><span>{c.label}{sort === c.key ? ' ↓' : ''}</span></Tooltip>
                 </th>
               ))}
             </tr>
@@ -180,6 +192,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
                 <td className="px-2 py-1 text-amber-400/80">{r.bucket}</td>
                 <td className="px-2 py-1 text-zinc-500">{r.age !== undefined ? Math.round(r.age) : '—'}</td>
                 <td className="px-2 py-1 text-right font-mono text-amber-300">{(r.war ?? 0).toFixed(1)}</td>
+                <td className={`px-2 py-1 text-right font-mono ${sort === 'FAN' ? 'text-orange-300 font-bold' : 'text-teal-200/80'}`}>{r.grades.FAN.toFixed(1)}</td>
                 <td className="px-2 py-1 text-right font-mono text-blue-200">{r.grades.PV.toFixed(1)}</td>
                 <td className="px-2 py-1 text-right font-mono text-fuchsia-200">{r.grades.FV.toFixed(1)}</td>
                 {lenses.map((l) => (

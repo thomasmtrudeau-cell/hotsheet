@@ -256,6 +256,23 @@ function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRu
   return war;
 }
 
+// Pure park-neutral fantasy PRODUCTION rate — the bat/arm alone, weighted by the
+// league format. No playing time, market, WAR, or age: the "if he plays, what
+// does he produce" anchor. When this and the asset grades disagree, the gap IS
+// the playing-time / market / aging story.
+export function fantasyRate(inp: ValueInputs, s: LeagueSettings): number {
+  const fmt = FORMAT[s.format];
+  if (inp.isPitcher) {
+    if (inp.era20 === undefined) return 0;
+    return Math.max(0, (4.6 - inp.era20) * 2.2);
+  }
+  let f = 0;
+  if (inp.peakWrcPlus !== undefined) f += fmt.wrcFan * Math.max(0, (inp.peakWrcPlus - 90) / 12);
+  if (inp.hr !== undefined) f += fmt.hrFan * (inp.hr / 12);
+  if (inp.sb !== undefined) f += fmt.sbFan * (inp.sb / 12);
+  return f;
+}
+
 export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number } {
   if (inp.war === undefined) return { present: 0, future: 0 };
   const fmt = FORMAT[s.format];
