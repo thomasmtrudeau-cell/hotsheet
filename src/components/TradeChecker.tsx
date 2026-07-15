@@ -40,8 +40,19 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, lens, pending, injured, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; injured?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
+  if (pending) {
+    // Values are still being priced — pulse placeholders instead of misleading 0.0s.
+    return (
+      <div className="flex flex-wrap gap-1 mt-0.5">
+        {['PV', 'FV', lens?.label ?? 'OV'].map((l) => (
+          <span key={l} className={`${chip} bg-zinc-700/40 text-zinc-500 animate-pulse`}>{l} …</span>
+        ))}
+        <span className="text-[10px] text-zinc-600 self-center">pricing…</span>
+      </div>
+    );
+  }
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
       <Tooltip text="PV — present value: what he's worth THIS season. WAR + market base + live production (current rate × actual playing time × park), docked for injury, job security and playing-time threats."><span className={`${chip} bg-blue-500/25 text-blue-200`}>PV {pv.toFixed(1)}</span></Tooltip>
@@ -74,6 +85,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined>>({});
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
+  const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
@@ -115,16 +127,27 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     } catch { setResults([]); }
   }, []);
 
+  // INCREMENTAL loading: only fetch data for players not seen yet and MERGE into
+  // state — adding Bellinger must not re-fetch (and re-wait on) Caballero. A
+  // mounted ref (not a per-effect flag) guards the merges, so an in-flight fetch
+  // for player A isn't dropped when player B is added a second later.
+  const fetchedRef = useRef<Set<number>>(new Set());
+  const mountedRef = useRef(true);
+  useEffect(() => () => { mountedRef.current = false; }, []);
   useEffect(() => {
     const all = [...sideA, ...sideB, ...faFills];
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (all.length === 0) { setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); return; }
-    let active = true;
+    if (all.length === 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); setLoadedIds(new Set());
+      fetchedRef.current = new Set();
+      return;
+    }
+    const fresh = all.filter((p) => !fetchedRef.current.has(p.id));
+    if (fresh.length === 0) return;
+    for (const p of fresh) fetchedRef.current.add(p.id);
     // IL-aware playing-time role per hitter (few players in a trade, so per-player
-    // team-game-log fetches are fine). Docks PV for part-time / bench guys.
-    // Playing-time role only applies in the majors — a minor leaguer's usage
-    // isn't a job-security signal (he's developing), so we never dock prospects.
-    Promise.all(all.filter((p) => p.primaryPosition !== 'P' && p.sportId === 1).map(async (p) => {
+    // team-game-log fetches are fine). Majors-only — never dock prospects.
+    Promise.all(fresh.filter((p) => p.primaryPosition !== 'P' && p.sportId === 1).map(async (p) => {
       try {
         const r = await fetch(`/api/stats/gamelog?playerId=${p.id}&sportId=${p.sportId}&pitcher=0&teamId=${p.currentTeam.id}`);
         const d = await r.json();
@@ -136,25 +159,30 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         return [p.id, role] as const;
       } catch { return [p.id, null] as const; }
     })).then((pairs) => {
-      if (!active) return;
-      const m: Record<number, { label: string; factor: number; rate: number }> = {};
-      for (const [id, role] of pairs) if (role) m[id] = role;
-      setRoles(m);
+      if (!mountedRef.current) return;
+      setRoles((prev) => {
+        const m = { ...prev };
+        for (const [id, role] of pairs) if (role) m[id] = role;
+        return m;
+      });
     });
-    fetch('/api/war', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: all }) })
-      .then((r) => r.json()).then((d) => { if (active) setMetrics(d && typeof d === 'object' ? d : {}); }).catch(() => active && setMetrics({}));
-    fetch('/api/players/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: all.map((p) => ({ ...p, followedAt: '' })) }) })
+    fetch('/api/war', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: fresh }) })
       .then((r) => r.json())
       .then((d) => {
-        if (!active || !Array.isArray(d)) return;
-        const inj: Record<number, InjuryStatus | undefined> = {};
-        const pr: Record<number, { name: string; position: string; kind?: 'il' | 'depth' } | undefined> = {};
-        const bs: Record<number, string | undefined> = {};
-        for (const p of d) { inj[p.id] = p.injury; pr[p.id] = p.playingTimeRisk; bs[p.id] = p.batSide; }
-        setInjuries(inj); setPtRisk(pr); setBatSides(bs);
+        if (!mountedRef.current) return;
+        if (d && typeof d === 'object') setMetrics((prev) => ({ ...prev, ...d }));
+        setLoadedIds((prev) => new Set([...prev, ...fresh.map((p) => p.id)]));
+      })
+      .catch(() => mountedRef.current && setLoadedIds((prev) => new Set([...prev, ...fresh.map((p) => p.id)])));
+    fetch('/api/players/refresh', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ players: fresh.map((p) => ({ ...p, followedAt: '' })) }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!mountedRef.current || !Array.isArray(d)) return;
+        setInjuries((prev) => { const m = { ...prev }; for (const p of d) m[p.id] = p.injury; return m; });
+        setPtRisk((prev) => { const m = { ...prev }; for (const p of d) m[p.id] = p.playingTimeRisk; return m; });
+        setBatSides((prev) => { const m = { ...prev }; for (const p of d) m[p.id] = p.batSide; return m; });
       })
       .catch(() => {});
-    return () => { active = false; };
   }, [sideA, sideB, faFills]);
 
   if (!isPremium) return <PremiumTeaser context="trade" />;
@@ -496,7 +524,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -506,7 +534,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} injured={Boolean(injuries[p.id])} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
