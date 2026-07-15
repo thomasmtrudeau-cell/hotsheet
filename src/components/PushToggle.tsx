@@ -114,6 +114,7 @@ export default function PushToggle() {
         <div className="absolute right-0 mt-2 w-64 z-50 bg-zinc-900 border border-zinc-700 rounded-lg shadow-xl p-3 text-left">
           <div className="text-xs font-semibold text-zinc-200 mb-1">Background alerts</div>
           <p className="text-[11px] text-zinc-500 mb-2">Call-ups, IL moves, and roster changes for your players — pushed even when Hot Sheet is closed.</p>
+          <p className="text-[11px] text-zinc-400 mb-2">Your alerts always collect in the <strong>🔔 bell</strong> here in the app either way — this toggle only adds system pop-ups for when the tab is closed.</p>
           {needsInstall ? (
             <p className="text-[11px] text-amber-300/90 leading-relaxed">
               On iPhone/iPad, first add Hot Sheet to your home screen: tap the Share button <span aria-hidden>⎋</span>, then <strong>Add to Home Screen</strong>. Open it from there to enable notifications.
