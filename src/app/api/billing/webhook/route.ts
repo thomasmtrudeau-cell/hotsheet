@@ -29,7 +29,13 @@ export async function POST(request: NextRequest) {
       const userId = session.client_reference_id;
       const customerId = typeof session.customer === 'string' ? session.customer : session.customer?.id;
       if (userId) {
-        await sb.from('profiles').update({ tier: 'premium', stripe_customer_id: customerId ?? null, subscription_status: 'active' }).eq('id', userId);
+        // Resilient write: if the billing migration hasn't been run yet (no
+        // stripe_customer_id column), still flip the tier — degrade, never fail.
+        const { error } = await sb.from('profiles').update({ tier: 'premium', stripe_customer_id: customerId ?? null, subscription_status: 'active' }).eq('id', userId);
+        if (error) {
+          console.error('full profile update failed (run supabase/migrations/20260715_billing.sql):', error.message);
+          await sb.from('profiles').update({ tier: 'premium' }).eq('id', userId);
+        }
       }
       // Referral attribution: which promotion code (if any) was used?
       try {
