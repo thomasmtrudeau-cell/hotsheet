@@ -46,8 +46,8 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
     setLoading(true); setPitchersLoading(true);
     fetch('/api/values?side=bat')
       .then((r) => r.json())
-      .then((d) => setRows(Array.isArray(d?.rows) ? d.rows : []))
-      .catch(() => setRows([]))
+      .then((d) => { if (Array.isArray(d?.rows)) setRows((prev) => [...d.rows, ...prev.filter((x) => x.isPitcher)]); })
+      .catch(() => {})
       .finally(() => setLoading(false));
     fetch('/api/values?side=pit')
       .then((r) => r.json())
