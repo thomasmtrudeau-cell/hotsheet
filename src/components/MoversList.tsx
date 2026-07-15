@@ -44,15 +44,16 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
       </div>
     );
   }
-  // Group by mover date, newest date first. Items arrive WAR-sorted from the API,
-  // so within each date the top-WAR guys stay on top (for everyone — the order is
-  // WAR-derived even when the number itself is premium-hidden).
+  // Group by mover date, newest date first. Premium sees the WAR-derived order
+  // (top guys first, as the API sends them); free users get ALPHABETICAL — the
+  // ranking itself is part of the premium layer.
   const byDate = new Map<string, CallUp[]>();
   for (const c of items) {
     const k = c.calledUpDate || 'unknown';
     if (!byDate.has(k)) byDate.set(k, []);
     byDate.get(k)!.push(c);
   }
+  if (!isPremium) for (const arr of byDate.values()) arr.sort((a, b) => a.fullName.localeCompare(b.fullName));
   const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
 
   const controls = (
@@ -140,7 +141,7 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                 )}
               </div>
               <div className="text-[11px] text-zinc-500 truncate">
-                {c.primaryPosition} · {c.currentTeam.name} · {verb} {fmtDate(c.calledUpDate)}
+                {c.primaryPosition} · {c.currentTeam.name} · {c.sportId === 1 ? 'called up' : 'promoted'} {fmtDate(c.calledUpDate)}
               </div>
               {(c.priorLine || c.last30Line) && (
                 <div className="text-[11px] text-zinc-400 truncate mt-0.5">

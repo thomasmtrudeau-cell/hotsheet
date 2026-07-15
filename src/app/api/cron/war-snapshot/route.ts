@@ -16,6 +16,24 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
     }
   }
+  // Piggybacked housekeeping: expire time-boxed premium comps. A comp sets
+  // app_metadata.premium_until on the auth user (no schema change); when it
+  // passes, tier flips back to free. Runs here because this cron already fires
+  // several times a day. Non-fatal on error.
+  try {
+    const sb0 = createServiceClient();
+    const { data: userList } = await sb0.auth.admin.listUsers({ perPage: 1000 });
+    const now = Date.now();
+    for (const u of userList?.users ?? []) {
+      const until = (u.app_metadata as Record<string, unknown> | null)?.premium_until;
+      if (typeof until === 'string' && Date.parse(until) < now) {
+        await sb0.from('profiles').update({ tier: 'free' }).eq('id', u.id);
+        await sb0.auth.admin.updateUserById(u.id, { app_metadata: { ...u.app_metadata, premium_until: null } });
+        console.log(`comp expired -> free: ${u.email}`);
+      }
+    }
+  } catch (e) { console.error('comp-expiry sweep failed:', e); }
+
   const sheetId = process.env.WAR_SHEET_ID;
   if (!sheetId) return NextResponse.json({ skipped: 'no WAR_SHEET_ID' });
 

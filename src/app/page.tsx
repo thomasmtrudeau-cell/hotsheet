@@ -158,20 +158,18 @@ export default function Home() {
 
   // Fetch the pre-built discovery lists when their view is opened.
   useEffect(() => {
-    if (activeGroup === CALLUPS_VIEW) {
+    if (activeGroup === CALLUPS_VIEW || activeGroup === PROMOTIONS_VIEW) {
+      // One consolidated movers feed: MLB call-ups + MiLB level jumps.
       setCallupsLoading(true);
-      fetch(`/api/callups?date=${getDateString(0)}&days=${moversDays}`)
-        .then((r) => r.json())
-        .then((d) => setCallups(Array.isArray(d) ? d : []))
-        .catch(() => setCallups([]))
+      Promise.all([
+        fetch(`/api/callups?date=${getDateString(0)}&days=${moversDays}`).then((r) => r.json()).catch(() => []),
+        fetch(`/api/promotions?date=${getDateString(0)}&days=${moversDays}`).then((r) => r.json()).catch(() => []),
+      ])
+        .then(([cu, pr]) => {
+          setCallups(Array.isArray(cu) ? cu : []);
+          setPromotions(Array.isArray(pr) ? pr : []);
+        })
         .finally(() => setCallupsLoading(false));
-    } else if (activeGroup === PROMOTIONS_VIEW) {
-      setPromotionsLoading(true);
-      fetch(`/api/promotions?date=${getDateString(0)}&days=${moversDays}`)
-        .then((r) => r.json())
-        .then((d) => setPromotions(Array.isArray(d) ? d : []))
-        .catch(() => setPromotions([]))
-        .finally(() => setPromotionsLoading(false));
     } else if (activeGroup === RISERS_VIEW) {
       setRisersLoading(true);
       fetch(`/api/risers?window=${risersWindow}`)
@@ -706,35 +704,19 @@ export default function Home() {
         </div>
       ) : isDiscovery && premiumPending ? (
         <div className="flex justify-center py-16"><div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" /></div>
-      ) : isCallups ? (
-        !isPremium ? <PremiumTeaser context="callups" /> :
+      ) : isCallups || isPromotions ? (
         <MoversList
-          items={callups}
+          items={[...callups, ...promotions]}
           onFollow={follow}
           isFollowing={(id) => players.some((p) => p.id === id)}
           loading={callupsLoading}
-          caption={`MLB call-ups in the last ${moversDays} day${moversDays === 1 ? '' : 's'} · tap Follow to add`}
-          emptyText={`No MLB call-ups in the last ${moversDays} day${moversDays === 1 ? '' : 's'}`}
-          verb="called up"
-          days={moversDays}
-          onDays={setMoversDays}
+          caption={`MLB call-ups + MiLB promotions in the last ${moversDays} day${moversDays === 1 ? '' : 's'} · tap Follow to add${isPremium ? '' : ' · alphabetical — premium sorts by upside (WAR) with scouting badges'}`}
+          emptyText={`No call-ups or promotions in the last ${moversDays} day${moversDays === 1 ? '' : 's'}`}
+          verb="moves"
           showWar={showPremium}
           isPremium={isPremium}
-        />
-      ) : isPromotions ? (
-        !isPremium ? <PremiumTeaser context="promotions" /> :
-        <MoversList
-          items={promotions}
-          onFollow={follow}
-          isFollowing={(id) => players.some((p) => p.id === id)}
-          loading={promotionsLoading}
-          caption={`MiLB players promoted a level in the last ${moversDays} day${moversDays === 1 ? '' : 's'} · tap Follow to add`}
-          emptyText={`No MiLB promotions in the last ${moversDays} day${moversDays === 1 ? '' : 's'}`}
-          verb="promoted"
           days={moversDays}
           onDays={setMoversDays}
-          showWar={showPremium}
-          isPremium={isPremium}
         />
       ) : isRisers ? (
         <RisersView

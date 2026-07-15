@@ -95,16 +95,7 @@ export default function GroupBar({
         }`}
         title="MLB players called up in the last 7 days"
       >
-        🆕 Call-Ups
-      </button>
-      <button
-        onClick={() => onSelect(PROMOTIONS_VIEW)}
-        className={`shrink-0 px-3 py-1.5 rounded-full text-xs font-medium transition-colors cursor-pointer ${
-          activeGroup === PROMOTIONS_VIEW ? 'bg-amber-600 text-white' : 'bg-amber-500/10 text-amber-300 hover:bg-amber-500/20'
-        }`}
-        title="MiLB players promoted a level in the last 7 days"
-      >
-        ⬆️ Promoted
+        ⬆️ Call-Ups & Promotions
       </button>
       {/* Visible to everyone; non-premium users see the premium preview inside. */}
       <button
