@@ -38,13 +38,21 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const [minWar, setMinWar] = useState(1.5);
   const [sort, setSort] = useState<SortKey>('OV');
 
+  const [pitchersLoading, setPitchersLoading] = useState(false);
   useEffect(() => {
-    setLoading(true);
-    fetch('/api/values')
+    // Hitters render immediately; pitchers stream in behind (each side is its
+    // own sheet-tab fetch — combined they made a ~20s cold load).
+    setLoading(true); setPitchersLoading(true);
+    fetch('/api/values?side=bat')
       .then((r) => r.json())
       .then((d) => setRows(Array.isArray(d?.rows) ? d.rows : []))
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
+    fetch('/api/values?side=pit')
+      .then((r) => r.json())
+      .then((d) => { if (Array.isArray(d?.rows)) setRows((prev) => [...prev.filter((x) => !x.isPitcher), ...d.rows]); })
+      .catch(() => {})
+      .finally(() => setPitchersLoading(false));
   }, []);
 
   const graded = useMemo(() => {
@@ -104,7 +112,12 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   ];
 
   if (loading && rows.length === 0) {
-    return <div className="flex justify-center py-16"><div className="w-6 h-6 border-2 border-zinc-700 border-t-orange-500 rounded-full animate-spin" /></div>;
+    return (
+      <div className="flex flex-col items-center gap-3 py-16">
+        <div className="w-6 h-6 border-2 border-zinc-700 border-t-orange-500 rounded-full animate-spin" />
+        <p className="text-[11px] text-zinc-500">Pricing every projected player (thousands of them) — the first load can take ~10s, then it&apos;s cached.</p>
+      </div>
+    );
   }
 
   return (
@@ -136,7 +149,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
           WAR ≥ <span className="font-mono font-bold text-amber-300 w-8">{minWar.toFixed(1)}</span>
           <input type="range" min={0} max={5} step={0.1} value={minWar} onChange={(e) => setMinWar(parseFloat(e.target.value))} className="accent-amber-500 w-32 cursor-pointer" />
         </label>
-        <span className="text-zinc-600 ml-auto">{shown.length} shown{shown.length === 300 ? ' (top 300)' : ''}</span>
+        <span className="text-zinc-600 ml-auto">{pitchersLoading && <span className="text-amber-400/80 mr-2">pitchers loading…</span>}{shown.length} shown{shown.length === 300 ? ' (top 300)' : ''}</span>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-zinc-800">

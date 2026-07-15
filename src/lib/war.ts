@@ -453,28 +453,40 @@ export async function getHitterRegression(sheetId: string): Promise<{ rows: Hitt
 // Value Board: every projected player's raw model inputs + display name, so the
 // client can compute PV/FV/lens grades in bulk against the user's league
 // settings (same computeValue the Trade Checker uses — minus live layers).
-let boardCache: { sheetId: string; at: number; rows: ValueBoardRow[] } | null = null;
+const boardCache = new Map<string, { at: number; rows: ValueBoardRow[] }>();
 export type ValueBoardRow = { player: string; nameKey: string; isPitcher: boolean } & PremiumMetrics;
-export async function getValueBoardInputs(sheetId: string): Promise<{ rows: ValueBoardRow[] }> {
-  if (boardCache && boardCache.sheetId === sheetId && Date.now() - boardCache.at < 5 * 60_000) {
-    return { rows: boardCache.rows };
+// side: 'bat' | 'pit' — one tab per request so the client can render hitters
+// immediately and stream pitchers in behind (a combined cold fetch took ~20s).
+export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'): Promise<{ rows: ValueBoardRow[] }> {
+  const ck = `${sheetId}|${side}`;
+  const hit = boardCache.get(ck);
+  if (hit && Date.now() - hit.at < 5 * 60_000) return { rows: hit.rows };
+  const isPitcher = side === 'pit';
+  const nameHeader = isPitcher ? 'player' : 'name';
+  const csv = await fetchCsvTab(sheetId, isPitcher ? PIT_TAB : HIT_TAB);
+  const metrics = parseTab(csv, nameHeader, isPitcher);
+  // parseTab keys by normalized name — recover the display spelling.
+  const raw = parseCsv(csv);
+  const h = raw[0]?.map((x) => x.trim()) ?? [];
+  const pi = h.findIndex((x) => x.toLowerCase() === nameHeader);
+  const names = new Map<string, string>();
+  if (pi >= 0) for (let r = 1; r < raw.length; r++) {
+    const n = raw[r][pi]?.trim();
+    if (n) { const k = normalizeName(n); if (!names.has(k)) names.set(k, n); }
   }
-  const [hitCsv, pitCsv] = await Promise.all([fetchCsvTab(sheetId, HIT_TAB), fetchCsvTab(sheetId, PIT_TAB)]);
+  const round = (v?: number) => (v === undefined ? undefined : Math.round(v * 1000) / 1000);
   const rows: ValueBoardRow[] = [];
-  for (const [csv, nameHeader, isPitcher] of [[hitCsv, 'name', false], [pitCsv, 'player', true]] as const) {
-    const metrics = parseTab(csv, nameHeader, isPitcher);
-    // parseTab keys by normalized name — recover the display spelling.
-    const raw = parseCsv(csv);
-    const h = raw[0]?.map((x) => x.trim()) ?? [];
-    const pi = h.findIndex((x) => x.toLowerCase() === nameHeader);
-    const names = new Map<string, string>();
-    if (pi >= 0) for (let r = 1; r < raw.length; r++) {
-      const n = raw[r][pi]?.trim();
-      if (n) { const k = normalizeName(n); if (!names.has(k)) names.set(k, n); }
-    }
-    for (const [key, m] of metrics) rows.push({ player: names.get(key) ?? key, nameKey: key, isPitcher, ...m });
+  for (const [key, m] of metrics) {
+    // Slim payload: only the fields the board consumes, rounded (the full
+    // metrics object with tool grades etc. tripled the JSON size).
+    rows.push({
+      player: names.get(key) ?? key, nameKey: key, isPitcher,
+      war: round(m.war), peakWrcPlus: m.peakWrcPlus, era20: round(m.era20),
+      hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
+      age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
+    });
   }
-  boardCache = { sheetId, at: Date.now(), rows };
+  boardCache.set(ck, { at: Date.now(), rows });
   return { rows };
 }
 
