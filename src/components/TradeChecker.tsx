@@ -66,7 +66,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, risk, role
       {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
       {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
       {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
-      {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected full-season saves at his current pace — the ninth-inning role carries fantasy value on its own.">🧯 ~{saves} SV</span>}
+      {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected full-season saves at his current pace — the ninth-inning role carries fantasy value on its own. The PV credit is risk-adjusted: a closer with a poor ERA/20 projection is one bad stretch from losing the job (or being traded into a setup role).">🧯 ~{saves} SV</span>}
       {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡💪{m.dual === 'double-plus' ? '40+' : '30+'}</span>}
       {m && !isPitcher && !m.dual && m.power && <span className={`${chip} bg-amber-500/20 text-amber-200`}>💪{m.power === 'double-plus' ? '++' : '+'}</span>}
       {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
@@ -349,15 +349,26 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // a light "currently out" hedge, not a role loss. Shared by PV and the timeline
   // projection (which un-docks it for future healthy seasons).
   const injuryMultOf = (p: SearchResult) => (injuries[p.id] ? 0.6 + 0.35 * entrench(p) : 1);
+  // Saves premium, risk-adjusted: the ninth-inning role carries value the
+  // WAR/rate model can't see — but a closer with a POOR run-prevention
+  // projection is a blown-save streak from losing the job (or getting traded
+  // into a setup role), so the premium fades as the projected ERA/20 climbs.
+  // Elite (≤3.4) keeps 100%; ~4.2 keeps ~80%; a 5.1-projection guy keeps ~57%.
+  const savesPremium = (p: SearchResult) => {
+    const pace = savesPace[p.id] ?? 0;
+    if (pace <= 0) return 0;
+    const m = metrics[p.id];
+    const era = m?.curEra20 !== undefined && m?.era20 !== undefined
+      ? 0.5 * m.era20 + 0.5 * m.curEra20 // current-year struggles raise the risk
+      : m?.era20;
+    const security = era === undefined ? 0.8 : Math.max(0.5, Math.min(1, 1 - Math.max(0, era - 3.4) * 0.25));
+    return Math.min(5, pace / 8) * security;
+  };
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
     const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
-    // Saves premium: the ninth-inning ROLE carries fantasy value the WAR/rate
-    // model can't see. ~40-save pace ≈ +5 (an elite closer's auction slice);
-    // fades linearly below.
-    const savesPv = Math.min(5, (savesPace[p.id] ?? 0) / 8);
-    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPv)
+    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPremium(p))
       * injuryMultOf(p)
       * ptDockEff(p)
       * jobSecurity(p)
@@ -412,8 +423,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const war = metrics[p.id]?.war ?? 0;
     const sustained = war >= 2.0 ? pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P') : 0;
     // Closer keeper credit: the saves role is year-to-year volatile, so FV only
-    // banks ~45% of the premium, faded by pitcher aging.
-    const savesFv = Math.min(5, (savesPace[p.id] ?? 0) / 8) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
+    // banks ~45% of the (risk-adjusted) premium, faded by pitcher aging.
+    const savesFv = savesPremium(p) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
     return Math.max(ceiling, sustained) + savesFv;
   };
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
