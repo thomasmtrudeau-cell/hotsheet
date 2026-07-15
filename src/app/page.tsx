@@ -122,6 +122,7 @@ export default function Home() {
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
   const [promotionsLoading, setPromotionsLoading] = useState(false);
+  const [moversDays, setMoversDays] = useState(7); // Call-Ups/Promoted window (1–14 days)
   const [risers, setRisers] = useState<Riser[]>([]);
   const [risersWindow, setRisersWindow] = useState(7);
   const [risersLoading, setRisersLoading] = useState(false);
@@ -157,14 +158,14 @@ export default function Home() {
   useEffect(() => {
     if (activeGroup === CALLUPS_VIEW) {
       setCallupsLoading(true);
-      fetch(`/api/callups?date=${getDateString(0)}`)
+      fetch(`/api/callups?date=${getDateString(0)}&days=${moversDays}`)
         .then((r) => r.json())
         .then((d) => setCallups(Array.isArray(d) ? d : []))
         .catch(() => setCallups([]))
         .finally(() => setCallupsLoading(false));
     } else if (activeGroup === PROMOTIONS_VIEW) {
       setPromotionsLoading(true);
-      fetch(`/api/promotions?date=${getDateString(0)}`)
+      fetch(`/api/promotions?date=${getDateString(0)}&days=${moversDays}`)
         .then((r) => r.json())
         .then((d) => setPromotions(Array.isArray(d) ? d : []))
         .catch(() => setPromotions([]))
@@ -191,7 +192,7 @@ export default function Home() {
         .catch(() => setScouting([]))
         .finally(() => setScoutingLoading(false));
     }
-  }, [activeGroup, risersWindow]);
+  }, [activeGroup, risersWindow, moversDays]);
 
   // Player count per group, for the GroupBar pills.
   const groupCounts = useMemo(() => {
@@ -695,9 +696,11 @@ export default function Home() {
           onFollow={follow}
           isFollowing={(id) => players.some((p) => p.id === id)}
           loading={callupsLoading}
-          caption="MLB call-ups in the last 7 days · tap Follow to add"
-          emptyText="No MLB call-ups in the last 7 days"
+          caption={`MLB call-ups in the last ${moversDays} day${moversDays === 1 ? '' : 's'} · tap Follow to add`}
+          emptyText={`No MLB call-ups in the last ${moversDays} day${moversDays === 1 ? '' : 's'}`}
           verb="called up"
+          days={moversDays}
+          onDays={setMoversDays}
           showWar={showPremium}
           isPremium={isPremium}
         />
@@ -708,9 +711,11 @@ export default function Home() {
           onFollow={follow}
           isFollowing={(id) => players.some((p) => p.id === id)}
           loading={promotionsLoading}
-          caption="MiLB players promoted a level in the last 7 days · tap Follow to add"
-          emptyText="No MiLB promotions in the last 7 days"
+          caption={`MiLB players promoted a level in the last ${moversDays} day${moversDays === 1 ? '' : 's'} · tap Follow to add`}
+          emptyText={`No MiLB promotions in the last ${moversDays} day${moversDays === 1 ? '' : 's'}`}
           verb="promoted"
+          days={moversDays}
+          onDays={setMoversDays}
           showWar={showPremium}
           isPremium={isPremium}
         />

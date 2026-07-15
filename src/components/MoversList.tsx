@@ -13,6 +13,8 @@ interface MoversListProps {
   verb: string;      // "called up" | "promoted"
   showWar?: boolean; // honor the premium metrics toggle (default true)
   isPremium?: boolean; // premium sees real numbers; everyone else a locked chip
+  days?: number;              // active date window (1–14)
+  onDays?: (d: number) => void; // change the window
 }
 
 function fmtDate(d: string): string {
@@ -34,7 +36,7 @@ function levelBadgeClass(sportId: number): string {
   return 'bg-zinc-500/20 text-zinc-300';
 }
 
-export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true, isPremium = false }: MoversListProps) {
+export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true, isPremium = false, days, onDays }: MoversListProps) {
   if (loading && items.length === 0) {
     return (
       <div className="flex justify-center py-16">
@@ -42,14 +44,45 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
       </div>
     );
   }
+  // Group by mover date, newest date first. Items arrive WAR-sorted from the API,
+  // so within each date the top-WAR guys stay on top (for everyone — the order is
+  // WAR-derived even when the number itself is premium-hidden).
+  const byDate = new Map<string, CallUp[]>();
+  for (const c of items) {
+    const k = c.calledUpDate || 'unknown';
+    if (!byDate.has(k)) byDate.set(k, []);
+    byDate.get(k)!.push(c);
+  }
+  const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
+
+  const controls = (
+    <div className="flex flex-wrap items-center justify-between gap-2 mb-2">
+      <p className="text-[11px] text-zinc-500">{caption}</p>
+      {days !== undefined && onDays && (
+        <label className="flex items-center gap-2 text-[11px] text-zinc-400">
+          Last <span className="font-mono font-bold text-zinc-200 w-7 text-center">{days}D</span>
+          <input type="range" min={1} max={14} step={1} value={days} onChange={(e) => onDays(parseInt(e.target.value, 10))} className="accent-blue-500 w-28 cursor-pointer" />
+        </label>
+      )}
+    </div>
+  );
+
   if (items.length === 0) {
-    return <div className="text-center py-12 text-sm text-zinc-500">{emptyText}</div>;
+    return <div>{controls}<div className="text-center py-12 text-sm text-zinc-500">{emptyText}</div></div>;
   }
 
   return (
     <div className="space-y-1.5">
-      <p className="text-[11px] text-zinc-500 mb-2">{caption}</p>
-      {items.map((c) => {
+      {controls}
+      {dates.map((d) => (
+        <div key={d}>
+          <div className="flex items-center gap-2 mt-3 mb-1.5 first:mt-0">
+            <span className="text-[11px] font-semibold text-zinc-400">{fmtDate(d)}</span>
+            <span className="text-[10px] text-zinc-600">{byDate.get(d)!.length} {verb}</span>
+            <span className="flex-1 border-t border-zinc-800" />
+          </div>
+          <div className="space-y-1.5">
+          {byDate.get(d)!.map((c) => {
         const following = isFollowing(c.id);
         return (
           <div
@@ -140,6 +173,9 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
           </div>
         );
       })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }

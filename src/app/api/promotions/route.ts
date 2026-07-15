@@ -7,8 +7,9 @@ import { createClient } from '@/lib/supabase/server';
 export async function GET(request: NextRequest) {
   try {
     const date = request.nextUrl.searchParams.get('date') || new Date().toISOString().slice(0, 10);
+    const days = Math.min(14, Math.max(1, Number(request.nextUrl.searchParams.get('days')) || 7));
     const sheetId = process.env.WAR_SHEET_ID;
-    const list = await getPromotionsList(date, 7, sheetId);
+    const list = await getPromotionsList(date, days, sheetId);
 
     let premium = false;
     if (sheetId) {

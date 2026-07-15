@@ -6,9 +6,9 @@ import { homeParkMultiplier } from '@/lib/parks';
 import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
+import Tooltip from './Tooltip';
 
 const SETTINGS_KEY = 'hotsheet_league_settings';
-const BUILD_KEY = 'hotsheet_build_lens';
 // Build lenses. Every player already has a per-season value projection (k=0 is THIS
 // season = his live PV; future seasons follow the age curve, injuries rebound,
 // prospects ramp in at arrival). A lens scores him as a weighted AVERAGE of those
@@ -44,9 +44,9 @@ function Chips({ m, isPitcher, pv, fv, lens, injured, risk, role }: { m?: Premiu
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   return (
     <div className="flex flex-wrap gap-1 mt-0.5">
-      <span className={`${chip} bg-blue-500/25 text-blue-200`} title="Present value — win-now">PV {pv.toFixed(1)}</span>
-      <span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`} title="Future value — keeper/dynasty">FV {fv.toFixed(1)}</span>
-      {lens && <span className={`${chip} bg-orange-500/25 text-orange-200`} title={lens.title}>{lens.label} {lens.value.toFixed(1)}</span>}
+      <Tooltip text="PV — present value: what he's worth THIS season. WAR + market base + live production (current rate × actual playing time × park), docked for injury, job security and playing-time threats."><span className={`${chip} bg-blue-500/25 text-blue-200`}>PV {pv.toFixed(1)}</span></Tooltip>
+      <Tooltip text="FV — future/keeper value: his peak ceiling × age × distance to the majors, on the same scale as PV. Aging vets fade below their PV; young stars carry big FV."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
+      {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
       {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title="On the injured list">IL</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
@@ -90,15 +90,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         // eslint-disable-next-line react-hooks/set-state-in-effect
         setSettings({ ...DEFAULT_SETTINGS, ...s, slots: { ...DEFAULT_SETTINGS.slots, ...(s.slots ?? {}) } });
       }
-      const b = localStorage.getItem(BUILD_KEY);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      if (b && BUILDS.some((x) => x.key === b)) setBuildKey(b);
     } catch { /* ignore */ }
   }, []);
-  const updateBuild = useCallback((k: string) => {
-    setBuildKey(k);
-    try { localStorage.setItem(BUILD_KEY, k); } catch { /* ignore */ }
-  }, []);
+  // Deliberately NOT persisted — the lens always starts on Overall so the default
+  // verdict is the neutral one; switch per-trade as needed.
+  const updateBuild = useCallback((k: string) => setBuildKey(k), []);
   const updateSettings = useCallback((s: LeagueSettings) => {
     setSettings(s);
     try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* ignore */ }
@@ -467,7 +463,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     <div className="flex-1 min-w-0 rounded-lg border border-zinc-800 p-3">
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-zinc-300">You {side === 'A' ? 'get' : 'give'}</span>
-        <span className="text-[11px] font-bold"><span className="text-blue-200">PV {sumPv(players, side).toFixed(1)}</span> · <span className="text-fuchsia-200">FV {sumFv(players, side).toFixed(1)}</span> · <span className="text-orange-300">{build.short} {sumLens(players, side).toFixed(1)}</span></span>
+        <span className="text-[11px] font-bold inline-flex gap-1">
+          <Tooltip text="Total present (win-now) value on this side."><span className="text-blue-200">PV {sumPv(players, side).toFixed(1)}</span></Tooltip> ·
+          <Tooltip text="Total future (keeper) value on this side."><span className="text-fuchsia-200">FV {sumFv(players, side).toFixed(1)}</span></Tooltip> ·
+          <Tooltip text={lensTitle}><span className="text-orange-300">{build.short} {sumLens(players, side).toFixed(1)}</span></Tooltip>
+        </span>
       </div>
       {players.length === 0 && !showFa && !showTheoretical ? (
         <p className="text-[11px] text-zinc-600 py-4 text-center">Search above, then tap <strong>+{side}</strong>.</p>
@@ -571,37 +571,39 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       </div>
       {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
-      {(sideA.length > 0 || sideB.length > 0) && (() => {
-        const bigger = Math.max(lensA, lensB, 0.1);
-        const fair = Math.abs(lensDiff) < 0.08 * bigger || Math.abs(lensDiff) < 0.5;
-        const verdictColor = fair ? 'text-zinc-200' : lensDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
-        const verdict = fair ? 'Fair trade' : lensDiff > 0 ? `Favors you +${lensDiff.toFixed(1)}` : `Favors them +${(-lensDiff).toFixed(1)}`;
-        return (
-        <div className="mb-4">
-          <div className="flex justify-center mb-2">
-            <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season + next, contender = the next few, retooling = next year onward, rebuild = 2–3+ years out).">
-              {BUILDS.map((b) => (
-                <button key={b.key} onClick={() => updateBuild(b.key)}
-                  className={`px-2.5 py-1 text-[11px] cursor-pointer ${buildKey === b.key ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                  {b.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="text-center">
-            <div className={`text-lg font-bold ${verdictColor}`}>{verdict}</div>
-            <div className="text-[11px] text-zinc-500">
-              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span>
-            </div>
-            <div className="text-[11px] text-zinc-600 max-w-xl mx-auto mb-2">{build.blurb}</div>
-          </div>
-          <div className="text-center text-sm flex flex-wrap justify-center gap-x-4">
-            <span className="text-blue-200 font-semibold">{edge(pvDiff, 'Now')}</span>
-            <span className="text-fuchsia-200 font-semibold">{edge(fvDiff, 'Keeper')}</span>
+      {/* Build lens tabs — always visible, so you set your team's posture BEFORE
+          building the trade (starts on Overall every visit). */}
+      <div className="mb-4">
+        <div className="flex justify-center mb-1">
+          <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season + next, contender = the next few, retooling = next year onward, rebuild = 2–3+ years out).">
+            {BUILDS.map((b) => (
+              <button key={b.key} onClick={() => updateBuild(b.key)}
+                className={`px-2.5 py-1 text-[11px] cursor-pointer ${buildKey === b.key ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
+                {b.label}
+              </button>
+            ))}
           </div>
         </div>
-        );
-      })()}
+        <div className="text-center text-[11px] text-zinc-600 max-w-xl mx-auto">{build.blurb}</div>
+        {(sideA.length > 0 || sideB.length > 0) && (() => {
+          const bigger = Math.max(lensA, lensB, 0.1);
+          const fair = Math.abs(lensDiff) < 0.08 * bigger || Math.abs(lensDiff) < 0.5;
+          const verdictColor = fair ? 'text-zinc-200' : lensDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
+          const verdict = fair ? 'Fair trade' : lensDiff > 0 ? `Favors you +${lensDiff.toFixed(1)}` : `Favors them +${(-lensDiff).toFixed(1)}`;
+          return (
+          <div className="text-center mt-2">
+            <div className={`text-lg font-bold ${verdictColor}`}>{verdict}</div>
+            <div className="text-[11px] text-zinc-500 mb-1">
+              {build.label} <span className="text-orange-300/90">{lensA.toFixed(1)}</span> vs <span className="text-zinc-300">{lensB.toFixed(1)}</span>
+            </div>
+            <div className="text-sm flex flex-wrap justify-center gap-x-4">
+              <span className="text-blue-200 font-semibold">{edge(pvDiff, 'Now')}</span>
+              <span className="text-fuchsia-200 font-semibold">{edge(fvDiff, 'Keeper')}</span>
+            </div>
+          </div>
+          );
+        })()}
+      </div>
 
       <div className="flex flex-col md:flex-row gap-3">
         {renderColumn('A', sideA)}
