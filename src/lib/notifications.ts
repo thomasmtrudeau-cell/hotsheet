@@ -65,30 +65,34 @@ export function diffPlayer(prev: FollowedPlayer, next: FollowedPlayer): HotNotif
 
   if (prevRank && nextRank && prevRank !== nextRank) {
     if (nextRank > prevRank) {
+      // A level move that ALSO changes organizations is a trade — say so, don't
+      // let the promotion message swallow it.
+      const traded = next.parentOrgAbbrev && prev.parentOrgAbbrev && next.parentOrgAbbrev !== prev.parentOrgAbbrev
+        ? ` · traded to the ${next.parentOrgAbbrev} org` : '';
       const msg =
         next.sportId === 1
-          ? `Called up to the majors — ${next.currentTeam.name}`
-          : `Promoted to ${levelLabel} — ${next.currentTeam.name}`;
+          ? `Called up to the majors — ${next.currentTeam.name}${traded}`
+          : `Promoted to ${levelLabel} — ${next.currentTeam.name}${traded}`;
       out.push(makeNotification(next, name, 'promoted', `${next.sportId}:${next.currentTeam.id}`, msg));
     } else {
+      const traded = next.parentOrgAbbrev && prev.parentOrgAbbrev && next.parentOrgAbbrev !== prev.parentOrgAbbrev
+        ? ` · traded to the ${next.parentOrgAbbrev} org` : '';
       const msg =
         prev.sportId === 1
-          ? `Sent down to ${levelLabel} — ${next.currentTeam.name}`
-          : `Demoted to ${levelLabel} — ${next.currentTeam.name}`;
+          ? `Sent down to ${levelLabel} — ${next.currentTeam.name}${traded}`
+          : `Demoted to ${levelLabel} — ${next.currentTeam.name}${traded}`;
       out.push(makeNotification(next, name, 'demoted', `${next.sportId}:${next.currentTeam.id}`, msg));
     }
   } else if (prev.currentTeam.id !== next.currentTeam.id) {
-    // Same level, new team — trade or affiliate reassignment.
-    const orgNote =
-      next.parentOrgAbbrev && next.parentOrgAbbrev !== prev.parentOrgAbbrev
-        ? ` (${next.parentOrgAbbrev} org)`
-        : '';
-    out.push(
-      makeNotification(
-        next, name, 'team_change', `${next.currentTeam.id}`,
-        `Now with ${next.currentTeam.name}${orgNote} — was ${prev.currentTeam.name}`
-      )
-    );
+    // Same level, new team. A new ORGANIZATION (MLB team change, or a minor
+    // leaguer whose parent org flipped) = trade/claim/signing — lead with that.
+    const orgChanged = next.sportId === 1
+      ? true
+      : Boolean(next.parentOrgAbbrev && prev.parentOrgAbbrev && next.parentOrgAbbrev !== prev.parentOrgAbbrev);
+    const msg = orgChanged
+      ? `Changed organizations — now with ${next.currentTeam.name}${next.parentOrgAbbrev ? ` (${next.parentOrgAbbrev})` : ''}, was ${prev.currentTeam.name}`
+      : `Now with ${next.currentTeam.name} — was ${prev.currentTeam.name} (affiliate move)`;
+    out.push(makeNotification(next, name, 'team_change', `${next.currentTeam.id}`, msg));
   }
 
   if (prev.injury && !next.injury) {
