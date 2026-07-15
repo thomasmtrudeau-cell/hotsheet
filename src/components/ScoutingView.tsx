@@ -167,7 +167,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
                   {r.isPitcher
                     ? (r.era20 !== undefined && <span className="text-zinc-500">{r.era20.toFixed(2)} ERA/20</span>)
                     : (r.wrcPlus !== undefined && <span className="text-zinc-500">{r.wrcPlus} wRC+</span>)}
-                  <span className="text-amber-300 font-bold w-10 text-right">{r.war.toFixed(1)} WAR</span>
+                  <span className="text-amber-300 font-bold w-16 text-right shrink-0">{r.war.toFixed(1)} WAR</span>
                 </span>
                 {!followed && (
                   <span className="relative inline-flex">

@@ -63,7 +63,7 @@ export default function NotificationBell({ notifications, onOpen, onClear }: Not
       </button>
 
       {open && (
-        <div className="absolute right-0 z-50 mt-1 w-80 bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
+        <div className="absolute right-0 z-50 mt-1 w-80 max-w-[calc(100vw-1.5rem)] bg-zinc-800 border border-zinc-700 rounded-lg shadow-xl overflow-hidden">
           <div className="flex items-center justify-between px-4 py-2.5 border-b border-zinc-700">
             <span className="text-xs font-semibold uppercase tracking-wider text-zinc-400">
               Notifications

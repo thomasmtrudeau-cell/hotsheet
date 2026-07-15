@@ -309,7 +309,7 @@ export async function fetchPremiumMap(
 // a pitcher has thrown at multiple levels we keep the one with the most innings
 // (his primary current role). Cached ~30 min. Season stamped in via `season`.
 const SPORT_LEVEL: Record<number, string> = { 1: 'MLB', 11: 'AAA', 12: 'AA', 13: 'A+', 14: 'A', 16: 'Rk' };
-type ActualStat = { era: number; ip: number; level: string; role: 'SP' | 'RP'; playerId?: number; teamId?: number };
+type ActualStat = { era: number; ip: number; level: string; role: 'SP' | 'RP'; playerId?: number; teamId?: number; team?: string };
 let actualCache: { at: number; season: number; map: Map<string, ActualStat> } | null = null;
 const ACTUAL_TTL = 30 * 60 * 1000;
 async function fetchActualPitcherStats(season: number): Promise<Map<string, ActualStat>> {
@@ -337,7 +337,7 @@ async function fetchActualPitcherStats(season: number): Promise<Map<string, Actu
         if (!cur || ip > cur.ip) byName.set(key, {
           era, ip, level: SPORT_LEVEL[sid],
           role: g > 0 && gs / g < 0.5 ? 'RP' : 'SP',
-          playerId: s?.player?.id, teamId: s?.team?.id,
+          playerId: s?.player?.id, teamId: s?.team?.id, team: s?.team?.name,
         });
       }
     } catch { /* skip this level */ }
@@ -382,7 +382,7 @@ export async function getSpRegression(sheetId: string): Promise<{ rows: Regressi
     if (!a || a.ip < REGRESSION_MIN_IP) continue; // must have real current-year innings
     const stale = idI >= 0 ? isStaleId(c[idI] ?? '') : false;
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
-    byKey.set(key, { nameKey: key, player: name, level: a.level, peakEra20: peak, currentEra20: a.era, delta: a.era - peak, ip: a.ip, role: a.role, playerId: a.playerId, teamId: a.teamId });
+    byKey.set(key, { nameKey: key, player: name, level: a.level, peakEra20: peak, currentEra20: a.era, delta: a.era - peak, ip: a.ip, role: a.role, playerId: a.playerId, teamId: a.teamId, team: a.team });
     keptStale.set(key, stale);
   }
   return { rows: [...byKey.values()] };

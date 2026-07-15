@@ -376,6 +376,7 @@ export interface RegressionRow {
   ilSince?: string;      // IL placement date (YYYY-MM-DD, from transactions)
   playerId?: number;     // MLBAM id (for the IL join)
   teamId?: number;       // current team (for the IL join)
+  team?: string;         // current team name (for the home-park badge)
 }
 
 // OOPSY weekly projections (premium). Read from a separate published sheet.

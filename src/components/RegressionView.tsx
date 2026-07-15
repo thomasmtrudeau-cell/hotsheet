@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react';
 import { RegressionRow } from '@/lib/types';
+import { HOME_PARK_PF } from '@/lib/parks';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
 
@@ -59,8 +60,18 @@ function List({ title, subtitle, rows, tone, isFollowing }: {
                 {isFollowing(r.player) && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
               </div>
               <div className="flex items-center gap-2 whitespace-nowrap font-mono">
+                {(() => {
+                  const pf = r.team ? HOME_PARK_PF[r.team] : undefined;
+                  if (pf === undefined || Math.abs(pf - 100) < 3) return null;
+                  const friendly = pf < 100; // low run factor = pitcher park
+                  return (
+                    <Tooltip text={`${r.team} plays ${friendly ? 'pitcher' : 'hitter'}-friendly (park factor ${pf}). His ACTUAL ERA is ${friendly ? 'flattered' : 'inflated'} by the park — the projection is park-neutral, so read the gap with that in mind.`}>
+                      <span className={`text-[10px] px-1 rounded font-sans cursor-help ${friendly ? 'bg-green-500/15 text-green-300' : 'bg-red-500/15 text-red-300'}`}>🏟{friendly ? '+' : '−'}</span>
+                    </Tooltip>
+                  );
+                })()}
                 <span className={accent}>{r.delta > 0 ? '+' : ''}{r.delta.toFixed(2)}</span>
-                <span className="text-zinc-500">{r.currentEra20.toFixed(2)} ERA{r.ip ? ` (${Math.round(r.ip)} IP)` : ''} · {r.peakEra20.toFixed(2)} proj</span>
+                <span className="text-zinc-500">{r.currentEra20.toFixed(2)} ERA{r.ip ? ` (${Math.round(r.ip)} IP)` : ''} · <Tooltip text="Park-neutral true-talent projection — what he'd pitch to in a neutral park at a normalized 20-BF/G workload."><span className="underline decoration-dotted decoration-zinc-700">{r.peakEra20.toFixed(2)} proj</span></Tooltip></span>
               </div>
             </div>
           ))}
@@ -120,7 +131,7 @@ export default function RegressionView({ rows, loading, isPremium, isFollowing }
     <div>
       <p className="text-[11px] text-zinc-500 mb-3">
         Starters (SP &amp; SP prospects) whose <span className="text-zinc-300">actual current-year ERA</span> (live from the MLB/MiLB API, min {' '}20 IP) has drifted from their{' '}
-        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload. (ERA/20 runs ~0.2 above traditional ERA, so on-talent arms sit slightly negative.)">peak (true-talent) ERA/20 projection</span>
+        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload. (ERA/20 runs ~0.2 above traditional ERA, so on-talent arms sit slightly negative.)">peak (true-talent) ERA/20 projection</span> <span className="text-zinc-500">(park-neutral — 🏟 flags pitchers whose actual ERA is park-flattered/inflated)</span>
         {' '}— the gap is the regression signal.
       </p>
 
