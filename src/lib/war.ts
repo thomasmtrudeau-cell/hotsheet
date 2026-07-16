@@ -209,12 +209,12 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
 // pitching are kept SEPARATE — some names appear in both (position players who
 // pitched), so we must pick metrics by the player's actual role, not merge.
 let cache: { sheetId: string; at: number; hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> } | null = null;
-const TTL = 60_000; // 1 minute
+const TTL = 600_000; // 10 minutes — the sheet updates a few times a day, not by the second
 
 async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
   // Cache-bust Google's CDN and bypass Next's fetch cache so we always read the
   // latest published sheet, not a stale copy.
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}&_cb=${Date.now()}`;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}&_cb=${Math.floor(Date.now() / 3600_000)}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
   if (!res.ok) throw new Error(`WAR sheet fetch ${res.status}`);
   return res.text();
@@ -227,7 +227,10 @@ async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, P
     const [hitCsv, pitCsv, curHitCsv] = await Promise.all([
       fetchCsvTab(sheetId, HIT_TAB),
       fetchCsvTab(sheetId, PIT_TAB),
-      fetchCsvTab(sheetId, CUR_HIT_TAB).catch(() => ''), // non-fatal if the tab moves/renames
+      Promise.race([
+        fetchCsvTab(sheetId, CUR_HIT_TAB).catch(() => ''),
+        new Promise<string>((res) => setTimeout(() => res(''), 4000)), // don't let it gate pricing
+      ]),
     ]);
     const hitters = parseTab(hitCsv, 'name', false);
     const pitchers = parseTab(pitCsv, 'player', true);

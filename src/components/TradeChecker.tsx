@@ -25,15 +25,15 @@ const SETTINGS_KEY = 'hotsheet_league_settings';
 // the next two (ramps in at +2, full from +3).
 export const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
   { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45,
-    blurb: 'This season counts most; each season out counts ~28% less. 45% of the score is the keeper-ceiling premium.' },
+    blurb: 'This season counts most; each season out counts ~28% less. 45% of it is his keeper value (FV), the rest his production this season and next.' },
   { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15,
-    blurb: 'Production weighting: ~60% this season, ~30% next, almost nothing beyond. Only 15% ceiling premium — pay for wins today.' },
+    blurb: 'Production weighting: ~60% this season, ~30% next, almost nothing beyond. Only 15% keeper value — pay for wins today.' },
   { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3,
-    blurb: 'Production spread across the next ~3 seasons (next year weighted most). 30% ceiling premium.' },
+    blurb: 'Production across the next ~3 seasons (next year weighted most); 30% keeper value.' },
   { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45,
-    blurb: 'This season ignored — you’ve conceded it. The next two seasons carry ~60% of the production weight. 45% ceiling premium.' },
+    blurb: 'This season ignored — you’ve conceded it. The next two seasons carry ~60% of the production; 45% keeper value.' },
   { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.7,
-    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight. 70% ceiling premium — youth and upside rule (a rebuilder can always flip the asset).' },
+    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight; 70% keeper value — youth and upside rule.' },
 ];
 
 interface TradeCheckerProps {
@@ -44,36 +44,42 @@ type Side = 'A' | 'B';
 
 function Chips({ m, isPitcher, pv, fv, lens, pending, saves, pt, ip, ptBlended, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
+  const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
-    // Values are still being priced — pulse placeholders instead of misleading 0.0s.
-    return (
-      <div className="flex flex-wrap gap-1 mt-0.5">
-        {['PV', 'FV', lens?.label ?? 'OV'].map((l) => (
-          <span key={l} className={`${chip} bg-zinc-700/40 text-zinc-500 animate-pulse`}>{l} …</span>
-        ))}
-        <span className="text-[10px] text-zinc-600 self-center">pricing…</span>
-      </div>
-    );
+    return <div className="mt-1 text-[10px] text-zinc-500 animate-pulse">◍ pricing…</div>;
   }
+  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || risk;
   return (
-    <div className="flex flex-wrap gap-1 mt-0.5">
-      <Tooltip text="PV — present value: what he's worth THIS season. WAR + market base + live production (current rate × actual playing time × park), docked for injury, job security and playing-time threats."><span className={`${chip} bg-blue-500/25 text-blue-200`}>PV {pv.toFixed(1)}</span></Tooltip>
-      <Tooltip text="FV — future/keeper value: his peak ceiling × age × distance to the majors, on the same scale as PV. Aging vets fade below their PV; young stars carry big FV."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
-      {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
-      {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
-      {ip !== undefined && <span className={`${chip} bg-sky-500/20 text-sky-300`} title="Estimated rest-of-season innings — Depth-Chart projection (fresh) blended with a role-based estimate. Playing time is a probability estimate.">~{ip} IP</span>}
-      {pt !== undefined && <span className={`${chip} bg-sky-500/20 text-sky-300`} title={`Estimated rest-of-season plate appearances — recent playing-time rate × games left, nudged by current form${ptBlended ? ', blended with the Depth-Chart auction projection' : ''}. Playing time is a probability estimate.`}>~{pt} PA</span>}
-      {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — ARM injury (shoulder/elbow family): keeper value faded, not just current availability.' : 'On the injured list'}>{armRisk ? 'IL·arm' : 'IL'}</span>}
-      {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.kind === 'crowd' ? 'reps are split while both are healthy' : risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
-      {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
-      {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
-      {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
-      {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
-      {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected full-season saves at his current pace — the ninth-inning role carries fantasy value on its own. The PV credit is risk-adjusted: a closer with a poor ERA/20 projection is one bad stretch from losing the job (or being traded into a setup role).">🧯 ~{saves} SV</span>}
-      {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡💪{m.dual === 'double-plus' ? '40+' : '30+'}</span>}
-      {m && !isPitcher && !m.dual && m.power && <span className={`${chip} bg-amber-500/20 text-amber-200`}>💪{m.power === 'double-plus' ? '++' : '+'}</span>}
-      {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`}>⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
-      {m && !isPitcher && m.def && <span className={`${chip} ${m.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`}>🧤{m.def === 'double-plus' ? '++' : m.def === 'plus' ? '+' : m.def === 'double-minus' ? '−−' : '−'}</span>}
+    <div className="mt-1 space-y-1">
+      {/* value */}
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={lbl}>value</span>
+        <Tooltip text="Present value — what he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>PV {pv.toFixed(1)}</span></Tooltip>
+        <Tooltip text="Future / keeper value — his multi-year worth as a keeper."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
+      </div>
+      {/* ability */}
+      <div className="flex flex-wrap items-center gap-1">
+        <span className={lbl}>ability</span>
+        {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
+        {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
+        {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
+        {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Projected 30+ (or 40+) combined HR + SB">⚡💪{m.dual === 'double-plus' ? '40+' : '30+'}</span>}
+        {m && !isPitcher && !m.dual && m.power && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Power">💪{m.power === 'double-plus' ? '++' : '+'}</span>}
+        {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Speed">⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
+        {m && !isPitcher && m.def && <span className={`${chip} ${m.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`} title="Defense — mostly playing-time insurance in fantasy">🧤{m.def === 'double-plus' ? '++' : m.def === 'plus' ? '+' : m.def === 'double-minus' ? '−−' : '−'}</span>}
+        {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected saves at his current pace, risk-adjusted for a shaky closer">🧯 ~{saves} SV</span>}
+      </div>
+      {/* reps / status */}
+      {repsRow && (
+        <div className="flex flex-wrap items-center gap-1">
+          <span className={lbl}>reps</span>
+          {pt !== undefined && <Tooltip text={`Projected rest-of-season plate appearances${ptBlended ? ' (Depth-Chart projection blended with recent usage)' : ''} — playing time is an estimate.`}><span className={`${chip} bg-sky-500/20 text-sky-300`}>~{pt} PA</span></Tooltip>}
+          {ip !== undefined && <Tooltip text="Projected rest-of-season innings (Depth-Chart blended with role) — an estimate."><span className={`${chip} bg-sky-500/20 text-sky-300`}>~{ip} IP</span></Tooltip>}
+          {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="Recent usage looks part-time">{role.label.toLowerCase()}</span>}
+          {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{armRisk ? 'on IL · arm' : 'on IL'}</span>}
+          {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
+        </div>
+      )}
     </div>
   );
 }
@@ -623,13 +629,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // two sides through the active lens; PV and FV stay in the analysis untouched. ----
   const build = BUILDS.find((b) => b.key === buildKey) ?? BUILDS[0];
   const wSum = build.weights.reduce((a, b) => a + b, 0);
-  // Production over the build's window (per-season scale) + the market premium the
+  // Production over the build's window (per-season scale) + a share of his keeper value (FV) — the
   // asset commands (fvShare of his keeper FV). The FV term is what makes a massive
   // ceiling gap (J-Rod FV 17.8 vs Trout 6.5) surface in the verdict — production
   // curves alone called Julio-for-Trout "fair," and nobody makes that trade.
   const windowAvg = (p: SearchResult) => build.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / wSum;
   const lensOf = (p: SearchResult) => (1 - build.fvShare) * windowAvg(p) + build.fvShare * fvOf(p);
-  const lensTitle = `${build.label} value — projected production over the ${build.label.toLowerCase()} window plus the market premium his keeper ceiling commands`;
+  const lensTitle = `${build.label} value — his projected production over the ${build.label.toLowerCase()} window, blended with his keeper value (FV)`;
   // A theoretical consolidation keep gets the same blend: replacement production
   // (PV_KEEP, flat) + the lens's market share of a keeper-worthy FV_KEEP.
   const keepLens = (1 - build.fvShare) * PV_KEEP + build.fvShare * FV_KEEP;
@@ -676,7 +682,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
@@ -686,7 +692,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
@@ -883,7 +889,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       )}
 
       <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, plus the market premium his keeper ceiling commands (a young star is worth more than his seasons — you can always flip him). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more the ceiling premium counts. The verdict compares both sides through your active lens. Premium — a work in progress.
+        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, blended with his keeper value (FV). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more keeper value counts. The verdict compares both sides through your active lens. Premium — a work in progress.
       </p>
       </>
       )}
