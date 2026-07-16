@@ -42,6 +42,7 @@ function Tools({ r }: { r: ScoutingRow }) {
 
 export default function ScoutingView({ rows, loading, isPremium, isFollowing, onFollow, groups }: ScoutingViewProps) {
   const [minWar, setMinWar] = useState(2.0);
+  const [q, setQ] = useState('');
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [pos, setPos] = useState<Pos>('all');
   const [rowState, setRowState] = useState<Record<string, 'busy' | 'fail' | undefined>>({});
@@ -106,10 +107,10 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
     return next.size ? next : prev;
   });
 
-  const filtered = useMemo(() => rows
-    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher))
+  const filtered = useMemo(() => { const f = q.trim().toLowerCase(); return rows
+    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher) && (!f || r.player.toLowerCase().includes(f)))
     .sort((a, b) => b.war - a.war)
-    .slice(0, 200), [rows, minWar, levels, pos]);
+    .slice(0, 200); }, [rows, minWar, levels, pos, q]);
 
   if (!isPremium) return <PremiumTeaser context="scouting" />;
   if (loading && rows.length === 0) {
@@ -122,6 +123,8 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
 
       {/* Filters */}
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Filter by name…"
+          className="px-2.5 py-1 bg-zinc-900 border border-zinc-800 rounded text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-amber-500 w-40" />
         <label className="flex items-center gap-2 text-zinc-400">
           WAR ≥ <span className="font-mono font-bold text-amber-300 w-8">{minWar.toFixed(1)}</span>
           <input type="range" min={1.0} max={5.0} step={0.1} value={minWar} onChange={(e) => setMinWar(parseFloat(e.target.value))} className="accent-amber-500 w-40 cursor-pointer" />
