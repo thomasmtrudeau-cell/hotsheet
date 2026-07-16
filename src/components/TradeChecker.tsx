@@ -11,29 +11,19 @@ import Tooltip from './Tooltip';
 import ValueBoard from './ValueBoard';
 
 const SETTINGS_KEY = 'hotsheet_league_settings';
-// Build lenses. Every player already has a per-season value projection (k=0 is THIS
-// season = his live PV; future seasons follow the age curve, injuries rebound,
-// prospects ramp in at arrival). A lens scores him as a weighted AVERAGE of those
-// seasons (his production over that window) PLUS a market-premium share of FV —
-// because trade value is ASSET value: the market pays a real premium for ceiling +
-// control window (one Skenes fetches a deGrom+Wheeler+Freeman haul), and even a
-// win-now team shouldn't dump a young star for an old one — they'd flip him for
-// more. fvShare rises the more future-leaning the build is. Overall weights the
-// present most and decays outward; the team-build lenses re-center the window:
-// win-now = this season + next (front-spiked), contender = the next few seasons
-// (flatter), retooling EXCLUDES this season (you've conceded it), rebuild excludes
-// the next two (ramps in at +2, full from +3).
+// Build lenses — deliberately just TWO clear postures (five was noise). Every
+// player has a per-season value projection (k=0 = his live PV this season; future
+// seasons follow the age curve, injuries rebound, prospects ramp in at arrival). A
+// lens scores him as a weighted average of those seasons over its window, blended
+// with a share of his keeper value (FV) — trade value is ASSET value, so ceiling
+// and control matter, and fvShare rises for the more future-leaning build.
+// Contender (default) weights the next few seasons; Rebuild ignores this season and
+// weights the years ahead.
 export const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
-  { key: 'overall', label: 'Overall', short: 'OV', weights: [1, 0.72, 0.52, 0.37, 0.27, 0.19, 0.14], fvShare: 0.45,
-    blurb: 'This season counts most; each season out counts ~28% less. 45% of it is his keeper value (FV), the rest his production this season and next.' },
-  { key: 'win-now', label: 'Win-now', short: 'NOW', weights: [1, 0.55, 0.15, 0, 0, 0, 0], fvShare: 0.15,
-    blurb: 'Production weighting: ~60% this season, ~30% next, almost nothing beyond. Only 15% keeper value — pay for wins today.' },
-  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.85, 0.5, 0.2, 0.05, 0], fvShare: 0.3,
-    blurb: 'Production across the next ~3 seasons (next year weighted most); 30% keeper value.' },
-  { key: 'retool', label: 'Retooling', short: 'RTL', weights: [0, 1, 1, 0.65, 0.35, 0.15, 0.05], fvShare: 0.45,
-    blurb: 'This season ignored — you’ve conceded it. The next two seasons carry ~60% of the production; 45% keeper value.' },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0, 0.5, 1, 1, 0.9, 0.8], fvShare: 0.7,
-    blurb: 'The next two seasons ignored; seasons +3 to +6 carry the weight; 70% keeper value — youth and upside rule.' },
+  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.8, 0.4, 0.15, 0, 0], fvShare: 0.3,
+    blurb: 'Built to win soon — weights the next few seasons, without selling off the near future.' },
+  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0.5, 0.9, 1, 1, 0.9, 0.75], fvShare: 0.6,
+    blurb: 'Building for later — this season doesn’t count; youth and long-term upside rule.' },
 ];
 
 interface TradeCheckerProps {
@@ -104,8 +94,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
   const [tool, setTool] = useState<'trade' | 'board'>('trade'); // trade checker vs bulk value board
-  const [buildKey, setBuildKey] = useState('overall'); // YOUR build lens (Overall / Win-now / Contender / Retooling / Rebuild)
-  const [theirKey, setTheirKey] = useState('overall'); // THEIR build — view the same trade from the other side's posture
+  const [buildKey, setBuildKey] = useState('contender'); // YOUR build lens (Contender / Rebuild)
+  const [theirKey, setTheirKey] = useState('contender'); // THEIR build — view the same trade from the other side's posture
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
   const [showHow, setShowHow] = useState(false); // "How scoring works" explainer — collapsed by default (less wall-of-text)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -125,8 +115,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       }
     } catch { /* ignore */ }
   }, []);
-  // Deliberately NOT persisted — the lens always starts on Overall so the default
-  // verdict is the neutral one; switch per-trade as needed.
+  // Deliberately NOT persisted — the lens always starts on Contender (the default
+  // posture); switch to Rebuild per-trade as needed.
   const updateBuild = useCallback((k: string) => setBuildKey(k), []);
   // Rest-of-season projections (uploaded daily from the Mac pipeline) — the
   // forward-looking rate PV prefers over current-year actuals.
@@ -607,14 +597,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // worse guy). Name the actual guy with ＋FA to override the default.
   const depthFactor = Math.sqrt(560 / Math.max(1, settings.teams * settings.keepers)); // 1.0 at Tom's 560; >1 shallower
   // Bare-minimum replacement a rosterable spot is worth (per Tom, deep 20-team):
-  // PV 0.7, FV 2.0 — a real kept player, not a wire scrub. Linear per freed spot
-  // (each opened spot keeps another replacement-or-better guy); scales up in
-  // shallower leagues where the marginal roster player is better.
+  // PV 0.7, FV 2.0 — a real kept player, not a wire scrub; scales up in shallower
+  // leagues where the marginal roster player is better.
   const PV_KEEP = 0.7 * depthFactor;
   const FV_KEEP = 2.0 * depthFactor;
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
-  const pvFill = (n: number) => n * PV_KEEP;
-  const fvFill = (n: number) => n * FV_KEEP;
+  // Freed spots pay DIMINISHING returns: freeing 4 spots in one trade doesn't get
+  // you four equally-good keepers — each successive back-fill is a worse player. So
+  // the k-th freed spot is worth ~0.6^k of a replacement. This stops a lopsided
+  // 5-for-1 (give up five real players for one star) from reading "fair" purely on
+  // an inflated pile of freed-spot credit.
+  const diminish = (n: number, per: number) => { let t = 0; for (let k = 0; k < n; k++) t += per * Math.pow(0.6, k); return t; };
+  const pvFill = (n: number) => diminish(n, PV_KEEP);
+  const fvFill = (n: number) => diminish(n, FV_KEEP);
   // The side that gives up more players opens that many roster spots. You can fill
   // them with the REAL free agents you'd actually add (their true PV/FV), and any
   // spots you don't name get the theoretical replacement level. Extra FAs beyond
@@ -691,7 +686,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const keepLens = (1 - build.fvShare) * PV_KEEP + build.fvShare * FV_KEEP;
   const sumLens = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + lensOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + lensOf(p), 0) + theoreticalFill * keepLens;
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + lensOf(p), 0) + diminish(theoreticalFill, keepLens);
     return t;
   };
   const lensA = sumLens(sideA, 'A');
@@ -706,7 +701,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const theirKeep = (1 - theirBuild.fvShare) * PV_KEEP + theirBuild.fvShare * FV_KEEP;
   const sumTheirLens = (ps: SearchResult[], side: Side) => {
     let t = ps.reduce((acc, p) => acc + theirLensOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + theirLensOf(p), 0) + theoreticalFill * theirKeep;
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + theirLensOf(p), 0) + diminish(theoreticalFill, theirKeep);
     return t;
   };
   const theirDiff = sumTheirLens(sideB, 'B') - sumTheirLens(sideA, 'A'); // positive = good for THEM
@@ -756,7 +751,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
                 <div className="flex flex-wrap gap-1 mt-0.5">
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now {pvFill(theoreticalFill).toFixed(1)}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep {fvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.label} {(theoreticalFill * keepLens).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.label} {diminish(theoreticalFill, keepLens).toFixed(1)}</span>
                 </div>
               </div>
             </div>
@@ -868,7 +863,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
       {/* Build lens tabs — always visible, so you set your team's posture BEFORE
-          building the trade (starts on Overall every visit). */}
+          building the trade (starts on Contender every visit). */}
       <div className="mb-4">
         <div className="flex justify-center mb-1">
           <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season + next, contender = the next few, retooling = next year onward, rebuild = 2–3+ years out).">
@@ -945,7 +940,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         </button>
         {showHow && (
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — his ceiling and how many good years remain, so young risers sit above their Now value and aging vets below. The big number is your <strong className="text-orange-300">build</strong>: <strong>Overall</strong> weighs this season most and fades outward; <strong>Win-now</strong> is this year + next; <strong>Contender</strong> the next few; <strong>Retooling</strong> next year onward; <strong>Rebuild</strong> two-plus years out — the further out you&apos;re building, the more keeper value counts. A lopsided trade (2-for-1) frees a roster spot, worth a keepable replacement (Now {PV_KEEP.toFixed(1)} · Keep {FV_KEEP.toFixed(1)} here, more in shallower leagues); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. The verdict compares both sides through your build. Still being calibrated.
+            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — so young risers sit above their Now value and aging vets below. The big number is your <strong className="text-orange-300">build</strong>: <strong>Contender</strong> leans on the next few seasons, <strong>Rebuild</strong> sets this season aside and leans on the years ahead. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. The verdict compares both sides through your build. Still being calibrated.
           </p>
         )}
       </div>

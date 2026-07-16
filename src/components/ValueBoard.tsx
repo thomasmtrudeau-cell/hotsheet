@@ -37,7 +37,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const [pos, setPos] = useState<'all' | 'hitter' | 'pitcher'>('all');
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [minWar, setMinWar] = useState(1.5);
-  const [sort, setSort] = useState<SortKey>('OV');
+  const [sort, setSort] = useState<SortKey>('CTD');
   const [hiddenBuilds, setHiddenBuilds] = useState<Set<string>>(new Set()); // lens columns the user doesn't care about
 
   const [pitchersLoading, setPitchersLoading] = useState(false);
@@ -117,14 +117,11 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
 
   const COL_HELP: Record<string, string> = {
     war: 'Peak WAR projection (ScoutTheStatline) — his ceiling season, all-around value.',
-    FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and Overall disagree, the gap is the playing-time/asset story.',
+    FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and the build grade disagree, the gap is the playing-time/asset story.',
     PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
     FV: 'Keep — what he is worth held as a keeper across future seasons (ceiling × how many good years remain).',
-    OV: 'Overall build — this season counts most, each season out counts less, blended with 45% keeper value. The default ranking.',
-    NOW: 'Win-now build — this season + next, only 15% keeper value. Pay for wins today.',
-    CTD: 'Contender build — production over the next ~3 seasons, 30% keeper value.',
-    RTL: 'Retooling build — this season conceded; next two seasons carry the weight, 45% keeper value.',
-    RBD: 'Rebuild build — first two seasons ignored, seasons +3 to +6 rule, 60% keeper value.',
+    CTD: 'Contender — built to win soon; weights the next few seasons. The default ranking.',
+    RBD: 'Rebuild — building for later; this season doesn’t count, youth and upside rule.',
   };
   const shownLenses = lenses.filter((l) => !hiddenBuilds.has(l.short));
   const cols: { key: SortKey; label: string }[] = [
@@ -134,7 +131,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const toggleBuild = (short: string) => setHiddenBuilds((prev) => {
     const next = new Set(prev);
     if (next.has(short)) next.delete(short); else next.add(short);
-    if (sort === short && next.has(short)) setSort('OV'); // don't sort by a hidden column
+    if (sort === short && next.has(short)) setSort('CTD'); // don't sort by a hidden column
     return next;
   });
 
