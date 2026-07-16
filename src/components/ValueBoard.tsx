@@ -117,18 +117,18 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
 
   const COL_HELP: Record<string, string> = {
     war: 'Peak WAR projection (ScoutTheStatline) — his ceiling season, all-around value.',
-    FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and OV disagree, the gap is the playing-time/asset story.',
-    PV: 'Present value — what he is worth THIS season (base model: WAR + market + level/age).',
-    FV: 'Future/keeper value — peak ceiling × age × distance to the majors.',
-    OV: 'Overall — one asset number: this season counts most, each season out counts less, plus a 45% keeper-ceiling premium. The default ranking.',
-    NOW: 'Win-now build — this season + next, only 15% ceiling premium. Pay for wins today.',
-    CTD: 'Contender build — production over the next ~3 seasons, 30% ceiling premium.',
-    RTL: 'Retooling build — this season conceded; next two seasons carry the weight, 45% ceiling premium.',
-    RBD: 'Rebuild build — first two seasons ignored, seasons +3 to +6 rule, 60% ceiling premium.',
+    FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and Overall disagree, the gap is the playing-time/asset story.',
+    PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
+    FV: 'Keep — what he is worth held as a keeper across future seasons (ceiling × how many good years remain).',
+    OV: 'Overall build — this season counts most, each season out counts less, blended with 45% keeper value. The default ranking.',
+    NOW: 'Win-now build — this season + next, only 15% keeper value. Pay for wins today.',
+    CTD: 'Contender build — production over the next ~3 seasons, 30% keeper value.',
+    RTL: 'Retooling build — this season conceded; next two seasons carry the weight, 45% keeper value.',
+    RBD: 'Rebuild build — first two seasons ignored, seasons +3 to +6 rule, 60% keeper value.',
   };
   const shownLenses = lenses.filter((l) => !hiddenBuilds.has(l.short));
   const cols: { key: SortKey; label: string }[] = [
-    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' }, { key: 'PV', label: 'PV' }, { key: 'FV', label: 'FV' },
+    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' }, { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' },
     ...shownLenses.map((l) => ({ key: l.short, label: l.short })),
   ];
   const toggleBuild = (short: string) => setHiddenBuilds((prev) => {

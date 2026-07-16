@@ -158,6 +158,73 @@ export function abilityCurve(age?: number, isPitcher = false): number {
   return presentMaturity(age) * Math.min(1, ageRetention(age, isPitcher)) * survivalTo(Math.round(age), isPitcher);
 }
 
+// ---- WAR as PLAYING-TIME CONFIDENCE (not fantasy value) ----
+// Empirically, playing time is the #1 driver of fantasy value (corr(auction$, PA)
+// ≈ 0.95) and WAR is the WEAKEST of the big three (≈0.72, below wRC+'s 0.75). So
+// WAR's job in this model is NOT to be the value — it's to tell us how confident
+// we are the reps will show up NOW and PERSIST over the keeper horizon. Net effect
+// by design: a high WAR nudges PV a little and lifts FV a lot.
+
+// PRESENT PT fragility — a DOCK for low WAR, never a boost (caps at 1.0). A
+// low-WAR regular is a slump/bench/call-up from losing the job, so his win-now
+// reps carry risk even when he's playing today. Reaching 1.0 means "no fringe
+// dock" — NOT "guaranteed everyday"; a high-WAR guy who's actually part-time is
+// docked by the observed-role layer (roles/platoon/ptCredit), not here, and WAR
+// never manufactures playing time he isn't getting. Docks from ~0.7 at 1.0 WAR up
+// to no-dock at 2.5 (nobody's a lock below that — plenty of 2-WAR guys sit or are
+// in the minors). Up-the-middle (C/SS/2B/CF) is gentler (scarce + the glove holds
+// the job); corners (1B/DH) are steeper — a bat-only guy is the first benched (his
+// wRC+ is checked separately by the caller, where for corners it "rules").
+export function ptFragility(war: number, position?: string): number {
+  const p = position ?? '';
+  const premium = p === 'C' || p === 'SS' || p === '2B' || p === 'CF';
+  const corner = p === '1B' || p === 'DH';
+  const hi = 2.5;                                   // no fringe dock at 2.5+ WAR (still not a PT guarantee)
+  const lo = corner ? 1.5 : 1.0;                    // corners need more WAR before the dock eases
+  const floor = premium ? 0.82 : corner ? 0.62 : 0.7;  // premium gentler, corners harshest
+  const t = clamp((war - lo) / (hi - lo), 0, 1);
+  return floor + (1 - floor) * t;
+}
+
+// EARNING reps (the flip side of fragility, a small PV nudge). A prime-age
+// (24–29) player with a good peak WAR but limited CURRENT reps is talent waiting
+// to play — most guys who look like that in their prime end up playing every day,
+// so give a little of the reps dock back rather than treating today's part-time
+// role as his ceiling (Gabriel Arias 2.65 WAR, Anthony Volpe 3.5 WAR — the classic
+// buy-lows). Kicks in at peak WAR ≥ 2.5 with a base nudge that grows with talent;
+// deliberately small (a nudge, not a rerating): ~+3% for a 2.5-WAR part-timer up to
+// ~+12% for a benched 5-WAR stud. Returns a PV multiplier ≥ 1. (The bigger buy-low
+// signal lives in FV via warDurability — this is just the present sweetener.)
+export function earningPtBump(war: number, age?: number, ptRate?: number): number {
+  if (age === undefined || ptRate === undefined) return 1;
+  if (age < 24 || age > 29) return 1;               // prime-age window only
+  if (ptRate >= 0.8 || war < 2.5) return 1;         // already playing, or not enough talent to expect it
+  const talent = clamp((war - 2.5) / 2.5, 0, 1);    // 2.5 WAR → base only … 5+ WAR → full
+  const shortfall = clamp((0.8 - ptRate) / 0.5, 0, 1);
+  return 1 + (0.06 + 0.14 * talent) * shortfall;    // base 6% at 2.5 WAR → up to 20% at 5 WAR, scaled by the reps gap
+}
+
+// LONG-TERM PT durability (the dominant use of WAR, weighs on FV). A good WAR
+// means the everyday reps keep coming for years — keeper value you can bank; a
+// poor WAR means the future role is a question mark (a bat-only or fringe guy is
+// a demotion/platoon away from zero keeper value). This is the "FV a lot" half of
+// the design. Centered on the ~2.0-WAR everyday pivot so it TILTS the keeper grade
+// by durability rather than inflating the whole board: ~1.0 at 2 WAR, up to ~1.18
+// for stars, down to ~0.6–0.68 for a replacement-level regular. Up-the-middle is
+// a touch more durable (scarcity keeps them employed); corners harsher (bat-only,
+// replaceable). Uses raw WAR on purpose — a high framing/glove WAR genuinely means
+// durable playing time (teams keep good defenders), which is what durability is.
+export function warDurability(war: number, position?: string): number {
+  const p = position ?? '';
+  const premium = p === 'C' || p === 'SS' || p === '2B' || p === 'CF';
+  const corner = p === '1B' || p === 'DH';
+  const up = premium ? 0.09 : corner ? 0.06 : 0.075;   // reward for WAR above the pivot
+  const dn = premium ? 0.11 : corner ? 0.17 : 0.14;    // risk for WAR below it (corners harshest)
+  const d = war - 2.0;
+  const f = 1 + (d >= 0 ? up * d : dn * d);
+  return clamp(f, corner ? 0.6 : premium ? 0.72 : 0.68, 1.18);
+}
+
 // Present value only fully counts in the majors.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -220,11 +287,19 @@ export function scarcityMult(pos: string | undefined, s: LeagueSettings): number
 // accumulation/playing-time (WAR) king and rate stats matter less. AVG leagues
 // devalue the walk-driven slice of wRC+ (approximated — we have no AVG data) and
 // lean a touch more on contact/production.
+// PRESENT-value weights. Empirically the auction MARKET (production × playing time
+// × scarcity) predicts fantasy value far better than WAR — corr(auction$, PA)≈0.95
+// vs corr(auction$, WAR)≈0.72 — and WAR's extra over the market is largely defense/
+// position that doesn't score. So present value leans on the market with WAR only a
+// light tilt (two identical-production bats should read close regardless of their
+// glove). Points leagues reward accumulation, so WAR gets a bit more there. When a
+// player has NO market signal (missing from the auction export) we fall back to
+// WAR-led present so he isn't zeroed — see computeValue.
 interface FormatWeights { warW: number; mktW: number; prodW: number; wrcFan: number; hrFan: number; sbFan: number; }
 const FORMAT: Record<ScoringFormat, FormatWeights> = {
-  obp:    { warW: 0.60, mktW: 0.25, prodW: 0.15, wrcFan: 1.00, hrFan: 1.00, sbFan: 1.00 },
-  points: { warW: 0.72, mktW: 0.18, prodW: 0.10, wrcFan: 0.90, hrFan: 1.15, sbFan: 0.60 },
-  avg:    { warW: 0.58, mktW: 0.25, prodW: 0.17, wrcFan: 0.82, hrFan: 1.05, sbFan: 0.90 },
+  obp:    { warW: 0.18, mktW: 0.62, prodW: 0.20, wrcFan: 1.00, hrFan: 1.00, sbFan: 1.00 },
+  points: { warW: 0.34, mktW: 0.46, prodW: 0.20, wrcFan: 0.90, hrFan: 1.15, sbFan: 0.60 },
+  avg:    { warW: 0.18, mktW: 0.60, prodW: 0.22, wrcFan: 0.82, hrFan: 1.05, sbFan: 0.90 },
 };
 
 // WAR isn't fantasy value. Catcher WAR is inflated by framing/defense that
@@ -306,8 +381,13 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const fantasyFade = inp.isPitcher ? 1 : growth / 3;
   // Catcher counting stats shrink with catcher PA volume too.
   if (inp.position === 'C') fantasy *= 0.8;
+  // Clearing the keeper bar used to be a hard step (0.15 → 1.0 the instant WAR
+  // crossed the bar), which put a cliff in keeper value — a 1.9- and 2.1-WAR guy
+  // graded 10× apart. Smooth it into a ramp across ±0.75 WAR around the bar so a
+  // small WAR difference is a small FV difference.
+  const clears = clamp((fWarKeeper - bar + 0.75) / 1.5, 0, 1);
   const warTerm = Math.max(0, fWarKeeper - bar) * growth;
-  const fantasyTerm = fantasy * (fWarKeeper > bar ? 1 : 0.15) * fantasyFade;
+  const fantasyTerm = fantasy * (0.15 + 0.85 * clears) * fantasyFade;
   const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
@@ -325,7 +405,15 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // replace on your roster); win-now production is closer to position-agnostic
   // (a run's a run today), so present value only feels scarcity at half strength.
   const scarPresent = 1 + (scar - 1) * 0.5;
-  const present = (fmt.warW * warPv + fmt.mktW * mkt) * scarPresent;
+  // Market-led when the player is IN the auction export (the good predictor) —
+  // including when the market values him at/below replacement (mkt 0), which is a
+  // real signal, not a reason to fall back. WAR-led fallback ONLY when he's absent
+  // from the export entirely (marketBaseline undefined), so he isn't zeroed. His
+  // actual production still flows in via the dynamic layer downstream.
+  const inExport = inp.marketBaseline !== undefined;
+  const wW = inExport ? fmt.warW : 0.6;
+  const mW = inExport ? fmt.mktW : 0;
+  const present = (wW * warPv + mW * mkt) * scarPresent;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };

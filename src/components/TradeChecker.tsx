@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, ptFragility, earningPtBump, warDurability, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
@@ -54,8 +54,8 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, pt, ip, ptBlended, 
       {/* value */}
       <div className="flex flex-wrap items-center gap-1">
         <span className={lbl}>value</span>
-        <Tooltip text="Present value — what he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>PV {pv.toFixed(1)}</span></Tooltip>
-        <Tooltip text="Future / keeper value — his multi-year worth as a keeper."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
+        <Tooltip text="What he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {pv.toFixed(1)}</span></Tooltip>
+        <Tooltip text="What he's worth held as a keeper across future seasons."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
       </div>
       {/* ability */}
       <div className="flex flex-wrap items-center gap-1">
@@ -107,6 +107,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [buildKey, setBuildKey] = useState('overall'); // YOUR build lens (Overall / Win-now / Contender / Retooling / Rebuild)
   const [theirKey, setTheirKey] = useState('overall'); // THEIR build — view the same trade from the other side's posture
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
+  const [showHow, setShowHow] = useState(false); // "How scoring works" explainer — collapsed by default (less wall-of-text)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const searchRef = useRef<HTMLInputElement>(null);
 
@@ -257,15 +258,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // Present value: injured players lose most of it, a returning teammate (PT
   // risk) docks it, and the home park nudges it (wRC+ is already park-adjusted,
   // so this is a light real-life-output touch).
-  // Perpetual job-security discount: low-WAR bats are always a slump/call-up from
-  // losing the job, even if full-time now. 1B/DH get slack — their WAR is
-  // positionally deflated, so a good bat (high wRC+) secures the spot.
+  // Perpetual job-security discount = WAR as PRESENT playing-time confidence: a
+  // low-WAR regular is always a slump/call-up from losing the job, even if
+  // full-time now. Position-aware (ptFragility): gentler up-the-middle where the
+  // glove holds the job, steeper at corners. 1B/DH get the extra bat override —
+  // their WAR is positionally deflated, so a good bat (high wRC+) secures the spot
+  // regardless (for them, wRC+ rules).
   const jobSecurity = (p: SearchResult) => {
     if (p.primaryPosition === 'P') return 1;
     if (p.sportId !== 1) return 1; // job security is an MLB concept — never dock prospects
     const war = metrics[p.id]?.war;
     if (war === undefined) return 1;
-    let f = war >= 2.0 ? 1.0 : war >= 1.5 ? 0.93 : war >= 1.0 ? 0.85 : 0.7;
+    let f = ptFragility(war, p.primaryPosition);
     // A 1B/DH's job IS his bat — a plus bat holds an everyday role even at modest
     // WAR (a 1.5-WAR, 107-wRC+ power 1B like Burger isn't a PT risk), so job
     // security keys on wRC+ for them, not the WAR tier.
@@ -274,7 +278,15 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       const batSecure = wrc >= 105 ? 1.0 : wrc >= 95 ? 0.95 : wrc >= 85 ? 0.85 : 0.75;
       f = Math.max(f, batSecure);
     }
-    return f;
+    // Same "production rules" logic for anyone with a real counting profile: scarce
+    // combined HR+SB are why he's in the lineup, so they secure the job somewhat even
+    // at a low WAR. NOTE: `dual` = 30+ (plus) / 40+ (double-plus) COMBINED HR+SB — not
+    // 30/30. Trevor Story is ~17 HR + ~20 SB (a ~30-combined 'plus'), so he gets a
+    // modest floor, not a lock.
+    const m = metrics[p.id];
+    const hrsb = (m?.hr ?? 0) + (m?.sb ?? 0);
+    const countSecure = m?.dual === 'double-plus' ? 1.0 : m?.dual === 'plus' || hrsb >= 45 ? 0.97 : hrsb >= 35 ? 0.93 : 0;
+    return Math.max(f, countSecure);
   };
   // Playing-time dock on PRESENT value: a returning/pushing teammate directly
   // imperils the current reps that win-now value is built on, so it bites harder
@@ -311,7 +323,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (!m) return false;
     const age = m.age ?? 26, wrc = m.peakWrcPlus ?? 0, war = m.war ?? 0;
     const def = m.def;
-    return wrc >= 110 || war >= 2.5 || (age >= 30 && (wrc >= 100 || war >= 1.8))
+    // "Established" = a PROVEN everyday role whose game-log DNPs are noise (rest,
+    // paternity, a rehab week) — NOT a projection of talent. Deliberately does NOT
+    // key on projected WAR: a high peak WAR does not mean a guy is actually playing
+    // (Gabriel Arias 2.6 / Anthony Volpe 3.0 can be part-time or benched), and
+    // letting WAR manufacture everyday status was erasing real playing-time risk.
+    // A genuinely elite bat (wRC+) is in the lineup; a 30+ vet has the track record.
+    return wrc >= 118 || (age >= 30 && (wrc >= 100 || war >= 1.8))
       || (age >= 30 && (def === 'plus' || def === 'double-plus')); // glove-first everyday vet
   };
   const ptRateOf = (p: SearchResult) => {
@@ -349,7 +367,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (wrc !== undefined) prob = Math.max(0.3, Math.min(1, prob + (wrc - 100) / 300)); // form slack
     const algoPA = remainingGames * prob * PA_PER_GAME;
     const aPa = AUCTION_VALUES[String(p.id)]?.pa;
-    if (aPa === undefined || !AUCTION_AS_OF) return { pa: Math.round(algoPA), blended: false };
+    // An injured player's auction PA is depressed by missed time, not a part-time
+    // role — blending it would misprice him as a platoon guy. Value his everyday
+    // role (algo, full reps); the "currently out" hit is applied separately by
+    // injuryMultOf. As he nears return the projection recovers on its own.
+    if (aPa === undefined || !AUCTION_AS_OF || injuries[p.id]) return { pa: Math.round(algoPA), blended: false };
     const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
     const scaledAuction = aPa * (remainingGames / exportRemain);       // rescale stale magnitude
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
@@ -362,7 +384,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const isRp = ipg !== undefined && ipg < 2.01;
     const algoIP = isRp ? remainingGames * 0.33 : (remainingGames / 5) * (ipg ?? 5.4); // RP ~1/3 IP per team game; SP ~1 turn/5
     const aIp = AUCTION_VALUES[String(p.id)]?.ip;
-    if (aIp === undefined || !AUCTION_AS_OF) return Math.round(algoIP);
+    // Injured arms: the auction IP reflects missed starts, not a diminished role —
+    // value the healthy workload; injuryMultOf handles the current absence.
+    if (aIp === undefined || !AUCTION_AS_OF || injuries[p.id]) return Math.round(algoIP);
     const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
     const scaled = aIp * (remainingGames / exportRemain);
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
@@ -476,6 +500,15 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     }
     return Math.min(5, pace / 8) * security * competition;
   };
+  // Earning-reps nudge: a prime-age, high-peak-WAR bat who's currently part-time
+  // is talent waiting to play — give a little of the reps dock back (he tends to
+  // force his way in). Narrow by design; most high-WAR guys are already treated as
+  // everyday by establishedRegular, so this bites the in-between case (a young stud
+  // in a timeshare not yet clearing the established bar). Off for injured/pitchers.
+  const earnBump = (p: SearchResult) => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P' || injuries[p.id]) return 1;
+    return earningPtBump(metrics[p.id]?.war ?? 0, metrics[p.id]?.age, roles[p.id]?.rate);
+  };
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
@@ -484,6 +517,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       * injuryMultOf(p) * (armRiskOf(p) === 1 ? 1 : 0.93)
       * ptDockEff(p)
       * jobSecurity(p)
+      * earnBump(p)
       * platoonDock(p)
       * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
   };
@@ -520,7 +554,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return risk * roleF;
   };
   const fvOf = (p: SearchResult) => {
-    const ceiling = baseValue(p).future * fvPtFactor(p);
+    // WAR as LONG-TERM playing-time confidence — the dominant, FV-heavy use. A good
+    // WAR means durable everyday reps for years (keeper value you can bank); a poor
+    // WAR is a future-role question mark. Tilts the keeper ceiling by durability.
+    const durable = warDurability(metrics[p.id]?.war ?? 0, p.primaryPosition === 'P' ? undefined : p.primaryPosition);
+    const ceiling = baseValue(p).future * fvPtFactor(p) * durable;
     // Sustained-production floor: an established player is stable — his future
     // years ≈ his present production, discounted by how many good years remain
     // (keeperAgeFactor). So a solid-but-not-star vet's keeper value shouldn't
@@ -539,9 +577,21 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // here. This stops a younger, better-true-talent arm (Sproat, 25) from being
     // out-floored by an older, more-established one (Pfaadt, 27) purely because
     // his current PV is lower.
-    const sustained = war >= 2.0
-      ? (pvOf(p) / presentMaturity(metrics[p.id]?.age)) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P')
-      : 0;
+    // This "kept one more year of usefulness" floor is what gives a low-WAR but
+    // productive vet (Trevor Story, Marcus Semien) keeper value SLIGHTLY above
+    // replacement in a deep 20-team league — and, because it flows through PV and
+    // is measured against the league's replacement bar, below replacement in
+    // shallower leagues where the marginal keeper is better. Phased in with a
+    // smooth WAR taper (replacing the old hard war≥2.0 gate that caused a cliff):
+    // a genuine replacement-level scrub keeps little of it, a 1.5-WAR+ regular most.
+    const sustainTaper = Math.max(0, Math.min(1, (war - 0.4) / 1.4));
+    // Use the HEALTHY present value (un-dock the "currently out" injury hedge):
+    // keeper value is about future healthy seasons, so an injured everyday star's
+    // keeper worth shouldn't be suppressed by his current IL stint (his projected
+    // PA / auction $ are temporarily depressed by missed time, not a part-time role).
+    const healthyPv = pvOf(p) / injuryMultOf(p);
+    const sustained = sustainTaper
+      * (healthyPv / presentMaturity(metrics[p.id]?.age)) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P');
     // Closer keeper credit: the saves role is year-to-year volatile, so FV only
     // banks ~45% of the (risk-adjusted) premium, faded by pitcher aging.
     const savesFv = savesPremium(p) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
@@ -670,9 +720,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-zinc-300">You {side === 'A' ? 'get' : 'give'}</span>
         <span className="text-[11px] font-bold inline-flex gap-1">
-          <Tooltip text="Total present (win-now) value on this side."><span className="text-blue-200">PV {sumPv(players, side).toFixed(1)}</span></Tooltip> ·
-          <Tooltip text="Total future (keeper) value on this side."><span className="text-fuchsia-200">FV {sumFv(players, side).toFixed(1)}</span></Tooltip> ·
-          <Tooltip text={lensTitle}><span className="text-orange-300">{build.short} {sumLens(players, side).toFixed(1)}</span></Tooltip>
+          <Tooltip text="Total this-season value on this side."><span className="text-blue-200">Now {sumPv(players, side).toFixed(1)}</span></Tooltip> ·
+          <Tooltip text="Total keeper value on this side."><span className="text-fuchsia-200">Keep {sumFv(players, side).toFixed(1)}</span></Tooltip> ·
+          <Tooltip text={lensTitle}><span className="text-orange-300">{build.label} {sumLens(players, side).toFixed(1)}</span></Tooltip>
         </span>
       </div>
       {players.length === 0 && !showFa && !showTheoretical ? (
@@ -682,7 +732,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">{build.label} {lensOf(p).toFixed(1)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
@@ -692,7 +742,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">{build.label} {lensOf(p).toFixed(1)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
@@ -704,9 +754,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
               <div className="min-w-0">
                 <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} roster spot{theoreticalFill === 1 ? '' : 's'} freed <span className="not-italic text-[11px] text-zinc-500">— keep {theoreticalFill === 1 ? 'a player' : 'players'} you&apos;d have cut</span></div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">PV {pvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">FV {fvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.short} {(theoreticalFill * keepLens).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now {pvFill(theoreticalFill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep {fvFill(theoreticalFill).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.label} {(theoreticalFill * keepLens).toFixed(1)}</span>
                 </div>
               </div>
             </div>
@@ -734,7 +784,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       {ros.asOf && (
         <div className="text-center mb-3">
           <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300/80 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2.5 py-0.5" title="Present value's production layer is running on rest-of-season OOPSY projections, refreshed by the daily pipeline run.">
-            ● PV uses ROS projections · as of {new Date(ros.asOf + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+            ● &ldquo;Now&rdquo; values use rest-of-season projections · as of {new Date(ros.asOf + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
           </span>
         </div>
       )}
@@ -811,7 +861,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           <button onClick={() => setShowSettings(true)}
             className="w-full sm:w-auto rounded-lg border border-orange-500/40 bg-orange-500/10 hover:bg-orange-500/20 px-3 py-2 text-left cursor-pointer">
             <span className="text-sm font-semibold text-orange-300">⚙ Set up YOUR league first</span>
-            <span className="block text-[11px] text-zinc-400 mt-0.5">Values below assume the default {settings.teams}-team · {settings.keepers}-keeper · {settings.format.toUpperCase()} league — set your real teams, keepers, format and roster slots so PV/FV fit <em>your</em> league. {showSettings ? '' : 'Tap to open ▾'}</span>
+            <span className="block text-[11px] text-zinc-400 mt-0.5">Values below assume the default {settings.teams}-team · {settings.keepers}-keeper · {settings.format.toUpperCase()} league — set your real teams, keepers, format and roster slots so the values fit <em>your</em> league. {showSettings ? '' : 'Tap to open ▾'}</span>
           </button>
         )}
       </div>
@@ -888,9 +938,17 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         <button onClick={() => setFaFills([])} className="text-[11px] text-zinc-600 hover:text-zinc-400 cursor-pointer mt-2">Clear FA adds</button>
       )}
 
-      <p className="text-[11px] text-zinc-600 mt-3">
-        <strong className="text-blue-300">PV</strong> (present) = a WAR + auction-market base plus a live production layer (your current-year rate × <em>actual</em> recent playing time × park), then discounted for injury, a returning/pushing teammate, and job security. Position-aware: 1B/DH lean on the bat, catcher WAR is discounted for defense, and playing-time effects are MLB-only (prospects aren&apos;t docked). <strong className="text-fuchsia-300">FV</strong> (future/keeper) = peak ceiling × age × distance to the majors. An unbalanced trade (e.g. 2-for-1) <strong>frees roster spots</strong> — each one lets you keep a player you&apos;d otherwise have cut, worth at least a rosterable replacement (PV {PV_KEEP.toFixed(1)} · FV {FV_KEEP.toFixed(1)} per spot here, scaling up in shallower leagues), and that backfill counts in every lens total. Name the actual <strong className="text-emerald-300">＋FA</strong> / keeper for a spot to use his real value instead. The <strong className="text-orange-300">build lenses</strong> score every player as an <em>asset</em>: his projected production over the window that build cares about, blended with his keeper value (FV). <strong>Overall</strong> weighs the present most and decays outward; <strong>Win-now</strong> = this season + next, <strong>Contender</strong> = the next few, <strong>Retooling</strong> = next year onward (this season conceded), <strong>Rebuild</strong> = 2–3+ years out — the further out your window, the more keeper value counts. The verdict compares both sides through your active lens. Premium — a work in progress.
-      </p>
+      <div className="mt-4">
+        <button onClick={() => setShowHow((v) => !v)}
+          className="text-[11px] text-zinc-500 hover:text-zinc-300 cursor-pointer">
+          How scoring works {showHow ? '▲' : '▾'}
+        </button>
+        {showHow && (
+          <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
+            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — his ceiling and how many good years remain, so young risers sit above their Now value and aging vets below. The big number is your <strong className="text-orange-300">build</strong>: <strong>Overall</strong> weighs this season most and fades outward; <strong>Win-now</strong> is this year + next; <strong>Contender</strong> the next few; <strong>Retooling</strong> next year onward; <strong>Rebuild</strong> two-plus years out — the further out you&apos;re building, the more keeper value counts. A lopsided trade (2-for-1) frees a roster spot, worth a keepable replacement (Now {PV_KEEP.toFixed(1)} · Keep {FV_KEEP.toFixed(1)} here, more in shallower leagues); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. The verdict compares both sides through your build. Still being calibrated.
+          </p>
+        )}
+      </div>
       </>
       )}
     </div>

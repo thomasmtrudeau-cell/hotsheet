@@ -80,7 +80,10 @@ function isStaleId(id: string): boolean {
 // a $). We subtract the role's free-agent line (freely available on the wire)
 // and normalize to the PV scale; computeValue() blends it in. Kept here because
 // the auction table + FA lines are server-side reference data.
-const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 5 };
+// Hitter replacement line is $3 (not $5): the $4–5 auction bats are typically guys
+// we don't trust to actually get the playing time, so the real "freely available"
+// line sits lower — anyone above $3 carries some market value.
+const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 3 };
 const AUCTION_DIV = 5; // $ above the FA line per 1.0 of present value
 function marketBaselineFor(auctionId?: string): number | undefined {
   if (!auctionId) return undefined;
