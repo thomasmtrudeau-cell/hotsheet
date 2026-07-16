@@ -337,6 +337,33 @@ export async function fetchPremiumMap(
   return result;
 }
 
+// A slim, serializable snapshot of the whole parsed premium sheet — the daily cron
+// writes this to Storage so /api/war can join against it instead of pulling ~7MB of
+// gviz CSV on every cold start. Keyed by normalized name, same as the live maps.
+export interface PremiumSnapshot {
+  capturedAt: string;
+  hitters: Record<string, PremiumMetrics>;
+  pitchers: Record<string, PremiumMetrics>;
+}
+export async function buildPremiumSnapshot(sheetId: string): Promise<PremiumSnapshot> {
+  const { hitters, pitchers } = await getPremiumMaps(sheetId);
+  return {
+    capturedAt: new Date().toISOString(),
+    hitters: Object.fromEntries(hitters),
+    pitchers: Object.fromEntries(pitchers),
+  };
+}
+// Same name-join as fetchPremiumMap, but against a Storage snapshot (no fetch).
+export function premiumFromSnapshot(players: FollowedPlayer[], snap: PremiumSnapshot): Record<number, PremiumMetrics> {
+  const result: Record<number, PremiumMetrics> = {};
+  for (const p of players) {
+    const key = normalizeName(p.fullName);
+    const m = p.primaryPosition === 'P' ? snap.pitchers[key] : snap.hitters[key];
+    if (m) result[p.id] = m;
+  }
+  return result;
+}
+
 // Actual current-year pitching, pulled live from the MLB/MiLB stats API across
 // every level. Keyed by normalized name (the same join key the sheet uses); when
 // a pitcher has thrown at multiple levels we keep the one with the most innings

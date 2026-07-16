@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getWarRows } from '@/lib/war';
+import { getWarRows, buildPremiumSnapshot } from '@/lib/war';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const maxDuration = 60;
@@ -80,7 +80,22 @@ export async function GET(request: NextRequest) {
     const { error: thinErr } = await sb.rpc('thin_war_snapshots', { before_ts: new Date(Date.now() - 45 * 86_400_000).toISOString() });
     if (thinErr) console.error('thin_war_snapshots:', thinErr.message); // non-fatal hygiene
 
-    return NextResponse.json({ capturedAt, inserted: records.length });
+    // Cache a slim premium snapshot to Storage so /api/war joins against it (fast)
+    // instead of pulling ~7MB of sheet CSV on every cold start. Non-fatal — pricing
+    // falls back to the live fetch if this is missing/stale.
+    let premiumCached = false;
+    try {
+      const snap = await buildPremiumSnapshot(sheetId);
+      const store = createServiceClient();
+      await store.storage.createBucket('war', { public: false }); // idempotent; errors (already-exists) ignored below
+      const body = JSON.stringify(snap);
+      const { error: upErr } = await store.storage.from('war')
+        .upload('war_premium.json', body, { upsert: true, contentType: 'application/json' });
+      if (upErr) console.error('premium snapshot upload:', upErr.message);
+      else premiumCached = Object.keys(snap.hitters).length + Object.keys(snap.pitchers).length > 0;
+    } catch (e) { console.error('premium snapshot failed:', e); }
+
+    return NextResponse.json({ capturedAt, inserted: records.length, premiumCached });
   } catch (error) {
     console.error('war-snapshot error:', error);
     const detail = error instanceof Error ? error.message
