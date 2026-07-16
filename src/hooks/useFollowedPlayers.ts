@@ -50,14 +50,20 @@ export function useFollowedPlayers() {
       const prevById = new Map(prev.map((p) => [p.id, p]));
       const events = fresh.flatMap((next) => {
         const old = prevById.get(next.id);
-        return old ? diffPlayer(old, next) : [];
+        // Only diff against a fully-hydrated baseline. A just-followed player's
+        // stored record came from search — no injury data, and often his parent-org
+        // team rather than his current rehab affiliate — so its FIRST hydration
+        // would fire pre-existing conditions ("placed on IL", "affiliate move") as
+        // fake new alerts. Seed silently on first hydration; diff from then on.
+        return old?.baselined ? diffPlayer(old, next) : [];
       });
       if (events.length > 0) setNotifications(addNotifications(events));
 
-      // Persist the refreshed copies so the next visit diffs against these.
-      store.setCachedPlayers(fresh);
-      await store.bulkUpsertCloudPlayers(fresh);
-      if (rosterSignature(fresh) !== rosterSignature(prev)) setPlayers(fresh);
+      // Persist the refreshed copies (now marked baselined) so future refreshes diff.
+      const baselined = fresh.map((p) => ({ ...p, baselined: true }));
+      store.setCachedPlayers(baselined);
+      await store.bulkUpsertCloudPlayers(baselined);
+      if (rosterSignature(baselined) !== rosterSignature(prev)) setPlayers(baselined);
     } catch {
       // Offline / API hiccup — diff again next load.
     }

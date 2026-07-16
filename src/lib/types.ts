@@ -111,6 +111,7 @@ export interface FollowedPlayer {
   followedAt: string;
   injury?: InjuryStatus;
   onRehab?: boolean; // IL player currently on a minor-league rehab assignment (MLB status "RA")
+  baselined?: boolean; // has this player been fully hydrated at least once? Until then we don't diff — a freshly-followed record (from search) lacks injury/rehab-affiliate data, so its first hydration would fire pre-existing conditions as fake "new" alerts.
   batSide?: 'L' | 'R' | 'S'; // for platoon weighting in the matchup rating
   playingTimeRisk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; // same-org teammate at his (or an adjacent) position: IL return, minors pusher, or active roster crowd
 }
