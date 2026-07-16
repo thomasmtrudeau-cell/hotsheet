@@ -527,7 +527,15 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // expire (Burger, 1.5 WAR) doesn't get his production floored forward — his FV
     // is the age-faded ceiling, which lands below his PV, as it should.
     const war = metrics[p.id]?.war ?? 0;
-    const sustained = war >= 2.0 ? pvOf(p) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P') : 0;
+    // The keeper floor should reflect a young player's PEAK ability, not his
+    // pre-peak present value: presentMaturity docks a 25-yo's PV for not being at
+    // his ceiling YET, but keeper value banks that future peak — so un-dock it
+    // here. This stops a younger, better-true-talent arm (Sproat, 25) from being
+    // out-floored by an older, more-established one (Pfaadt, 27) purely because
+    // his current PV is lower.
+    const sustained = war >= 2.0
+      ? (pvOf(p) / presentMaturity(metrics[p.id]?.age)) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P')
+      : 0;
     // Closer keeper credit: the saves role is year-to-year volatile, so FV only
     // banks ~45% of the (risk-adjusted) premium, faded by pitcher aging.
     const savesFv = savesPremium(p) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
