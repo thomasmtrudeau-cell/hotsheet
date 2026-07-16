@@ -303,7 +303,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const m = metrics[p.id];
     if (!m) return false;
     const age = m.age ?? 26, wrc = m.peakWrcPlus ?? 0, war = m.war ?? 0;
-    return wrc >= 110 || war >= 2.5 || (age >= 30 && (wrc >= 100 || war >= 1.8));
+    const def = m.def;
+    return wrc >= 110 || war >= 2.5 || (age >= 30 && (wrc >= 100 || war >= 1.8))
+      || (age >= 30 && (def === 'plus' || def === 'double-plus')); // glove-first everyday vet
   };
   const ptRateOf = (p: SearchResult) => {
     if (p.sportId !== 1) return 1;
@@ -362,8 +364,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
     }
     const w = ros.hitters[k]?.wrc ?? m.curWrcPlus ?? m.peakWrcPlus;
-    if (w === undefined) return 0;
-    return Math.max(0, (w - 90) / 12) * ptRateOf(p) * mat; // bat rate × actual playing time × maturity
+    const rateProd = w === undefined ? 0 : Math.max(0, (w - 90) / 12); // OBP/rate value
+    // Counting value: a 30/30-type produces scarce HR+SB even with a modest rate
+    // (Trevor Story's 83 wRC+ zeroed his rate, but his ⚡💪30+ is real). Take the
+    // higher of rate vs counting so it lifts counting profiles without double-
+    // counting for guys who are strong at both.
+    const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 26;
+    return Math.max(rateProd, countingProd) * ptRateOf(p) * mat;
   };
   const DYN_W = 0.6; // weight of the dynamic production layer
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
@@ -397,13 +404,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const cur = m.war * presentMaturity(m.age);
     return cur >= 3.3 ? 1 : cur >= 2.5 ? 0.7 : cur >= 2.0 ? 0.4 : cur >= 1.5 ? 0.2 : 0;
   };
-  const ptDockEff = (p: SearchResult) => 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p));
+  const ptDockEff = (p: SearchResult) => (injuries[p.id] ? 1 : 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p)));
   // Injury dock scales with entrenchment: a fringe guy's IL stint threatens his job
   // (heavy dock), but an entrenched everyday star (J-Rod, big contract, played every
   // day pre-injury) returns to his role — his value is his healthy value minus only
   // a light "currently out" hedge, not a role loss. Shared by PV and the timeline
   // projection (which un-docks it for future healthy seasons).
-  const injuryMultOf = (p: SearchResult) => (injuries[p.id] ? 0.6 + 0.35 * entrench(p) : 1);
+  const injuryMultOf = (p: SearchResult) => (injuries[p.id] ? (establishedRegular(p) ? 0.9 : 0.6 + 0.35 * entrench(p)) : 1);
   // Pitcher ARM injuries (shoulder/elbow family) are a different species of risk
   // than a hamstring — they threaten the arm itself, so they fade KEEPER value,
   // not just current availability (Crochet problem: elite projection, shoulder
