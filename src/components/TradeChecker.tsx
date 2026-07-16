@@ -61,7 +61,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, pt, ptBlended, inju
       <Tooltip text="FV — future/keeper value: his peak ceiling × age × distance to the majors, on the same scale as PV. Aging vets fade below their PV; young stars carry big FV."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
       {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
       {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
-      {pt !== undefined && !injured && <span className={`${chip} bg-sky-500/20 text-sky-300`} title={`Estimated rest-of-season plate appearances — recent playing-time rate × games left, nudged by current form${ptBlended ? ', blended with the Depth-Chart auction projection' : ''}. Playing time is a probability estimate.`}>~{pt} PA</span>}
+      {pt !== undefined && <span className={`${chip} bg-sky-500/20 text-sky-300`} title={`Estimated rest-of-season plate appearances — recent playing-time rate × games left, nudged by current form${ptBlended ? ', blended with the Depth-Chart auction projection' : ''}. Playing time is a probability estimate.`}>~{pt} PA</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — ARM injury (shoulder/elbow family): keeper value faded, not just current availability.' : 'On the injured list'}>{armRisk ? 'IL·arm' : 'IL'}</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.kind === 'crowd' ? 'reps are split while both are healthy' : risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
@@ -346,8 +346,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
     const scaledAuction = aPa * (remainingGames / exportRemain);       // rescale stale magnitude
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
-    const wA = 0.5 * Math.max(0, 1 - ageDays / 28);                    // equal when fresh -> 0 by ~4wk
+    const wA = 0.66 * Math.max(0, 1 - ageDays / 28);                   // 66% DC when fresh -> 0 by ~4wk (they know Story/Semien play every day)
     return { pa: Math.round(wA * scaledAuction + (1 - wA) * algoPA), blended: wA > 0 };
+  };
+  const ptCredit = (p: SearchResult) => {
+    const est = estRosPA(p);
+    if (!est) return ptRateOf(p); // pitchers / minors — keep live-usage rate
+    return Math.max(0.3, Math.min(1.05, est.pa / (remainingGames * PA_PER_GAME)));
   };
   const dynProd = (p: SearchResult) => {
     if (p.sportId !== 1) return 0;
@@ -370,7 +375,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // higher of rate vs counting so it lifts counting profiles without double-
     // counting for guys who are strong at both.
     const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 26;
-    return Math.max(rateProd, countingProd) * ptRateOf(p) * mat;
+    return Math.max(rateProd, countingProd) * ptCredit(p) * mat;
   };
   const DYN_W = 0.6; // weight of the dynamic production layer
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
@@ -454,7 +459,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const pvOf = (p: SearchResult) => {
     // The WAR+market base assumes a full-time role, so it takes a mild continuous
     // playing-time haircut; the dynamic layer already bakes in actual usage.
-    const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.75 + 0.25 * ptRateOf(p) : 1;
+    const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.6 + 0.4 * ptCredit(p) : 1;
     return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPremium(p))
       * injuryMultOf(p) * (armRiskOf(p) === 1 ? 1 : 0.93)
       * ptDockEff(p)

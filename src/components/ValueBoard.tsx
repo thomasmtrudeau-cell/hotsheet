@@ -55,6 +55,12 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
       .then((d) => { if (Array.isArray(d?.rows)) setRows((prev) => [...prev.filter((x) => !x.isPitcher), ...d.rows]); })
       .catch(() => {})
       .finally(() => setPitchersLoading(false));
+    // Positions stream in after the rows render (public MLB rosters, cached) —
+    // fills prospects the auction export didn't cover. Off the critical path.
+    fetch('/api/positions')
+      .then((r) => r.json())
+      .then((d) => { const m = d?.map; if (m) setRows((prev) => prev.map((x) => x.pos || x.isPitcher ? x : { ...x, pos: m[x.nameKey] ?? x.pos })); })
+      .catch(() => {});
   }, []);
 
   const graded = useMemo(() => {
