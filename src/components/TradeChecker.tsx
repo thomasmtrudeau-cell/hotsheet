@@ -88,6 +88,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
+  const [ros, setRos] = useState<{ asOf: string | null; hitters: Record<string, { wrc?: number; sv?: number }>; pitchers: Record<string, { era?: number; sv?: number }> }>({ asOf: null, hitters: {}, pitchers: {} });
   const [savesPace, setSavesPace] = useState<Record<number, number>>({}); // MLB pitchers: projected full-season saves
   const [bullpen, setBullpen] = useState<Array<{ nameKey: string; team?: string; role?: string; peakEra20: number; currentEra20: number }> | null>(null); // all RPs w/ projected+actual ERA (lazy)
   const [settings, setSettings] = useState<LeagueSettings>(DEFAULT_SETTINGS);
@@ -117,6 +118,14 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // Deliberately NOT persisted — the lens always starts on Overall so the default
   // verdict is the neutral one; switch per-trade as needed.
   const updateBuild = useCallback((k: string) => setBuildKey(k), []);
+  // Rest-of-season projections (uploaded daily from the Mac pipeline) — the
+  // forward-looking rate PV prefers over current-year actuals.
+  useEffect(() => {
+    fetch('/api/ros').then((r) => r.json())
+      .then((d) => setRos({ asOf: d?.asOf ?? null, hitters: d?.hitters ?? {}, pitchers: d?.pitchers ?? {} }))
+      .catch(() => {});
+  }, []);
+  const rosKey = (name: string) => name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/['’`.]/g, '').replace(/\s+(jr|sr|ii|iii|iv|v)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
   const updateSettings = useCallback((s: LeagueSettings) => {
     setSettings(s);
     setSettingsCustomized(true);
@@ -315,11 +324,14 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // Pre-peak guys don't produce their peak rate yet (and a newly-promoted guy's
     // rate often falls back to the peak projection) — so age-discount here too.
     const mat = presentMaturity(m.age);
+    const k = rosKey(p.fullName);
     if (p.primaryPosition === 'P') {
-      const e = m.curEra20 ?? m.era20;
+      // ROS ERA is traditional; the model's ERA/20 runs ~0.2 higher — convert.
+      const rosEra = ros.pitchers[k]?.era;
+      const e = rosEra !== undefined ? rosEra + 0.2 : (m.curEra20 ?? m.era20);
       return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
     }
-    const w = m.curWrcPlus ?? m.peakWrcPlus;
+    const w = ros.hitters[k]?.wrc ?? m.curWrcPlus ?? m.peakWrcPlus;
     if (w === undefined) return 0;
     return Math.max(0, (w - 90) / 12) * ptRateOf(p) * mat; // bat rate × actual playing time × maturity
   };
@@ -649,6 +661,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         <span className="text-sm leading-none mt-0.5">🧪</span>
         <span><strong>Experimental</strong> — the value model is being actively calibrated and numbers can shift week to week. Treat verdicts as a second opinion, not gospel.</span>
       </div>
+      {ros.asOf && (
+        <div className="text-center mb-3">
+          <span className="inline-flex items-center gap-1.5 text-[11px] text-emerald-300/80 bg-emerald-500/10 border border-emerald-500/25 rounded-full px-2.5 py-0.5" title="Present value's production layer is running on rest-of-season OOPSY projections, refreshed by the daily pipeline run.">
+            ● PV uses ROS projections · as of {new Date(ros.asOf + 'T00:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+          </span>
+        </div>
+      )}
       <div className="flex justify-center mb-3">
         <div className="inline-flex rounded-md overflow-hidden border border-zinc-700">
           <button onClick={() => setTool('trade')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'trade' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>🔀 Trade checker</button>
