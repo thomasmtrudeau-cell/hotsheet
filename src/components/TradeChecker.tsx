@@ -3,6 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
+import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
 import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
@@ -41,7 +42,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, lens, pending, saves, pt, ptBlended, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; pt?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   if (pending) {
     // Values are still being priced — pulse placeholders instead of misleading 0.0s.
@@ -60,6 +61,7 @@ function Chips({ m, isPitcher, pv, fv, lens, pending, saves, injured, armRisk, r
       <Tooltip text="FV — future/keeper value: his peak ceiling × age × distance to the majors, on the same scale as PV. Aging vets fade below their PV; young stars carry big FV."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>FV {fv.toFixed(1)}</span></Tooltip>
       {lens && <Tooltip text={lens.title}><span className={`${chip} bg-orange-500/25 text-orange-200`}>{lens.label} {lens.value.toFixed(1)}</span></Tooltip>}
       {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="IL-aware playing-time role over the team's recent games">{role.label}</span>}
+      {pt !== undefined && !injured && <span className={`${chip} bg-sky-500/20 text-sky-300`} title={`Estimated rest-of-season plate appearances — recent playing-time rate × games left, nudged by current form${ptBlended ? ', blended with the Depth-Chart auction projection' : ''}. Playing time is a probability estimate.`}>~{pt} PA</span>}
       {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — ARM injury (shoulder/elbow family): keeper value faded, not just current availability.' : 'On the injured list'}>{armRisk ? 'IL·arm' : 'IL'}</span>}
       {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'on the IL'} — ${risk.kind === 'crowd' ? 'reps are split while both are healthy' : risk.adjacent ? 'a positional logjam that could shuffle his reps' : 'a direct threat to his reps'}`}>⚠ PT</span>}
       {m?.age !== undefined && <span className={`${chip} bg-zinc-700/50 text-zinc-300`} title="Projection age">{Number.isInteger(m.age) ? m.age : m.age.toFixed(1)} yo</span>}
@@ -317,6 +319,34 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // by ACTUAL recent playing time. This is the non-WAR, usage-responsive layer —
   // it's what lets a DH/1B's live bat (or a slumping/benched guy's drop) move PV
   // even when WAR is stale or positionally distorted. Majors only.
+  // ---- Rest-of-season playing-time estimate (hitters). PT is a probability
+  // guess, so this is explicitly an estimate. Base = recent games-played rate;
+  // nudged by current-year form (a hot bat earns manager slack, a cold one loses
+  // reps); the crowd/IL threats already dock the rate upstream. Blended with the
+  // FanGraphs Depth-Chart PA from a fresh auction export — equal weight when
+  // fresh, decaying to all-algorithm over ~4 weeks, and the stale snapshot is
+  // rescaled to today's remaining games (it projected from more games left). ----
+  const seasonFrac = (iso?: string) => {
+    const start = Date.parse('2026-03-26');
+    const now = iso ? Date.parse(iso) : Date.now();
+    return Math.min(1, Math.max(0, (now - start) / (183 * 86_400_000)));
+  };
+  const remainingGames = Math.round(162 * (1 - seasonFrac()));
+  const PA_PER_GAME = 4.15;
+  const estRosPA = (p: SearchResult): { pa: number; blended: boolean } | undefined => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P') return undefined;
+    let prob = ptRateOf(p); // 1 for established/injured (handled in ptRateOf), else recent rate
+    const wrc = metrics[p.id]?.curWrcPlus ?? metrics[p.id]?.peakWrcPlus;
+    if (wrc !== undefined) prob = Math.max(0.3, Math.min(1, prob + (wrc - 100) / 300)); // form slack
+    const algoPA = remainingGames * prob * PA_PER_GAME;
+    const aPa = AUCTION_VALUES[String(p.id)]?.pa;
+    if (aPa === undefined || !AUCTION_AS_OF) return { pa: Math.round(algoPA), blended: false };
+    const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
+    const scaledAuction = aPa * (remainingGames / exportRemain);       // rescale stale magnitude
+    const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
+    const wA = 0.5 * Math.max(0, 1 - ageDays / 28);                    // equal when fresh -> 0 by ~4wk
+    return { pa: Math.round(wA * scaledAuction + (1 - wA) * algoPA), blended: wA > 0 };
+  };
   const dynProd = (p: SearchResult) => {
     if (p.sportId !== 1) return 0;
     const m = metrics[p.id];
@@ -613,7 +643,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -623,7 +653,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition} · FA add</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>

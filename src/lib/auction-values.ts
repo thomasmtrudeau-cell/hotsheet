@@ -6,7 +6,12 @@
 // base model + Value Board get catcher/corner logic and roster-slot scarcity
 // without an MLB API lookup. Regenerate with scripts/build-auction-values.mjs.
 export type AuctionRole = 'SP' | 'RP' | 'HIT';
-export const AUCTION_VALUES: Record<string, { d: number; r: AuctionRole; pos?: string }> = {
+// PA (hitters) / IP (pitchers) = the FanGraphs Depth-Chart rest-of-season
+// playing time baked into the auction export. AUCTION_AS_OF stamps when the CSVs
+// were exported, so the PT blend can decay a stale snapshot. Null until PA/IP are
+// ingested (re-run scripts/build-auction-values.mjs on fresh exports).
+export const AUCTION_AS_OF: string | null = null;
+export const AUCTION_VALUES: Record<string, { d: number; r: AuctionRole; pos?: string; pa?: number; ip?: number }> = {
   '2967': { d: -17.6, r: 'HIT', pos: 'OF' },
   '3096': { d: 2.9, r: 'RP', pos: 'RP' },
   '3137': { d: -0.4, r: 'SP', pos: 'SP' },
