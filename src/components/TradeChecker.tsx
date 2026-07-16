@@ -374,10 +374,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     // (Trevor Story's 83 wRC+ zeroed his rate, but his ⚡💪30+ is real). Take the
     // higher of rate vs counting so it lifts counting profiles without double-
     // counting for guys who are strong at both.
-    const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 26;
+    const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 20; // HR/SB are scarce categories — worth more than their WAR share
     return Math.max(rateProd, countingProd) * ptCredit(p) * mat;
   };
-  const DYN_W = 0.6; // weight of the dynamic production layer
+  const DYN_W = 0.7; // weight of the fantasy-production layer (up from 0.6 — counting/rate output matters more than the WAR base for a fantasy roster)
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
   // sits against the tough-side arm — applies to lefties AND righties (Esteury
   // Ruiz is a RHB platoon guy). But you can MASH your way out (a big wRC+ plays
@@ -654,7 +654,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span></div>
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}</span> <span className="text-[13px] font-bold text-orange-300">{lensOf(p).toFixed(1)} {build.short}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
