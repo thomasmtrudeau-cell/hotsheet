@@ -9,6 +9,7 @@ import { computeValue, DEFAULT_SETTINGS } from './value-model';
 // hitting has one exact "WAR" col + "DEF" + "wRC+"; pitching WAR is "WAR (20 TBFG)".
 
 const HIT_TAB = 'peak hitting raw';
+const CUR_HIT_TAB = '2025 hitting raw'; // authoritative CURRENT-year hitter projection (per Jordan) — peak tab lacks it, so hitter PV was running on peak rate
 const PIT_TAB = 'pitching raw';
 
 // Normalize a player name for joining sheet rows to followed players: drop
@@ -223,12 +224,34 @@ async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, P
   const now = Date.now();
   if (cache && cache.sheetId === sheetId && now - cache.at < TTL) return cache;
   try {
-    const [hitCsv, pitCsv] = await Promise.all([
+    const [hitCsv, pitCsv, curHitCsv] = await Promise.all([
       fetchCsvTab(sheetId, HIT_TAB),
       fetchCsvTab(sheetId, PIT_TAB),
+      fetchCsvTab(sheetId, CUR_HIT_TAB).catch(() => ''), // non-fatal if the tab moves/renames
     ]);
     const hitters = parseTab(hitCsv, 'name', false);
     const pitchers = parseTab(pitCsv, 'player', true);
+    // Backfill hitter CURRENT-year wRC+ from the dedicated current tab — the peak
+    // tab doesn't carry it, so without this PV's production layer falls back to
+    // the PEAK rate (a slumping hitter reads at his ceiling). Joined by name.
+    if (curHitCsv) {
+      const rows = parseCsv(curHitCsv);
+      if (rows.length > 1) {
+        const h = rows[0].map((x) => x.trim());
+        const ni = h.findIndex((x) => x.toLowerCase() === 'name');
+        const ci = h.findIndex((x) => x === 'wRC+ - current year only');
+        const ci2 = ci >= 0 ? ci : h.findIndex((x) => x === 'wRC+'); // fall back to the tab's headline current wRC+
+        if (ni >= 0 && ci2 >= 0) {
+          for (let r = 1; r < rows.length; r++) {
+            const nm = rows[r][ni]?.trim();
+            if (!nm) continue;
+            const cw = parseFloat(rows[r][ci2]);
+            const m = hitters.get(normalizeName(nm));
+            if (m && Number.isFinite(cw)) m.curWrcPlus = Math.round(cw);
+          }
+        }
+      }
+    }
     // A transient bad/empty response must not clobber good data — keep the last
     // good cache rather than blanking every player's metrics to zero.
     if (hitters.size === 0 && pitchers.size === 0 && cache && cache.sheetId === sheetId) {
