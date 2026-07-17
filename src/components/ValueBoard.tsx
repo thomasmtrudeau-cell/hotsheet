@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { computeValue, overallValue, warDurability, LeagueSettings } from '@/lib/value-model';
+import { liveValue, LeagueSettings } from '@/lib/value-model';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
@@ -10,6 +10,9 @@ type SortKey = 'war' | 'FAN' | 'PV' | 'FV' | 'OV';
 
 const LEVELS = ['MLB', 'AAA', 'AA', 'A+', 'A', 'Rk'] as const;
 type Level = (typeof LEVELS)[number];
+// Same normalization the Trade Checker uses to key ROS rates by player name.
+const rosKey = (name: string) => name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/['’`.]/g, '').replace(/\s+(jr|sr|ii|iii|iv|v)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
 function levelBucket(lvl?: string): Level {
   const l = (lvl ?? '').toUpperCase();
   if (l.includes('MLB') || l.includes('MAJOR')) return 'MLB';
@@ -22,8 +25,9 @@ function levelBucket(lvl?: string): Level {
 
 // The Value Board: every projected player scored by the BASE model (sheet + age
 // curves + league settings) across all grades — an implicit ranking per build,
-// for bulk calibration review. Live layers (park, injury, playing time, saves)
-// apply only in the trade view, so a few rows (e.g. closers) read low here.
+// for bulk review — the SAME shared pipeline (value-model's liveValue) the Trade
+// Checker uses, so a healthy everyday player grades identically in both. Only the
+// per-player live layers (injury, park, observed PT, saves) are trade-view-only.
 export default function ValueBoard({ settings, isFollowing }: {
   settings: LeagueSettings;
   isFollowing: (name: string) => boolean;
@@ -36,6 +40,9 @@ export default function ValueBoard({ settings, isFollowing }: {
   const [minWar, setMinWar] = useState(1.5);
   const [sort, setSort] = useState<SortKey>('OV');
   const [limit, setLimit] = useState(250); // paginated: "Show more" loads +250
+  // Rest-of-season current-form rates (same source the Trade Checker uses) — so a
+  // player's fantasy-production layer matches between the board and a trade card.
+  const [ros, setRos] = useState<{ hitters: Record<string, { wrc?: number }>; pitchers: Record<string, { era?: number }> }>({ hitters: {}, pitchers: {} });
 
   const [pitchersLoading, setPitchersLoading] = useState(false);
   useEffect(() => {
@@ -58,6 +65,11 @@ export default function ValueBoard({ settings, isFollowing }: {
       .then((r) => r.json())
       .then((d) => { const m = d?.map; if (m) setRows((prev) => prev.map((x) => x.pos || x.isPitcher ? x : { ...x, pos: m[x.nameKey] ?? x.pos })); })
       .catch(() => {});
+    // ROS rates (the current-form fantasy-production input) — bulk map keyed by name.
+    fetch('/api/ros')
+      .then((r) => r.json())
+      .then((d) => setRos({ hitters: d?.hitters ?? {}, pitchers: d?.pitchers ?? {} }))
+      .catch(() => {});
   }, []);
 
   const graded = useMemo(() => {
@@ -69,20 +81,24 @@ export default function ValueBoard({ settings, isFollowing }: {
         age: r.age, level: r.level, marketBaseline: r.marketBaseline,
         defRuns: r.defRuns, ipg: r.ipg,
       };
-      const base = computeValue(inputs, settings);
       const bucket = levelBucket(r.level);
-      // Keeper value gets the same WAR-durability tilt as the trade view (a good WAR
-      // means durable future reps). Live layers (park/injury/actual PT/saves/ROS)
-      // stay trade-view-only — the board is the base-model ranking.
-      const fv = base.future * warDurability(r.war ?? 0, r.isPitcher ? undefined : r.pos);
-      const grades: Record<string, number> = {
-        PV: base.present,
-        FV: fv,
-        OV: overallValue(base.present, fv),
-      };
+      const rk = rosKey(r.player);
+      // SAME shared pipeline as the Trade Checker (value-model's liveValue), fed the
+      // BULK-available live layers: whether he's in the majors and his rest-of-season
+      // current-form rate. Per-player live layers (observed playing time, injury,
+      // park, saves, PT threats) can't be fetched for a whole board, so they stay
+      // neutral here. Net effect: a healthy, everyday, neutral-park player grades
+      // IDENTICALLY to his trade card; an injured / benched / closer reads his
+      // clean base value here (the trade view is where those adjustments apply).
+      const v = liveValue(inputs, settings, {
+        isMLB: bucket === 'MLB',
+        rosWrc: !r.isPitcher ? ros.hitters[rk]?.wrc : undefined,
+        rosEra: r.isPitcher ? ros.pitchers[rk]?.era : undefined,
+      });
+      const grades: Record<string, number> = { PV: v.present, FV: v.future, OV: v.overall };
       return { ...r, bucket, grades };
     });
-  }, [rows, settings]);
+  }, [rows, settings, ros]);
 
   const sorted = useMemo(() => {
     const f = q.trim().toLowerCase();
@@ -129,7 +145,7 @@ export default function ValueBoard({ settings, isFollowing }: {
   return (
     <div>
       <p className="text-[11px] text-zinc-500 mb-3">
-        Every projected player through the <span className="text-zinc-300">base model</span> (league-settings aware) — sort any column for an implicit ranking per build. Live layers (park, injury, playing time, <span className="text-zinc-400">saves</span>) apply only in the trade view, so closers and role-risk guys read differently there.
+        Every projected player through the <span className="text-zinc-300">same value model as the Trade Checker</span> (league-settings aware) — sort any column for a full ranking. A healthy, everyday player grades the <span className="text-zinc-300">same here as in a trade</span>; per-player live layers (injury, park, observed playing time, <span className="text-zinc-400">saves</span>) apply only in the trade view, so an injured, benched, or closer role reads differently there.
       </p>
 
       {/* Filters */}

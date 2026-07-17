@@ -440,3 +440,82 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   return { present: r(present), future: r(future) };
 }
+
+// ---- LIVE value: the trade-grade Now / Keep / Overall. The SINGLE source of
+// truth for the graded values shown in BOTH the Trade Checker and the Value
+// Board — do not re-derive PV/FV in the components. It wraps computeValue's
+// neutral base with the two layers the base model omits:
+//   1) the fantasy-PRODUCTION layer (current-form rate + scarce HR/SB counting,
+//      scaled by playing time) — the biggest chunk of present value, and
+//   2) the SUSTAINED-production keeper floor (an established bat's future years ≈
+//      his present production, age-discounted), which lifts a solid vet's Keep.
+// Every genuinely-LIVE signal (injury, park, saves, observed role, platoon, PT
+// threats) arrives via `layers`, each defaulting to NEUTRAL — so a healthy,
+// everyday, neutral-park player reads IDENTICALLY on the board and in a trade.
+// The board supplies only the bulk-available layers (isMLB, ROS rates); the
+// Trade Checker supplies the full live set. Whatever differs between the two is
+// therefore exactly a real live adjustment (an injury, a benching, a park), not
+// a code-drift artifact.
+export const DYN_W = 0.7; // weight of the fantasy-production layer over the WAR/market base
+
+export interface ValueLayers {
+  isMLB?: boolean;        // MLB player? the fantasy layer + PT haircut are majors-only (default false → prospects score off the neutral base, as they do in a trade)
+  ptCredit?: number;      // 0.3–1.05 fraction of full-time reps (hitters); default 1 (everyday). Playing time is a live layer — the board leaves it at 1.
+  rosWrc?: number;        // rest-of-season wRC+ (hitters) — the preferred current-form rate; falls back to cur/peak
+  rosEra?: number;        // rest-of-season ERA, traditional scale (pitchers); falls back to cur/peak ERA/20
+  savesPremium?: number;  // closer saves value (trade-only, needs live saves pace); default 0
+  fvPtFactor?: number;    // keeper PT / role-attainment factor; default 1
+  injuryMult?: number;    // present injury dock; default 1
+  armPvMult?: number;     // present arm-injury nick (0.93 if arm-injured); default 1
+  armFvMult?: number;     // keeper arm-injury fade; default 1
+  ptDockEff?: number;     // present PT-threat dock (returnee / minors pusher / roster crowd); default 1
+  jobSecurity?: number;   // present job-security (WAR as PT confidence, position-aware); default 1
+  earnBump?: number;      // prime-age high-WAR buy-low reps nudge; default 1
+  platoonDock?: number;   // platoon-role dock; default 1
+  homePark?: number;      // home-park run environment; default 1
+}
+
+// Fantasy PRODUCTION rate scaled by playing time — the non-WAR, usage-responsive
+// layer that lets a live bat/arm move present value. Majors-only (a prospect's
+// production doesn't count toward THIS season, so it stays on the neutral base).
+function fantasyProd(inp: ValueInputs, L: ValueLayers): number {
+  if (!L.isMLB) return 0;
+  const mat = presentMaturity(inp.age); // pre-peak guys don't produce their peak rate yet
+  if (inp.isPitcher) {
+    // ROS ERA is traditional; the model's ERA/20 runs ~0.2 higher — convert.
+    const e = L.rosEra !== undefined ? L.rosEra + 0.2 : (inp.curEra20 ?? inp.era20);
+    return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
+  }
+  const w = L.rosWrc ?? inp.curWrcPlus ?? inp.peakWrcPlus;
+  const rateProd = w === undefined ? 0 : Math.max(0, (w - 90) / 12);       // OBP/rate value
+  const countingProd = ((inp.hr ?? 0) + (inp.sb ?? 0)) / 18;              // scarce HR+SB — worth more than their WAR share
+  return Math.max(rateProd, countingProd) * (L.ptCredit ?? 1) * mat;
+}
+
+export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}): { present: number; future: number; overall: number } {
+  const base = computeValue(inp, s);
+  const ptCredit = L.ptCredit ?? 1;
+  // Present: the WAR+market base assumes a full-time role, so MLB hitters take a
+  // mild continuous PT haircut; the fantasy layer already bakes in actual usage.
+  const ptHaircut = L.isMLB && !inp.isPitcher ? 0.6 + 0.4 * ptCredit : 1;
+  const injuryMult = L.injuryMult ?? 1;
+  const present = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L) + (L.savesPremium ?? 0))
+    * injuryMult * (L.armPvMult ?? 1)
+    * (L.ptDockEff ?? 1) * (L.jobSecurity ?? 1) * (L.earnBump ?? 1)
+    * (L.platoonDock ?? 1) * (L.homePark ?? 1);
+  // Keeper: the durability-tilted ceiling, floored by sustained production.
+  const durable = warDurability(inp.war ?? 0, inp.isPitcher ? undefined : inp.position);
+  const ceiling = base.future * (L.fvPtFactor ?? 1) * durable;
+  const war = inp.war ?? 0;
+  // Sustained-production floor: an established player's future years ≈ his present
+  // production, discounted by how many good years remain (keeperAgeFactor). Un-dock
+  // the age-maturity haircut (keeper banks the peak) and the current-IL hedge
+  // (keeper value is about future healthy seasons). Phased in with a smooth WAR
+  // taper so a genuine scrub keeps little of it and a 1.5-WAR+ regular most.
+  const sustainTaper = clamp((war - 0.4) / 1.4, 0, 1);
+  const healthyPv = present / injuryMult;
+  const sustained = sustainTaper * (healthyPv / presentMaturity(inp.age)) * keeperAgeFactor(inp.age, inp.isPitcher);
+  const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
+  const future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
+  return { present, future, overall: overallValue(present, future) };
+}

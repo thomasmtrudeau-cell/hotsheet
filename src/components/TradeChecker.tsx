@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { computeValue, presentMaturity, keeperAgeFactor, overallValue, ptFragility, earningPtBump, warDurability, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
@@ -272,16 +272,17 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // Base PV/FV recomputed live from raw inputs against the user's league
   // settings (keeper depth, format, positional slots), then PV gets the dynamic
   // discounts layered on top.
-  const baseValue = (p: SearchResult) => {
-    const m = metrics[p.id];
-    if (!m) return { present: 0, future: 0 };
-    return computeValue({
+  // Raw sheet inputs for the shared value pipeline. Live signals (injury, park,
+  // saves, observed role, platoon, PT threats) ride in separately via layersOf.
+  const inputsOf = (p: SearchResult) => {
+    const m = metrics[p.id] ?? {};
+    return {
       isPitcher: p.primaryPosition === 'P', position: p.primaryPosition,
       war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
       defRuns: m.defRuns, ipg: m.ipg,
-    }, settings);
+    };
   };
   // Actual playing-time rate (fraction of team games he's appeared in), from the
   // game log — the DYNAMIC signal. Majors only; pitchers carry a normal workload;
@@ -375,32 +376,9 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (!est) return ptRateOf(p); // pitchers / minors — keep live-usage rate
     return Math.max(0.3, Math.min(1.05, est.pa / (remainingGames * PA_PER_GAME)));
   };
-  const dynProd = (p: SearchResult) => {
-    if (p.sportId !== 1) return 0;
-    const m = metrics[p.id];
-    if (!m) return 0;
-    // Pre-peak guys don't produce their peak rate yet (and a newly-promoted guy's
-    // rate often falls back to the peak projection) — so age-discount here too.
-    const mat = presentMaturity(m.age);
-    const k = rosKey(p.fullName);
-    if (p.primaryPosition === 'P') {
-      // ROS ERA is traditional; the model's ERA/20 runs ~0.2 higher — convert.
-      const rosEra = ros.pitchers[k]?.era;
-      const e = rosEra !== undefined ? rosEra + 0.2 : (m.curEra20 ?? m.era20);
-      return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
-    }
-    const w = ros.hitters[k]?.wrc ?? m.curWrcPlus ?? m.peakWrcPlus;
-    const rateProd = w === undefined ? 0 : Math.max(0, (w - 90) / 12); // OBP/rate value
-    // Counting value: a scarce HR+SB profile is worth more than its rate suggests.
-    // Uses peak HR/SB (as a rate × PT). We tried a ROS dollarized-counting signal
-    // (auction mHR+mSB) but it under-credited real counting bats — dollarized mHR
-    // goes NEGATIVE for modest power and cancels a speedster's SB value, and it
-    // double-counted the market anchor (which already carries mHR/mSB). Peak HR/SB
-    // is the cleaner signal; the market anchor handles current-form counting.
-    const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 18; // HR/SB are scarce categories — worth more than their WAR share
-    return Math.max(rateProd, countingProd) * ptCredit(p) * mat;
-  };
-  const DYN_W = 0.7; // weight of the fantasy-production layer (up from 0.6 — counting/rate output matters more than the WAR base for a fantasy roster)
+  // (The fantasy-production layer — current-form rate + scarce HR/SB counting ×
+  // playing time — now lives in value-model's shared liveValue, fed the live
+  // ROS rates + ptCredit below. This keeps the board and the trade calc in sync.)
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
   // sits against the tough-side arm — applies to lefties AND righties (Esteury
   // Ruiz is a RHB platoon guy). But you can MASH your way out (a big wRC+ plays
@@ -536,18 +514,33 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (p.sportId !== 1 || p.primaryPosition === 'P' || injuries[p.id]) return 1;
     return earningPtBump(metrics[p.id]?.war ?? 0, metrics[p.id]?.age, roles[p.id]?.rate);
   };
-  const pvOf = (p: SearchResult) => {
-    // The WAR+market base assumes a full-time role, so it takes a mild continuous
-    // playing-time haircut; the dynamic layer already bakes in actual usage.
-    const ptHaircut = p.sportId === 1 && p.primaryPosition !== 'P' ? 0.6 + 0.4 * ptCredit(p) : 1;
-    return (baseValue(p).present * ptHaircut + DYN_W * dynProd(p) + savesPremium(p))
-      * injuryMultOf(p) * (armRiskOf(p) === 1 ? 1 : 0.93)
-      * ptDockEff(p)
-      * jobSecurity(p)
-      * earnBump(p)
-      * platoonDock(p)
-      * homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
+  // Assemble the LIVE layers for a player — every game-log / injury / park / saves
+  // signal, each collapsing to neutral (1, or 0 for saves) when it doesn't apply.
+  // The shared liveValue in value-model takes these on top of the neutral base;
+  // the Value Board passes only the bulk-available ones (isMLB + ROS rates), so a
+  // player with no live adjustments reads identically in both places.
+  const layersOf = (p: SearchResult): ValueLayers => {
+    const k = rosKey(p.fullName);
+    const arm = armRiskOf(p);
+    return {
+      isMLB: p.sportId === 1,
+      ptCredit: ptCredit(p),
+      rosWrc: p.primaryPosition !== 'P' ? ros.hitters[k]?.wrc : undefined,
+      rosEra: p.primaryPosition === 'P' ? ros.pitchers[k]?.era : undefined,
+      savesPremium: savesPremium(p),
+      fvPtFactor: fvPtFactor(p),
+      injuryMult: injuryMultOf(p),
+      armPvMult: arm === 1 ? 1 : 0.93,
+      armFvMult: arm,
+      ptDockEff: ptDockEff(p),
+      jobSecurity: jobSecurity(p),
+      earnBump: earnBump(p),
+      platoonDock: platoonDock(p),
+      homePark: homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P'),
+    };
   };
+  const valueOf = (p: SearchResult) => liveValue(inputsOf(p), settings, layersOf(p));
+  const pvOf = (p: SearchResult) => valueOf(p).present;
   // Keeper value also takes a (softer) playing-time hit: a projection that
   // assumes a full-time role is worth less if that role is tenuous — a returning/
   // pushing teammate (Arias behind Ramírez) or a part-time role now. Softer than
@@ -580,50 +573,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     }
     return risk * roleF;
   };
-  const fvOf = (p: SearchResult) => {
-    // WAR as LONG-TERM playing-time confidence — the dominant, FV-heavy use. A good
-    // WAR means durable everyday reps for years (keeper value you can bank); a poor
-    // WAR is a future-role question mark. Tilts the keeper ceiling by durability.
-    const durable = warDurability(metrics[p.id]?.war ?? 0, p.primaryPosition === 'P' ? undefined : p.primaryPosition);
-    const ceiling = baseValue(p).future * fvPtFactor(p) * durable;
-    // Sustained-production floor: an established player is stable — his future
-    // years ≈ his present production, discounted by how many good years remain
-    // (keeperAgeFactor). So a solid-but-not-star vet's keeper value shouldn't
-    // collapse below his PV the way the ceiling-above-the-keeper-bar formula alone
-    // does (Griffin Jax: FV 2.0 vs PV 2.7). Young/star guys are unaffected — their
-    // ceiling already exceeds this. Park + current form flow in via PV, so a
-    // pitcher's durable park edge counts here too. FV dips below PV only as age
-    // fades the keeperAgeFactor below 1 (~30+), which is the clean FV<PV crossover.
-    // GATED to genuine everyday talent (WAR ≥ 2.0): a low-WAR bat-only guy about to
-    // expire (Burger, 1.5 WAR) doesn't get his production floored forward — his FV
-    // is the age-faded ceiling, which lands below his PV, as it should.
-    const war = metrics[p.id]?.war ?? 0;
-    // The keeper floor should reflect a young player's PEAK ability, not his
-    // pre-peak present value: presentMaturity docks a 25-yo's PV for not being at
-    // his ceiling YET, but keeper value banks that future peak — so un-dock it
-    // here. This stops a younger, better-true-talent arm (Sproat, 25) from being
-    // out-floored by an older, more-established one (Pfaadt, 27) purely because
-    // his current PV is lower.
-    // This "kept one more year of usefulness" floor is what gives a low-WAR but
-    // productive vet (Trevor Story, Marcus Semien) keeper value SLIGHTLY above
-    // replacement in a deep 20-team league — and, because it flows through PV and
-    // is measured against the league's replacement bar, below replacement in
-    // shallower leagues where the marginal keeper is better. Phased in with a
-    // smooth WAR taper (replacing the old hard war≥2.0 gate that caused a cliff):
-    // a genuine replacement-level scrub keeps little of it, a 1.5-WAR+ regular most.
-    const sustainTaper = Math.max(0, Math.min(1, (war - 0.4) / 1.4));
-    // Use the HEALTHY present value (un-dock the "currently out" injury hedge):
-    // keeper value is about future healthy seasons, so an injured everyday star's
-    // keeper worth shouldn't be suppressed by his current IL stint (his projected
-    // PA / auction $ are temporarily depressed by missed time, not a part-time role).
-    const healthyPv = pvOf(p) / injuryMultOf(p);
-    const sustained = sustainTaper
-      * (healthyPv / presentMaturity(metrics[p.id]?.age)) * keeperAgeFactor(metrics[p.id]?.age, p.primaryPosition === 'P');
-    // Closer keeper credit: the saves role is year-to-year volatile, so FV only
-    // banks ~45% of the (risk-adjusted) premium, faded by pitcher aging.
-    const savesFv = savesPremium(p) * 0.45 * keeperAgeFactor(metrics[p.id]?.age, true);
-    return (Math.max(ceiling, sustained) + savesFv) * armRiskOf(p);
-  };
+  // Keeper value: the durability-tilted ceiling floored by sustained production —
+  // now computed inside the shared liveValue (fed the fvPtFactor / saves / arm-risk
+  // layers above), so the board and trade calc grade Keep identically.
+  const fvOf = (p: SearchResult) => valueOf(p).future;
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
   // roster, who in a deep league is well above replacement (good players never hit
@@ -654,7 +607,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // too: a real prospect's big keeper ceiling (FV) keeps his overall above the line,
   // but a low-FV/useless prospect (overall ≈ ¾ of his FV) falls below it and floors,
   // so you can't hack a trade by tossing in throwaway prospects.
-  const ovOf = (p: SearchResult) => overallValue(pvOf(p), fvOf(p));
+  const ovOf = (p: SearchResult) => valueOf(p).overall;
   const ovKeep = overallValue(PV_KEEP, FV_KEEP);
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   const pvContrib = (p: SearchResult) => (belowRepl(p) ? PV_KEEP : pvOf(p));
