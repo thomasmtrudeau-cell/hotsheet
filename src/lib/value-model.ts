@@ -99,6 +99,18 @@ export function proximityMultiplier(level?: string): number {
   return 0.5;
 }
 
+// The keeper-ceiling deferral discount: a prospect is years from his peak
+// (maturityFactor) AND far from the majors (proximityMultiplier). Both key on
+// LEVEL, so multiplying them double-counts the same "young and far" risk and
+// crushes elite young prospects below replacement (a 2.79-WAR 19-yo SS in A-ball
+// is a prized dynasty keeper, not a scrub). Combine them additively so each risk
+// contributes ~60% of its discount. MLB players are unaffected (both factors = 1).
+export function keeperDeferral(age?: number, level?: string, isPitcher?: boolean, rebuilder?: boolean): number {
+  const mat = maturityFactor(age, level, isPitcher, rebuilder);
+  const prox = proximityMultiplier(level);
+  return Math.max(0.3, 1 - (1 - mat) * 0.6 - (1 - prox) * 0.6);
+}
+
 // Time-to-peak discount for FUTURE value. A player's productive peak window is
 // ~26-29; value years out is deferred and carries bust / attrition / years-of-
 // minors risk. But once a guy reaches the MAJORS his value has ARRIVED — he's
@@ -398,7 +410,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const clears = clamp((fWarKeeper - bar + 0.75) / 1.5, 0, 1);
   const warTerm = Math.max(0, fWarKeeper - bar) * growth;
   const fantasyTerm = fantasy * (0.15 + 0.85 * clears) * fantasyFade;
-  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * maturityFactor(inp.age, inp.level, inp.isPitcher, s.rebuilder) * proximityMultiplier(inp.level) * scar;
+  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
