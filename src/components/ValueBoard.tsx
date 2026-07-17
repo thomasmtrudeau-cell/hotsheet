@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { computeValue, fantasyRate, overallValue, LeagueSettings } from '@/lib/value-model';
+import { computeValue, fantasyRate, overallValue, warDurability, LeagueSettings } from '@/lib/value-model';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
@@ -35,6 +35,7 @@ export default function ValueBoard({ settings, isFollowing }: {
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [minWar, setMinWar] = useState(1.5);
   const [sort, setSort] = useState<SortKey>('OV');
+  const [limit, setLimit] = useState(250); // paginated: "Show more" loads +250
 
   const [pitchersLoading, setPitchersLoading] = useState(false);
   useEffect(() => {
@@ -70,17 +71,21 @@ export default function ValueBoard({ settings, isFollowing }: {
       };
       const base = computeValue(inputs, settings);
       const bucket = levelBucket(r.level);
+      // Keeper value gets the same WAR-durability tilt as the trade view (a good WAR
+      // means durable future reps). Live layers (park/injury/actual PT/saves/ROS)
+      // stay trade-view-only — the board is the base-model ranking.
+      const fv = base.future * warDurability(r.war ?? 0, r.isPitcher ? undefined : r.pos);
       const grades: Record<string, number> = {
         FAN: fantasyRate(inputs, settings),
         PV: base.present,
-        FV: base.future,
-        OV: overallValue(base.present, base.future),
+        FV: fv,
+        OV: overallValue(base.present, fv),
       };
       return { ...r, bucket, grades };
     });
   }, [rows, settings]);
 
-  const shown = useMemo(() => {
+  const sorted = useMemo(() => {
     const f = q.trim().toLowerCase();
     const arr = graded.filter((r) =>
       (r.war ?? 0) >= minWar &&
@@ -90,8 +95,11 @@ export default function ValueBoard({ settings, isFollowing }: {
     );
     const key = sort;
     arr.sort((a, b) => (key === 'war' ? (b.war ?? 0) - (a.war ?? 0) : (b.grades[key] ?? 0) - (a.grades[key] ?? 0)));
-    return arr.slice(0, 300);
+    return arr;
   }, [graded, q, pos, levels, minWar, sort]);
+  // Reset pagination when the filter set changes (not on a re-sort).
+  useEffect(() => { setLimit(250); }, [q, pos, levels, minWar]);
+  const shown = sorted.slice(0, limit);
 
   const toggleLevel = (l: Level) => setLevels((prev) => {
     const next = new Set(prev);
@@ -149,7 +157,7 @@ export default function ValueBoard({ settings, isFollowing }: {
           WAR ≥ <span className="font-mono font-bold text-amber-300 w-8">{minWar.toFixed(1)}</span>
           <input type="range" min={0} max={5} step={0.1} value={minWar} onChange={(e) => setMinWar(parseFloat(e.target.value))} className="accent-amber-500 w-32 cursor-pointer" />
         </label>
-        <span className="text-zinc-600 ml-auto">{pitchersLoading && <span className="text-amber-400/80 mr-2">pitchers loading…</span>}{shown.length} shown{shown.length === 300 ? ' (top 300)' : ''}</span>
+        <span className="text-zinc-600 ml-auto">{pitchersLoading && <span className="text-amber-400/80 mr-2">pitchers loading…</span>}{shown.length} shown{sorted.length > shown.length ? ` of ${sorted.length}` : ''}</span>
       </div>
 
       <div className="overflow-x-auto rounded-lg border border-zinc-800">
@@ -188,6 +196,16 @@ export default function ValueBoard({ settings, isFollowing }: {
           </tbody>
         </table>
       </div>
+      {sorted.length > shown.length && (
+        <div className="mt-3 flex justify-center">
+          <button
+            onClick={() => setLimit((l) => l + 250)}
+            className="px-4 py-1.5 rounded-lg text-xs font-semibold bg-zinc-800 text-zinc-300 border border-zinc-700 hover:bg-zinc-700 cursor-pointer"
+          >
+            Show more ({sorted.length - shown.length} more)
+          </button>
+        </div>
+      )}
     </div>
   );
 }
