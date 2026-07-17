@@ -18,7 +18,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
@@ -52,7 +52,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {pt !== undefined && <Tooltip text={`Projected rest-of-season plate appearances${ptBlended ? ' (Depth-Chart projection blended with recent usage)' : ''} — playing time is an estimate.`}><span className={`${chip} bg-sky-500/20 text-sky-300`}>~{pt} PA</span></Tooltip>}
           {ip !== undefined && <Tooltip text="Projected rest-of-season innings (Depth-Chart blended with role) — an estimate."><span className={`${chip} bg-sky-500/20 text-sky-300`}>~{ip} IP</span></Tooltip>}
           {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="Recent usage looks part-time">{role.label.toLowerCase()}</span>}
-          {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{armRisk ? 'on IL · arm' : 'on IL'}</span>}
+          {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
         </div>
       )}
@@ -333,6 +333,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const PA_PER_GAME = 4.15;
   const estRosPA = (p: SearchResult): { pa: number; blended: boolean } | undefined => {
     if (p.sportId !== 1 || p.primaryPosition === 'P') return undefined;
+    if (seasonEnding(p)) return { pa: 0, blended: false }; // 60-day/full-season IL or post-surgery — done for the year
     let prob = ptRateOf(p); // 1 for established/injured (handled in ptRateOf), else recent rate
     const wrc = metrics[p.id]?.curWrcPlus ?? metrics[p.id]?.peakWrcPlus;
     if (wrc !== undefined) prob = Math.max(0.3, Math.min(1, prob + (wrc - 100) / 300)); // form slack
@@ -351,13 +352,15 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   };
   const estRosIP = (p: SearchResult): number | undefined => {
     if (p.sportId !== 1 || p.primaryPosition !== 'P') return undefined;
+    if (seasonEnding(p)) return 0; // on the 60-day/full-season IL or post-surgery — not pitching again this season
     const ipg = metrics[p.id]?.ipg;
     const isRp = ipg !== undefined && ipg < 2.01;
     const algoIP = isRp ? remainingGames * 0.33 : (remainingGames / 5) * (ipg ?? 5.4); // RP ~1/3 IP per team game; SP ~1 turn/5
     const aIp = AUCTION_VALUES[String(p.id)]?.ip;
-    // Injured arms: the auction IP reflects missed starts, not a diminished role —
-    // value the healthy workload; injuryMultOf handles the current absence.
-    if (aIp === undefined || !AUCTION_AS_OF || injuries[p.id]) return Math.round(algoIP);
+    // Unlike a position player's PA, missed starts don't come back (you can't make
+    // up a rotation turn), so a short-term injured pitcher's auction IP — which
+    // already reflects the missed time — is the better estimate than a full workload.
+    if (aIp === undefined || !AUCTION_AS_OF) return Math.round(algoIP);
     const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
     const scaled = aIp * (remainingGames / exportRemain);
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
@@ -425,23 +428,42 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return cur >= 3.3 ? 1 : cur >= 2.5 ? 0.7 : cur >= 2.0 ? 0.4 : cur >= 1.5 ? 0.2 : 0;
   };
   const ptDockEff = (p: SearchResult) => (injuries[p.id] ? 1 : 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p)));
+  // Season-ending / long-term injury. MLB roster NOTES are often empty for
+  // prospects, so the reliable signal is the IL CODE: D60 (60-day) or ILF
+  // (full-season). A surgery note (Tommy John / UCL / labrum) counts too. These
+  // wipe out THIS season — no present value, no projected reps (a TJ pitcher isn't
+  // throwing 62 IP the rest of the year).
+  const SURGERY_RX = /tommy john|\bucl\b|internal brace|ligament|labrum|rotator|flexor tendon|elbow surgery|season[- ]ending|out for the (season|year)/i;
+  const seasonEnding = (p: SearchResult) => {
+    const inj = injuries[p.id];
+    if (!inj) return false;
+    return inj.code === 'D60' || inj.code === 'ILF' || SURGERY_RX.test(inj.note ?? '');
+  };
   // Injury dock scales with entrenchment: a fringe guy's IL stint threatens his job
-  // (heavy dock), but an entrenched everyday star (J-Rod, big contract, played every
-  // day pre-injury) returns to his role — his value is his healthy value minus only
-  // a light "currently out" hedge, not a role loss. Shared by PV and the timeline
-  // projection (which un-docks it for future healthy seasons).
-  const injuryMultOf = (p: SearchResult) => (injuries[p.id] ? (establishedRegular(p) ? 0.9 : 0.6 + 0.35 * entrench(p)) : 1);
-  // Pitcher ARM injuries (shoulder/elbow family) are a different species of risk
-  // than a hamstring — they threaten the arm itself, so they fade KEEPER value,
-  // not just current availability (Crochet problem: elite projection, shoulder
-  // injury, model shrugged). Keyword match on the roster's real injury note +
-  // severity from the IL type. Hitters and non-arm injuries: unchanged.
+  // (heavy dock), an entrenched everyday star (J-Rod) returns to his role (light
+  // hedge). A SEASON-ENDING injury tanks present value to ~zero — he contributes
+  // nothing the rest of this season. The FV floor divides this back out (pvOf /
+  // injuryMultOf) to recover his healthy keeper value, which armRiskOf then dings.
+  const injuryMultOf = (p: SearchResult) => (
+    !injuries[p.id] ? 1
+    : seasonEnding(p) ? 0.02
+    : establishedRegular(p) ? 0.9
+    : 0.6 + 0.35 * entrench(p)
+  );
+  // Pitcher ARM injuries fade KEEPER value, not just current availability, because
+  // the WAR projection is BLIND to the surgery (a fresh Tommy John is still a 3+ WAR
+  // arm on paper). A confirmed surgery hits hardest; a 60-day/full-season pitcher IL
+  // is a major injury even when the note is sparse (most are arm), so it dings too;
+  // a shorter-term arm note is lighter.
   const ARM_RX = /elbow|ucl|tommy john|shoulder|rotator|labrum|\blat\b|forearm|flexor|biceps|triceps/i;
   const armRiskOf = (p: SearchResult) => {
     const inj = injuries[p.id];
     if (!inj || p.primaryPosition !== 'P') return 1;
-    if (!ARM_RX.test(inj.note ?? '')) return 1;
-    return inj.code === 'D60' || /60/.test(inj.label) ? 0.7 : 0.85;
+    const note = inj.note ?? '';
+    if (SURGERY_RX.test(note)) return 0.5;                    // confirmed surgery (TJ/UCL/labrum)
+    if (inj.code === 'D60' || inj.code === 'ILF') return 0.65; // major long-term pitcher IL (likely arm)
+    if (ARM_RX.test(note)) return 0.85;                      // shorter-term arm note
+    return 1;
   };
   // Saves premium, risk-adjusted: the ninth-inning role carries value the
   // WAR/rate model can't see — but a closer with a POOR run-prevention
@@ -653,7 +675,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -663,7 +685,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
