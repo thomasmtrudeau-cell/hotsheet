@@ -387,13 +387,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       return e === undefined ? 0 : Math.max(0, (4.6 - e) * 1.2) * mat;
     }
     const w = ros.hitters[k]?.wrc ?? m.curWrcPlus ?? m.peakWrcPlus;
-    const rateProd = w === undefined ? 0 : Math.max(0, (w - 90) / 12); // OBP/rate value
-    // Counting value: a 30/30-type produces scarce HR+SB even with a modest rate
-    // (Trevor Story's 83 wRC+ zeroed his rate, but his ⚡💪30+ is real). Take the
-    // higher of rate vs counting so it lifts counting profiles without double-
-    // counting for guys who are strong at both.
-    const countingProd = ((m.hr ?? 0) + (m.sb ?? 0)) / 18; // scarce categories weighted up again // HR/SB are scarce categories — worth more than their WAR share
-    return Math.max(rateProd, countingProd) * ptCredit(p) * mat;
+    const rate = w === undefined ? 0 : Math.max(0, (w - 90) / 12); // OBP/rate (per-PA)
+    const rateProd = rate * ptCredit(p);                            // rate × our projected PT
+    // Counting value from CURRENT-FORM (ROS): the auction's dollarized power+speed
+    // contribution (mHR+mSB = `cnt`). It already bakes in his ROS playing time, so
+    // it is NOT multiplied by our PT again. This is the PV=ROS behavior — a faded
+    // or hurt slugger (Story, cnt < 0) gets no counting credit NOW even though his
+    // PEAK 30/30 still lives in FV. Falls back to peak HR/SB (as a rate × PT) only
+    // when the player isn't in the auction export (prospects).
+    const cnt = AUCTION_VALUES[String(p.id)]?.cnt;
+    const countProd = cnt !== undefined
+      ? Math.max(0, cnt) / 5
+      : ((m.hr ?? 0) + (m.sb ?? 0)) / 18 * ptCredit(p);
+    return Math.max(rateProd, countProd) * mat;
   };
   const DYN_W = 0.7; // weight of the fantasy-production layer (up from 0.6 — counting/rate output matters more than the WAR base for a fantasy roster)
   // Platoon risk: a bat who's already NOT everyday is likely in a platoon and
