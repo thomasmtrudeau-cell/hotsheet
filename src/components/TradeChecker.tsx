@@ -18,13 +18,14 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
     return <div className="mt-1 text-[10px] text-zinc-500 animate-pulse">◍ pricing…</div>;
   }
-  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || risk;
+  const multiElig = Boolean(elig && elig.includes('/'));
+  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || risk || belowRepl || multiElig;
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
@@ -54,6 +55,8 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="Recent usage looks part-time">{role.label.toLowerCase()}</span>}
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
+          {multiElig && <span className={`${chip} bg-indigo-500/20 text-indigo-300`} title="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)">🔀 {elig}</span>}
+          {belowRepl && <span className={`${chip} bg-zinc-600/40 text-zinc-400`} title="Below replacement — his overall value is under a freely-available keeper, so in a trade he counts as just a roster spot (you'd cut him for a free agent). He can't pad a trade or out-rank a real player.">▼ below replacement</span>}
         </div>
       )}
     </div>
@@ -629,6 +632,19 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const diminish = (n: number, per: number) => { let t = 0; for (let k = 0; k < n; k++) t += per * Math.pow(0.6, k); return t; };
   const pvFill = (n: number) => diminish(n, PV_KEEP);
   const fvFill = (n: number) => diminish(n, FV_KEEP);
+  // Overall (dynasty asset) value + the replacement floor. A player whose OVERALL
+  // worth is below a freely-available keeper is a "you'd cut him for a free agent"
+  // guy — so in a trade he's worth exactly a roster spot, no more, no less. Floor
+  // his contribution at replacement. This stops a sub-replacement throw-in from
+  // padding a side or out-ranking a real player (Peters −$2.4 out-valuing Dubón),
+  // and makes "receive a scrub" identical to "free a spot". MLB only — a marginal
+  // prospect's worth lives in his keeper ceiling, handled separately.
+  const ovOf = (p: SearchResult) => overallValue(pvOf(p), fvOf(p));
+  const ovKeep = overallValue(PV_KEEP, FV_KEEP);
+  const belowRepl = (p: SearchResult) => p.sportId === 1 && metrics[p.id] !== undefined && ovOf(p) < ovKeep;
+  const pvContrib = (p: SearchResult) => (belowRepl(p) ? PV_KEEP : pvOf(p));
+  const fvContrib = (p: SearchResult) => (belowRepl(p) ? FV_KEEP : fvOf(p));
+  const ovContrib = (p: SearchResult) => (belowRepl(p) ? ovKeep : ovOf(p));
   // The side that gives up more players opens that many roster spots. You can fill
   // them with the REAL free agents you'd actually add (their true PV/FV), and any
   // spots you don't name get the theoretical replacement level. Extra FAs beyond
@@ -638,13 +654,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const usedFAs = faFills.slice(0, openedSpots);
   const theoreticalFill = Math.max(0, openedSpots - usedFAs.length);
   const sumPv = (s: SearchResult[], side: Side) => {
-    let t = s.reduce((acc, p) => acc + pvOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + pvOf(p), 0) + pvFill(theoreticalFill);
+    let t = s.reduce((acc, p) => acc + pvContrib(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + pvContrib(p), 0) + pvFill(theoreticalFill);
     return t;
   };
   const sumFv = (s: SearchResult[], side: Side) => {
-    let t = s.reduce((acc, p) => acc + fvOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + fvOf(p), 0) + fvFill(theoreticalFill);
+    let t = s.reduce((acc, p) => acc + fvContrib(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + fvContrib(p), 0) + fvFill(theoreticalFill);
     return t;
   };
   const pvDiff = sumPv(sideA, 'A') - sumPv(sideB, 'B');
@@ -657,12 +673,10 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // and rebuild views, so a contender reads Now, a rebuilder reads Keep, and Overall
   // is the neutral total for everyone else. Different time windows, so blending them
   // is honest, not double-counting. ----
-  const ovOf = (p: SearchResult) => overallValue(pvOf(p), fvOf(p));
   const ovTitle = 'Overall — the dynasty asset value: ¼ this-season value + ¾ keeper value';
-  const ovKeep = overallValue(PV_KEEP, FV_KEEP); // a freed roster spot's overall worth
   const sumOv = (s: SearchResult[], side: Side) => {
-    let t = s.reduce((acc, p) => acc + ovOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovOf(p), 0) + diminish(theoreticalFill, ovKeep);
+    let t = s.reduce((acc, p) => acc + ovContrib(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + diminish(theoreticalFill, ovKeep);
     return t;
   };
   const ovA = sumOv(sideA, 'A');
@@ -690,8 +704,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovContrib(p).toFixed(1)}</span></div>
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvContrib(p)} fv={fvContrib(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -700,8 +714,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovContrib(p).toFixed(1)}</span></div>
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvContrib(p)} fv={fvContrib(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
