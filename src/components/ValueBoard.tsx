@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { computeValue, fantasyRate, overallValue, warDurability, LeagueSettings } from '@/lib/value-model';
+import { computeValue, overallValue, warDurability, LeagueSettings } from '@/lib/value-model';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
@@ -76,7 +76,6 @@ export default function ValueBoard({ settings, isFollowing }: {
       // stay trade-view-only — the board is the base-model ranking.
       const fv = base.future * warDurability(r.war ?? 0, r.isPitcher ? undefined : r.pos);
       const grades: Record<string, number> = {
-        FAN: fantasyRate(inputs, settings),
         PV: base.present,
         FV: fv,
         OV: overallValue(base.present, fv),
@@ -115,7 +114,6 @@ export default function ValueBoard({ settings, isFollowing }: {
     OV: 'Overall — the dynasty asset value: ¼ Now + ¾ Keep. The default ranking.',
   };
   const cols: { key: SortKey; label: string }[] = [
-    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' },
     { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' }, { key: 'OV', label: 'Overall' },
   ];
 
@@ -186,8 +184,6 @@ export default function ValueBoard({ settings, isFollowing }: {
                 </td>
                 <td className="px-2 py-1 text-amber-400/80">{r.bucket}</td>
                 <td className="px-2 py-1 text-zinc-500">{r.age !== undefined ? Math.round(r.age) : '—'}</td>
-                <td className="px-2 py-1 text-right font-mono text-amber-300">{(r.war ?? 0).toFixed(1)}</td>
-                <td className={`px-2 py-1 text-right font-mono ${sort === 'FAN' ? 'text-orange-300 font-bold' : 'text-teal-200/80'}`}>{r.grades.FAN.toFixed(1)}</td>
                 <td className={`px-2 py-1 text-right font-mono ${sort === 'PV' ? 'text-orange-300 font-bold' : 'text-blue-200'}`}>{r.grades.PV.toFixed(1)}</td>
                 <td className={`px-2 py-1 text-right font-mono ${sort === 'FV' ? 'text-orange-300 font-bold' : 'text-fuchsia-200'}`}>{r.grades.FV.toFixed(1)}</td>
                 <td className={`px-2 py-1 text-right font-mono ${sort === 'OV' ? 'text-orange-300 font-bold' : 'text-orange-200/80'}`}>{r.grades.OV.toFixed(1)}</td>
