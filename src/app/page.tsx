@@ -38,7 +38,9 @@ const TIPS: { id: string; node: React.ReactNode }[] = [
   { id: 'tip-movers', node: <><strong>Call-Ups</strong> &amp; <strong>Promoted</strong> show who just moved up in the last 7 days, sorted by upside.</> },
   { id: 'tip-bell', node: <>The <strong>🔔 bell</strong> flags your players&apos; call-ups, promotions, IL moves and lineup changes.</> },
   { id: 'tip-lists', node: <>Make custom lists with <strong>+ New list</strong>; rename or delete them under <strong>⚙ Manage lists</strong>.</> },
-  { id: 'tip-intl', node: <>NPB &amp; KBO show <strong>season stats</strong> (not live game-by-game).</> },
+  // (NPB/KBO tip removed from the rotation — international leagues are an opt-in
+  // power feature behind the 🌏 toggle, so we don't surface them to everyone. The
+  // inline "season stats only" banner still explains it once a user opts in.)
 ];
 
 function getDateString(offset: number = 0): string {
@@ -586,7 +588,7 @@ export default function Home() {
       <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-2 mb-6">
         <div>
           <h1 className="text-2xl font-bold text-zinc-100 mb-1">Hot Sheet</h1>
-          <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
+          <p className="text-sm text-zinc-500">Track live MLB & MiLB player stats</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <div className="relative">
