@@ -1595,21 +1595,31 @@ export async function getDailyStats(players: FollowedPlayer[], date: string): Pr
     } else if (playerGames.length === 1) {
       stat = buildSingleGameStats(player, playerGames[0], boxscores);
     } else {
-      // Doubleheader: aggregate played games, fall through to scheduled if none played
+      // Doubleheader: aggregate games he's actually played; otherwise show his
+      // lineup status for the game he's set to play (don't prematurely DNP him).
       const playedGames = playerGames.filter((g) => {
         const s = getGameStatus(g);
         return s === 'Live' || s === 'Final';
       });
       const upcomingGames = playerGames.filter((g) => getGameStatus(g) === 'Scheduled');
-
-      if (playedGames.length === 0) {
+      const perGame = playedGames.map((g) => {
+        const bs = boxscores.get(g.gamePk);
+        const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
+        return buildDailyStats(player, g, bp);
+      });
+      // Has he recorded ANY box-score activity yet (an AB or an out)? A live G1
+      // where he bats 4th but hasn't come up has 0 activity — that's "in lineup,
+      // awaiting first AB", NOT a DNP.
+      const hasActivity = perGame.some((s) => (s.atBats ?? 0) > 0 || parseIP(s.inningsPitched || '0') > 0);
+      const liveGame = playerGames.find((g) => getGameStatus(g) === 'Live');
+      const nextUpcoming = upcomingGames[0];
+      if (!hasActivity && (liveGame || nextUpcoming)) {
+        // No stats yet and his day isn't over — feature the game he's set to play
+        // (a live G1 he's starting reads "in lineup", not DNP) with a DH note.
+        stat = buildDoubleheaderPending(player, (liveGame ?? nextUpcoming)!, boxscores, playedGames.length, upcomingGames.length);
+      } else if (playedGames.length === 0) {
         stat = buildSingleGameStats(player, playerGames[0], boxscores);
       } else {
-        const perGame = playedGames.map((g) => {
-          const bs = boxscores.get(g.gamePk);
-          const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
-          return buildDailyStats(player, g, bp);
-        });
         stat = aggregateDoubleheader(perGame, upcomingGames.length);
       }
     }
@@ -1649,9 +1659,71 @@ function buildSingleGameStats(
   return buildDailyStats(player, game, boxscorePlayer);
 }
 
+// Doubleheader label. Lists the games that have started as G1[+G2…], then any
+// still to come as "G(n) upcoming" (or "G(n)–G(m) upcoming" for multiple). Avoids
+// the old "G1+G1" bug that appeared when only one game had started.
+function dhTag(playedCount: number, upcomingCount: number): string {
+  const parts: string[] = [];
+  if (playedCount >= 1) parts.push(Array.from({ length: playedCount }, (_, i) => `G${i + 1}`).join('+'));
+  if (upcomingCount > 0) {
+    const firstUp = playedCount + 1;
+    const lastUp = playedCount + upcomingCount;
+    parts.push(`${upcomingCount > 1 ? `G${firstUp}–G${lastUp}` : `G${firstUp}`} upcoming`);
+  }
+  return `(${parts.join(' · ')})`;
+}
+
+// Doubleheader in which he has no box-score activity yet — a game is live but he
+// hasn't batted, or the games are still upcoming. Show his LINEUP status for the
+// featured game (starting / probable / not in lineup) rather than a premature DNP.
+function buildDoubleheaderPending(
+  player: FollowedPlayer,
+  game: ScheduleGame,
+  boxscores: Map<number, Awaited<ReturnType<typeof getBoxscore>>>,
+  playedCount: number,
+  upcomingCount: number
+): DailyPlayerStats {
+  const stat = buildDailyStats(player, game, null); // null: don't grade a 0-for; we set status below
+  const info = getLineupInfo(player, game);
+  // A live game's lineup may only be in the boxscore (not the schedule hydrate) —
+  // fall back to the boxscore batting order to confirm he's a starter.
+  const bs = boxscores.get(game.gamePk);
+  const bp = bs ? extractPlayerFromBoxscore(bs, player.id) : null;
+  const boxOrder = bp?.battingOrder ? Math.floor(parseInt(bp.battingOrder, 10) / 100) : undefined;
+  if (info.lineupStatus === 'probable_pitcher') {
+    stat.lineupStatus = 'probable_pitcher';
+    stat.startingPosition = 'SP';
+    // Present as pending (his day isn't underway yet) so the card renders the
+    // lineup badge + start time rather than a grade — even if G1 is already live.
+    stat.gameStatus = 'Scheduled';
+    stat.performanceGrade = 'scheduled';
+    stat.gradeReason = 'Probable starter';
+    stat.statLine = stat.gameTime ?? 'Probable';
+  } else if (info.lineupStatus === 'starting' || boxOrder !== undefined) {
+    stat.lineupStatus = 'starting';
+    stat.startingPosition = info.startingPosition ?? bp?.position?.abbreviation;
+    stat.battingOrder = info.battingOrder ?? boxOrder;
+    stat.gameStatus = 'Scheduled'; // pending — show "3B / 4" lineup badge, not a 0-for grade
+    stat.performanceGrade = 'scheduled';
+    stat.gradeReason = 'In lineup';
+    stat.statLine = stat.gameTime ?? 'In lineup';
+  } else if (stat.gameStatus === 'Scheduled') {
+    // buildDailyStats already set the 'scheduled' grade + start time; keep it.
+    stat.lineupStatus = info.lineupStatus; // 'not_starting' or undefined (lineup not posted yet)
+  } else {
+    // Live/final game and he's not in the lineup — a real DNP.
+    stat.lineupStatus = 'not_starting';
+    stat.performanceGrade = 'off_day';
+    stat.gradeReason = 'Not in lineup';
+    stat.statLine = 'DNP';
+  }
+  stat.gameContext = `${stat.gameContext} ${dhTag(playedCount, upcomingCount)}`;
+  return stat;
+}
+
 function aggregateDoubleheader(games: DailyPlayerStats[], upcomingCount: number): DailyPlayerStats {
   const first = games[0];
-  const tag = `(G1+${games.length === 2 ? 'G2' : `G${games.length}`}${upcomingCount > 0 ? ` · G${games.length + 1} upcoming` : ''})`;
+  const tag = dhTag(games.length, upcomingCount);
   const base: DailyPlayerStats = { ...first };
   base.gameContext = `${first.gameContext} ${tag}`;
 
