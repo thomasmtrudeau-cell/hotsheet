@@ -56,7 +56,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
           {multiElig && <span className={`${chip} bg-indigo-500/20 text-indigo-300`} title="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)">🔀 {elig}</span>}
-          {belowRepl && <span className={`${chip} bg-zinc-600/40 text-zinc-400`} title="Below replacement — his overall value is under a freely-available keeper, so in a trade he counts as just a roster spot (you'd cut him for a free agent). He can't pad a trade or out-rank a real player.">▼ below replacement</span>}
+          {belowRepl && <span className={`${chip} bg-zinc-600/40 text-zinc-400`} title="Below replacement — his overall value is under a freely-available keeper (for a prospect, a weak keeper ceiling), so in a trade he counts as just a roster spot: you'd drop him for a better available player. He can't pad a trade or out-rank a real one.">▼ below replacement</span>}
         </div>
       )}
     </div>
@@ -637,11 +637,13 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // guy — so in a trade he's worth exactly a roster spot, no more, no less. Floor
   // his contribution at replacement. This stops a sub-replacement throw-in from
   // padding a side or out-ranking a real player (Peters −$2.4 out-valuing Dubón),
-  // and makes "receive a scrub" identical to "free a spot". MLB only — a marginal
-  // prospect's worth lives in his keeper ceiling, handled separately.
+  // and makes "receive a scrub" identical to "free a spot". Applies to prospects
+  // too: a real prospect's big keeper ceiling (FV) keeps his overall above the line,
+  // but a low-FV/useless prospect (overall ≈ ¾ of his FV) falls below it and floors,
+  // so you can't hack a trade by tossing in throwaway prospects.
   const ovOf = (p: SearchResult) => overallValue(pvOf(p), fvOf(p));
   const ovKeep = overallValue(PV_KEEP, FV_KEEP);
-  const belowRepl = (p: SearchResult) => p.sportId === 1 && metrics[p.id] !== undefined && ovOf(p) < ovKeep;
+  const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   const pvContrib = (p: SearchResult) => (belowRepl(p) ? PV_KEEP : pvOf(p));
   const fvContrib = (p: SearchResult) => (belowRepl(p) ? FV_KEEP : fvOf(p));
   const ovContrib = (p: SearchResult) => (belowRepl(p) ? ovKeep : ovOf(p));
