@@ -18,14 +18,14 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
     return <div className="mt-1 text-[10px] text-zinc-500 animate-pulse">◍ pricing…</div>;
   }
   const multiElig = Boolean(elig && elig.includes('/'));
-  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || risk || belowRepl || multiElig;
+  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || repsAtRisk || belowRepl || multiElig;
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
@@ -54,9 +54,9 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {ip !== undefined && <Tooltip text="Projected rest-of-season innings (Depth-Chart blended with role) — an estimate."><span className={`${chip} bg-sky-500/20 text-sky-300`}>~{ip} IP</span></Tooltip>}
           {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="Recent usage looks part-time">{role.label.toLowerCase()}</span>}
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
-          {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
+          {repsAtRisk && <Tooltip text={riskText || 'His reps could be squeezed.'}><span className={`${chip} bg-amber-500/20 text-amber-300`}>reps at risk</span></Tooltip>}
           {multiElig && <Tooltip text="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)"><span className={`${chip} bg-indigo-500/20 text-indigo-300`}>🔀 {elig}</span></Tooltip>}
-          {belowRepl && <Tooltip text="Below replacement — his overall value is under a freely-available keeper, so in a trade he counts as just a roster spot: you'd drop him for a better available player. He can't pad a trade or out-rank a real one."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
+          {belowRepl && <Tooltip text="Below replacement — you can generally find a more valuable player in free agency or on the back end of most rosters, so in a trade he counts as just a roster spot. He can't pad a trade or out-rank a real player."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
         </div>
       )}
     </div>
@@ -433,6 +433,21 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     return cur >= 3.3 ? 1 : cur >= 2.5 ? 0.7 : cur >= 2.0 ? 0.4 : cur >= 1.5 ? 0.2 : 0;
   };
   const ptDockEff = (p: SearchResult) => (injuries[p.id] ? 1 : 1 - (1 - ptDock(ptRisk[p.id])) * (1 - entrench(p)));
+  // "Reps at risk" is a BLANKET flag on the player's own marginality — a low
+  // WAR/wRC+ profile is a slump/platoon/call-up from losing reps regardless of any
+  // named threat (jobSecurity already encodes this, position-aware, with the bat/
+  // counting escapes). A specific same-spot teammate threat (roster crowd, AAA
+  // pusher, IL returnee) layers ON TOP as extra detail. Entrenched stars are exempt.
+  const repsRiskOf = (p: SearchResult): { atRisk: boolean; text: string } => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P' || injuries[p.id]) return { atRisk: false, text: '' };
+    const marginal = jobSecurity(p) < 0.9;
+    const named = entrench(p) < 1 ? ptRisk[p.id] : undefined;
+    if (!marginal && !named) return { atRisk: false, text: '' };
+    const parts: string[] = [];
+    if (marginal) parts.push('Modest WAR/wRC+ for the spot — a slump, platoon, or call-up away from losing reps.');
+    if (named) parts.push(`${named.name} (${named.position}) ${named.kind === 'crowd' ? 'shares his spot on the active roster' : named.kind === 'depth' ? 'is pushing up from the minors' : 'is returning from the IL'}.`);
+    return { atRisk: true, text: parts.join(' ') };
+  };
   // Season-ending / long-term injury. MLB roster NOTES are often empty for
   // prospects, so the reliable signal is the IL CODE: D60 (60-day) or ILF
   // (full-season). A surgery note (Tommy John / UCL / labrum) counts too. These
@@ -619,20 +634,17 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // worse guy). Name the actual guy with ＋FA to override the default.
   const depthFactor = Math.sqrt(560 / Math.max(1, settings.teams * settings.keepers)); // 1.0 at Tom's 560; >1 shallower
   // Bare-minimum replacement a rosterable spot is worth (per Tom, deep 20-team):
-  // PV 0.7, FV 1.5 — a freely-available backfill keeper, not a star. Overall
-  // replacement derives to ¼·0.7 + ¾·1.5 = 1.3. All scale UP in shallower leagues
-  // (bigger depthFactor) where more talent sits on the wire / available to keep.
+  // PV 0.7, FV 1.7 — a freely-available player, not a star. Overall replacement
+  // derives to ¼·0.7 + ¾·1.7 = 1.45. All scale UP in shallower leagues (bigger
+  // depthFactor) where more talent sits on the wire / available to backfill.
   const PV_KEEP = 0.7 * depthFactor;
-  const FV_KEEP = 1.5 * depthFactor;
+  const FV_KEEP = 1.7 * depthFactor;
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
-  // Freed spots pay DIMINISHING returns: freeing 4 spots in one trade doesn't get
-  // you four equally-good keepers — each successive back-fill is a worse player. So
-  // the k-th freed spot is worth ~0.6^k of a replacement. This stops a lopsided
-  // 5-for-1 (give up five real players for one star) from reading "fair" purely on
-  // an inflated pile of freed-spot credit.
-  const diminish = (n: number, per: number) => { let t = 0; for (let k = 0; k < n; k++) t += per * Math.pow(0.6, k); return t; };
-  const pvFill = (n: number) => diminish(n, PV_KEEP);
-  const fvFill = (n: number) => diminish(n, FV_KEEP);
+  // Every freed spot backfills at the SAME replacement level (per Tom: 2nd/3rd/4th
+  // backfill guys are readily available on the wire / roster back end, so no
+  // diminishing). Linear in the number of spots freed.
+  const pvFill = (n: number) => n * PV_KEEP;
+  const fvFill = (n: number) => n * FV_KEEP;
   // Overall (dynasty asset) value + the replacement floor. A player whose OVERALL
   // worth is below a freely-available keeper is a "you'd cut him for a free agent"
   // guy — so in a trade he's worth exactly a roster spot, no more, no less. Floor
@@ -679,7 +691,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const ovTitle = 'Overall — the dynasty asset value: ¼ this-season value + ¾ keeper value';
   const sumOv = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + ovContrib(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + diminish(theoreticalFill, ovKeep);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + (theoreticalFill * ovKeep);
     return t;
   };
   const ovA = sumOv(sideA, 'A');
@@ -708,7 +720,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -718,7 +730,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
@@ -731,7 +743,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
                 <div className="flex flex-wrap gap-1 mt-0.5">
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now {pvFill(theoreticalFill).toFixed(1)}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep {fvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall {diminish(theoreticalFill, ovKeep).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall {(theoreticalFill * ovKeep).toFixed(1)}</span>
                 </div>
               </div>
             </div>

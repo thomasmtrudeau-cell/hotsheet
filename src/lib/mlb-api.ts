@@ -1433,13 +1433,13 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
 // (so Willson Contreras 1B does NOT threaten Caleb Durbin 3B). Keyed by the
 // FOLLOWED player, each list = positions whose returnee could take his reps.
 const POS_ADJ: Record<string, string[]> = {
-  '1B': ['3B', 'DH'],   // a 3B slides to 1B; a DH competes for the bat
-  '3B': ['SS'],          // only a SS slides over — NOT 1B/DH (can't man the dirt) or 2B (across the diamond)
-  SS: ['2B', '3B'],      // up-the-middle / left-side infield interchange
-  '2B': ['SS'],
-  DH: ['1B'],
+  // Infielders at DISTINCT positions co-exist (a 3B and a 1B both start), so no
+  // cross-slide adjacency — a genuine same-position crowd (two SS, two 1B) is still
+  // caught by the exact-match check. Only real overlaps remain: the OF spots rotate,
+  // and 1B/DH compete for the same bat/lineup slot.
+  '1B': ['DH'], DH: ['1B'],
   LF: ['CF', 'RF', 'OF'], CF: ['LF', 'RF', 'OF'], RF: ['LF', 'CF', 'OF'], OF: ['LF', 'CF', 'RF'],
-  C: [],
+  '3B': [], SS: [], '2B': [], C: [],
 };
 // A position is "playable" (has reps to lose) if it's in the adjacency map.
 const playablePos = (pos: string) => pos === 'C' || pos in POS_ADJ;
