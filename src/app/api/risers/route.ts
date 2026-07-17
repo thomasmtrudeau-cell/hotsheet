@@ -17,8 +17,13 @@ export async function GET(request: NextRequest) {
     const windowDays = [7, 14, 30].includes(raw) ? raw : 7;
 
     const sb = createServiceClient();
-    const { data, error } = await sb.rpc('war_risers', { window_days: windowDays });
-    if (error) throw error;
+    // war_movers returns risers AND fallers (both directions). Fall back to the
+    // risers-only reader until the war_movers migration is applied.
+    const { data, error } = await sb.rpc('war_movers', { window_days: windowDays });
+    if (error) {
+      const { data: risersOnly } = await sb.rpc('war_risers', { window_days: windowDays });
+      return NextResponse.json(risersOnly ?? []);
+    }
     return NextResponse.json(data ?? []);
   } catch (error) {
     console.error('risers route error:', error);

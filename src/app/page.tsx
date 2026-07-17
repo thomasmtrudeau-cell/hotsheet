@@ -27,10 +27,6 @@ import ScoutingView from '@/components/ScoutingView';
 import TrendsView from '@/components/TrendsView';
 import { TipRotator } from '@/components/Tip';
 
-// Where the Feedback button points. Swap to a Google Form URL anytime — it just
-// needs to be a plain link. Default opens a pre-addressed email.
-const FEEDBACK_URL = 'mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20feedback&body=What%27s%20working%2C%20what%27s%20not%2C%20or%20an%20idea%3A%0A%0A';
-
 // Rotating first-run tips — one shows at a time, cycling per visit.
 const TIPS: { id: string; node: React.ReactNode }[] = [
   { id: 'tip-feedback', node: <>Got an idea or found a bug? Tap <strong>💬 Feedback</strong> up top — we read everything and ship fast.</> },
@@ -119,6 +115,7 @@ export default function Home() {
   const [showPremium, setShowPremium] = useState(true); // premium toggle (for clean screenshots)
   const [showPremiumInfo, setShowPremiumInfo] = useState(false); // teaser modal for non-premium users
   const [showImport, setShowImport] = useState(false); // roster import modal
+  const [showFeedback, setShowFeedback] = useState(false); // feedback popover (no mail-app launch)
   const [callups, setCallups] = useState<CallUp[]>([]);
   const [callupsLoading, setCallupsLoading] = useState(false);
   const [promotions, setPromotions] = useState<CallUp[]>([]);
@@ -461,7 +458,10 @@ export default function Home() {
       const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
       if (statusDiff !== 0) return statusDiff;
       if (ad.gameStatus === 'Scheduled') {
-        // Upcoming: best matchups + today's starters first, then soonest.
+        // Upcoming: chronological by game start time (reads like a schedule);
+        // matchup/starter rank only breaks ties among same-time games.
+        const timeDiff = (ad.gameStartTime ?? Infinity) - (bd.gameStartTime ?? Infinity);
+        if (timeDiff !== 0) return timeDiff;
         const rankDiff = scheduledRank(ad) - scheduledRank(bd);
         if (rankDiff !== 0) return rankDiff;
       } else {
@@ -518,11 +518,14 @@ export default function Home() {
       if (isMiLB(s.sportId)) playingMiLB.push(s);
       else playingMLB.push(s);
     }
-    // Within a bucket, cluster hitters before pitchers (keeping the sort order).
-    const hp = (arr: SortableStat[]) => [...arr.filter((x) => x.position !== 'P'), ...arr.filter((x) => x.position === 'P')];
+    const hit = (arr: SortableStat[]) => arr.filter((x) => x.position !== 'P');
+    const pit = (arr: SortableStat[]) => arr.filter((x) => x.position === 'P');
+    const hp = (arr: SortableStat[]) => [...hit(arr), ...pit(arr)];
     return [
-      { key: 'playing-mlb', label: 'Playing Today · MLB', stats: hp(playingMLB) },
-      { key: 'playing-milb', label: 'Playing Today · MiLB', stats: hp(playingMiLB) },
+      { key: 'playing-mlb-h', label: 'Playing Today · MLB · Hitters', stats: hit(playingMLB) },
+      { key: 'playing-mlb-p', label: 'Playing Today · MLB · Pitchers', stats: pit(playingMLB) },
+      { key: 'playing-milb-h', label: 'Playing Today · MiLB · Hitters', stats: hit(playingMiLB) },
+      { key: 'playing-milb-p', label: 'Playing Today · MiLB · Pitchers', stats: pit(playingMiLB) },
       { key: 'notplaying', label: 'Not Playing', stats: hp(notPlaying) },
       { key: 'injured', label: 'IL', stats: injured },
     ].filter((sec) => sec.stats.length > 0);
@@ -582,13 +585,32 @@ export default function Home() {
           <p className="text-sm text-zinc-500">Track live MLB, MiLB, NPB & KBO player stats</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
-          <a
-            href={FEEDBACK_URL}
-            className="text-[11px] px-2 py-1 rounded-full border border-blue-500/40 text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 transition-colors cursor-pointer"
-            title="Send feedback, ideas, or bug reports"
-          >
-            💬 Feedback
-          </a>
+          <div className="relative">
+            <button
+              onClick={() => setShowFeedback((v) => !v)}
+              className="text-[11px] px-2 py-1 rounded-full border border-blue-500/40 text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 transition-colors cursor-pointer"
+              title="How to reach me with feedback"
+            >
+              💬 Feedback
+            </button>
+            {showFeedback && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setShowFeedback(false)} />
+                <div className="absolute right-0 top-full mt-1 z-40 w-64 rounded-lg border border-zinc-700 bg-zinc-900 shadow-xl p-3 text-left">
+                  <p className="text-xs font-semibold text-zinc-200 mb-1">Got an idea or a bug?</p>
+                  <p className="text-[11px] text-zinc-400 leading-relaxed">
+                    Just <strong className="text-zinc-200">text me</strong>, <strong className="text-zinc-200">email me</strong>, or <strong className="text-zinc-200">DM me on WhatsApp</strong> — whatever&apos;s easiest. I read everything and ship fast.
+                  </p>
+                  <a
+                    href="mailto:ThomasMTrudeau@gmail.com?subject=Hot%20Sheet%20feedback"
+                    className="mt-2 inline-block text-[11px] text-blue-300 hover:text-blue-200 underline underline-offset-2"
+                  >
+                    ThomasMTrudeau@gmail.com
+                  </a>
+                </div>
+              </>
+            )}
+          </div>
           {isPremium ? (
             <button
               onClick={() => setShowPremium((v) => !v)}
@@ -685,7 +707,7 @@ export default function Home() {
             : isPromotions
             ? `${promotions.length} recent promotion${promotions.length !== 1 ? 's' : ''}`
             : isRisers
-            ? `${risers.length} riser${risers.length !== 1 ? 's' : ''}`
+            ? `${risers.length} mover${risers.length !== 1 ? 's' : ''}`
             : isProjections
             ? `${oopsy.hitters.length + oopsy.pitchers.length} weekly projections${oopsy.week ? ` · week of ${oopsy.week}` : ''}`
             : isTrade

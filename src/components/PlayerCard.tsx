@@ -276,11 +276,6 @@ function TeamLine({ team, sportId, parentOrgAbbrev }: { team: string; sportId: n
   return <>{team} <span className="text-zinc-600">({parentOrgAbbrev})</span></>;
 }
 
-function stripParen(name: string): string {
-  const i = name.indexOf(' (');
-  return i >= 0 ? name.slice(0, i) : name;
-}
-
 function XSearchLink({ playerName }: { playerName: string }) {
   const url = `https://x.com/search?q=%22${encodeURIComponent(playerName)}%22&f=live`;
   return (
@@ -294,21 +289,6 @@ function XSearchLink({ playerName }: { playerName: string }) {
       <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="currentColor">
         <path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z" />
       </svg>
-    </a>
-  );
-}
-
-function FGSearchLink({ playerName }: { playerName: string }) {
-  const url = `https://www.fangraphs.com/search?q=${encodeURIComponent(stripParen(playerName))}`;
-  return (
-    <a
-      href={url}
-      target="_blank"
-      rel="noopener noreferrer"
-      className="text-zinc-600 hover:text-emerald-400 transition-colors px-1 py-1 text-[10px] font-bold tracking-wider"
-      title="Search on FanGraphs"
-    >
-      FG
     </a>
   );
 }
@@ -478,7 +458,6 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
               onChange={groupControl.onAssignGroups}
             />
           )}
-          <FGSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
           <button
             onClick={() => onUnfollow(stats.playerId)}
@@ -634,7 +613,6 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { s
               onChange={groupControl.onAssignGroups}
             />
           )}
-          <FGSearchLink playerName={stats.playerName} />
           <XSearchLink playerName={stats.playerName} />
           <button
             onClick={() => onUnfollow(stats.playerId)}

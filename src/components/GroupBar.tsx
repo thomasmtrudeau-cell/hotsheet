@@ -105,7 +105,7 @@ export default function GroupBar({
         }`}
         title="Prospect risers — biggest peak-WAR gains (premium)"
       >
-        🚀 Risers
+        🚀 Risers &amp; Fallers
       </button>
       <button
         onClick={() => onSelect(PROJECTIONS_VIEW)}

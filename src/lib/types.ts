@@ -282,7 +282,7 @@ export const GRADE_MAP: Record<Grade, GradeConfig> = {
   standout: { label: 'Standout', emoji: '🔥', color: '#ef4444', bgColor: 'rgba(239,68,68,0.15)' },
   good: { label: 'Good', emoji: '✅', color: '#22c55e', bgColor: 'rgba(34,197,94,0.15)' },
   routine: { label: 'Routine', emoji: '😐', color: '#6b7280', bgColor: 'rgba(107,114,128,0.15)' },
-  off_day: { label: 'Off Day', emoji: '🚩', color: '#eab308', bgColor: 'rgba(234,179,8,0.15)' },
+  off_day: { label: 'DNP', emoji: '🪑', color: '#9ca3af', bgColor: 'rgba(156,163,175,0.12)' },
   scheduled: { label: 'Scheduled', emoji: '🕒', color: '#3b82f6', bgColor: 'rgba(59,130,246,0.15)' },
   no_game: { label: 'No Game', emoji: '—', color: '#4b5563', bgColor: 'rgba(75,85,99,0.15)' },
 };

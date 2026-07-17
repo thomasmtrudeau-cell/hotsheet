@@ -604,7 +604,7 @@ function buildDailyStats(
         base.statLine = 'Awaiting entry';
       }
     } else {
-      base.performanceGrade = 'routine';
+      base.performanceGrade = 'off_day';
       base.gradeReason = 'Not in lineup';
       base.statLine = 'DNP';
     }
@@ -651,7 +651,7 @@ function buildDailyStats(
       base.statLine = 'Awaiting entry';
     } else {
       // Game Final — pitcher was rostered but never pitched
-      base.performanceGrade = 'routine';
+      base.performanceGrade = 'off_day';
       base.gradeReason = 'Did not pitch';
       base.statLine = 'DNP';
     }
@@ -1724,7 +1724,7 @@ function aggregateDoubleheader(games: DailyPlayerStats[], upcomingCount: number)
       base.gradeReason = `${reason} ${tag}`;
       base.statLine = formatBattingLine(base);
     } else {
-      base.performanceGrade = 'routine';
+      base.performanceGrade = 'off_day';
       base.gradeReason = `Not in lineup ${tag}`;
       base.statLine = 'DNP';
     }
