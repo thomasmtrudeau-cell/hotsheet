@@ -44,7 +44,7 @@ function ManageRow({ group, count, onRename, onDelete }: {
       />
       <span className="text-[11px] text-zinc-500 w-8 text-right shrink-0">{count}</span>
       <button
-        onClick={() => { if (window.confirm(`Delete "${group.name}"? The players stay in All Players.`)) onDelete(group.id); }}
+        onClick={() => { if (window.confirm(`Delete "${group.name}"? Any player not in another list will also be removed from All Players.`)) onDelete(group.id); }}
         className="shrink-0 px-2 py-1.5 rounded-lg text-[11px] text-zinc-400 hover:text-red-300 hover:bg-red-500/10 cursor-pointer transition-colors"
         title="Delete this list"
       >

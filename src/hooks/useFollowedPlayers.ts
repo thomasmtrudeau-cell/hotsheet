@@ -274,20 +274,39 @@ export function useFollowedPlayers() {
   }, []);
 
   const removeGroup = useCallback(async (groupId: string) => {
+    // Players whose ONLY list was this one become orphaned — delete them from All
+    // Players too (per Tom: deleting a list drops any player not in another list).
+    // A player still in another list, or followed with no list at all (absent from
+    // the memberships map), is untouched.
+    const orphaned = new Set<number>();
+    memberships.forEach((ids, pid) => {
+      if (ids.includes(groupId) && ids.every((id) => id === groupId)) orphaned.add(pid);
+    });
+
     setGroups((prev) => {
       const updated = prev.filter((g) => g.id !== groupId);
       store.setCachedGroups(updated);
       return updated;
     });
-    // Drop this group from membership state (players stay in "All").
     setMemberships((prev) => {
       const next = new Map<number, string[]>();
-      prev.forEach((ids, pid) => next.set(pid, ids.filter((id) => id !== groupId)));
+      prev.forEach((ids, pid) => {
+        if (orphaned.has(pid)) return; // gone entirely
+        next.set(pid, ids.filter((id) => id !== groupId));
+      });
       store.setCachedMemberships(next);
       return next;
     });
+    if (orphaned.size) {
+      setPlayers((prev) => {
+        const updated = prev.filter((p) => !orphaned.has(p.id));
+        store.setCachedPlayers(updated);
+        return updated;
+      });
+    }
     await store.deleteGroup(groupId);
-  }, []);
+    await Promise.all([...orphaned].map((pid) => store.deleteCloudPlayer(pid)));
+  }, [memberships]);
 
   // Set exactly which groups a player belongs to.
   const assignGroups = useCallback(async (playerId: number, groupIds: string[]) => {
