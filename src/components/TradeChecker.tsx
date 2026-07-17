@@ -14,6 +14,7 @@ const SETTINGS_KEY = 'hotsheet_league_settings';
 
 interface TradeCheckerProps {
   isPremium: boolean;
+  isOwner?: boolean; // owner-only: gates the Value Board tab until it's trustworthy
 }
 
 type Side = 'A' | 'B';
@@ -63,7 +64,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
   );
 }
 
-export default function TradeChecker({ isPremium }: TradeCheckerProps) {
+export default function TradeChecker({ isPremium, isOwner = false }: TradeCheckerProps) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
   const [open, setOpen] = useState(false);
@@ -734,14 +735,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           </span>
         </div>
       )}
-      <div className="flex justify-center mb-3">
-        <div className="inline-flex rounded-md overflow-hidden border border-zinc-700">
-          <button onClick={() => setTool('trade')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'trade' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>🔀 Trade checker</button>
-          <button onClick={() => setTool('board')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'board' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>📋 Value board</button>
+      {/* Value Board is owner-only for now — hidden until its grades reliably
+          match the Trade Checker. Non-owners only ever see the trade view. */}
+      {isOwner && (
+        <div className="flex justify-center mb-3">
+          <div className="inline-flex rounded-md overflow-hidden border border-zinc-700">
+            <button onClick={() => setTool('trade')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'trade' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>🔀 Trade checker</button>
+            <button onClick={() => setTool('board')} className={`px-3 py-1 text-xs font-medium cursor-pointer ${tool === 'board' ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>📋 Value board <span className="opacity-70">· owner</span></button>
+          </div>
         </div>
-      </div>
+      )}
 
-      {tool === 'board' ? (
+      {isOwner && tool === 'board' ? (
         <>
           <div className="mb-3">
             <button onClick={() => setShowSettings((v) => !v)}

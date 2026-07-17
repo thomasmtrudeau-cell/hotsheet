@@ -410,6 +410,10 @@ export default function Home() {
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
   const isPremium = tier === 'premium' || Object.keys(premiumMap).length > 0;
+  // Owner-only gate. The Value Board is hidden from everyone but Tom until its
+  // grades reliably match the Trade Checker (they diverge for now — different
+  // live-layer coverage). Also enforced server-side in /api/values.
+  const isOwner = (user?.email ?? '').toLowerCase() === 'thomasmtrudeau@gmail.com';
   // Tier unknown and no premium data yet — don't show the teaser to someone who
   // may well be premium; the discovery views render a spinner instead.
   const premiumPending = tier === null && Object.keys(premiumMap).length === 0;
@@ -799,7 +803,7 @@ export default function Home() {
           isFollowing={(name) => isFollowingName(name)}
         />
       ) : isTrade ? (
-        <TradeChecker isPremium={isPremium} />
+        <TradeChecker isPremium={isPremium} isOwner={isOwner} />
       ) : isRegression ? (
         <RegressionView
           rows={showPremium ? regression : []}
