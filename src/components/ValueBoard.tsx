@@ -1,13 +1,12 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { computeValue, abilityCurve, fantasyRate, LeagueSettings } from '@/lib/value-model';
+import { computeValue, fantasyRate, overallValue, LeagueSettings } from '@/lib/value-model';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
 type BoardRow = { player: string; nameKey: string; isPitcher: boolean } & PremiumMetrics;
-type LensDef = { key: string; label: string; short: string; weights: number[]; fvShare: number };
-type SortKey = 'war' | 'pv' | 'fv' | string; // lens shorts too
+type SortKey = 'war' | 'FAN' | 'PV' | 'FV' | 'OV';
 
 const LEVELS = ['MLB', 'AAA', 'AA', 'A+', 'A', 'Rk'] as const;
 type Level = (typeof LEVELS)[number];
@@ -20,15 +19,13 @@ function levelBucket(lvl?: string): Level {
   if (l === 'A' || l.includes('LOW') || l.includes('SINGLE')) return 'A';
   return 'Rk';
 }
-const arrivalYear = (b: Level) => (b === 'AAA' ? 1 : b === 'AA' ? 2 : 3);
 
 // The Value Board: every projected player scored by the BASE model (sheet + age
 // curves + league settings) across all grades — an implicit ranking per build,
 // for bulk calibration review. Live layers (park, injury, playing time, saves)
 // apply only in the trade view, so a few rows (e.g. closers) read low here.
-export default function ValueBoard({ settings, lenses, isFollowing }: {
+export default function ValueBoard({ settings, isFollowing }: {
   settings: LeagueSettings;
-  lenses: LensDef[];
   isFollowing: (name: string) => boolean;
 }) {
   const [rows, setRows] = useState<BoardRow[]>([]);
@@ -37,8 +34,7 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
   const [pos, setPos] = useState<'all' | 'hitter' | 'pitcher'>('all');
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [minWar, setMinWar] = useState(1.5);
-  const [sort, setSort] = useState<SortKey>('CTD');
-  const [hiddenBuilds, setHiddenBuilds] = useState<Set<string>>(new Set()); // lens columns the user doesn't care about
+  const [sort, setSort] = useState<SortKey>('OV');
 
   const [pitchersLoading, setPitchersLoading] = useState(false);
   useEffect(() => {
@@ -74,27 +70,15 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
       };
       const base = computeValue(inputs, settings);
       const bucket = levelBucket(r.level);
-      const inMajors = bucket === 'MLB';
-      const age = r.age ?? 27;
-      // Per-season projection, mirroring the Trade Checker's base track.
-      const seasons: number[] = [];
-      if (inMajors) {
-        const cur = abilityCurve(age, r.isPitcher) || 1;
-        for (let k = 0; k <= 6; k++) seasons.push(k === 0 ? base.present : base.present * (abilityCurve(age + k, r.isPitcher) / cur));
-      } else {
-        const arr = arrivalYear(bucket);
-        const peakAnnual = computeValue({ ...inputs, age: 27, level: 'MLB' }, settings).present;
-        for (let k = 0; k <= 6; k++) seasons.push(k < arr ? 0 : peakAnnual * abilityCurve(age + k, r.isPitcher));
-      }
-      const grades: Record<string, number> = { FAN: fantasyRate(inputs, settings), PV: base.present, FV: base.future };
-      for (const l of lenses) {
-        const wSum = l.weights.reduce((a, b) => a + b, 0);
-        const wa = l.weights.reduce((acc, w, k) => acc + w * (seasons[k] ?? 0), 0) / wSum;
-        grades[l.short] = (1 - l.fvShare) * wa + l.fvShare * base.future;
-      }
+      const grades: Record<string, number> = {
+        FAN: fantasyRate(inputs, settings),
+        PV: base.present,
+        FV: base.future,
+        OV: overallValue(base.present, base.future),
+      };
       return { ...r, bucket, grades };
     });
-  }, [rows, settings, lenses]);
+  }, [rows, settings]);
 
   const shown = useMemo(() => {
     const f = q.trim().toLowerCase();
@@ -120,20 +104,12 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
     FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and the build grade disagree, the gap is the playing-time/asset story.',
     PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
     FV: 'Keep — what he is worth held as a keeper across future seasons (ceiling × how many good years remain).',
-    CTD: 'Contender — built to win soon; weights the next few seasons. The default ranking.',
-    RBD: 'Rebuild — building for later; this season doesn’t count, youth and upside rule.',
+    OV: 'Overall — the dynasty asset value: ¼ Now + ¾ Keep. The default ranking.',
   };
-  const shownLenses = lenses.filter((l) => !hiddenBuilds.has(l.short));
   const cols: { key: SortKey; label: string }[] = [
-    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' }, { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' },
-    ...shownLenses.map((l) => ({ key: l.short, label: l.short })),
+    { key: 'war', label: 'WAR' }, { key: 'FAN', label: 'FAN' },
+    { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' }, { key: 'OV', label: 'Overall' },
   ];
-  const toggleBuild = (short: string) => setHiddenBuilds((prev) => {
-    const next = new Set(prev);
-    if (next.has(short)) next.delete(short); else next.add(short);
-    if (sort === short && next.has(short)) setSort('CTD'); // don't sort by a hidden column
-    return next;
-  });
 
   if (loading && rows.length === 0) {
     return (
@@ -167,16 +143,6 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
           {LEVELS.map((l) => (
             <button key={l} onClick={() => toggleLevel(l)}
               className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${levels.has(l) ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>{l}</button>
-          ))}
-        </div>
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-500">Builds</span>
-          {lenses.map((l) => (
-            <button key={l.short} onClick={() => toggleBuild(l.short)}
-              title={hiddenBuilds.has(l.short) ? `Show the ${l.label} column` : `Hide the ${l.label} column`}
-              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${!hiddenBuilds.has(l.short) ? 'bg-fuchsia-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-              {l.label}
-            </button>
           ))}
         </div>
         <label className="flex items-center gap-2 text-zinc-400">
@@ -214,11 +180,9 @@ export default function ValueBoard({ settings, lenses, isFollowing }: {
                 <td className="px-2 py-1 text-zinc-500">{r.age !== undefined ? Math.round(r.age) : '—'}</td>
                 <td className="px-2 py-1 text-right font-mono text-amber-300">{(r.war ?? 0).toFixed(1)}</td>
                 <td className={`px-2 py-1 text-right font-mono ${sort === 'FAN' ? 'text-orange-300 font-bold' : 'text-teal-200/80'}`}>{r.grades.FAN.toFixed(1)}</td>
-                <td className="px-2 py-1 text-right font-mono text-blue-200">{r.grades.PV.toFixed(1)}</td>
-                <td className="px-2 py-1 text-right font-mono text-fuchsia-200">{r.grades.FV.toFixed(1)}</td>
-                {shownLenses.map((l) => (
-                  <td key={l.short} className={`px-2 py-1 text-right font-mono ${sort === l.short ? 'text-orange-300 font-bold' : 'text-zinc-300'}`}>{r.grades[l.short].toFixed(1)}</td>
-                ))}
+                <td className={`px-2 py-1 text-right font-mono ${sort === 'PV' ? 'text-orange-300 font-bold' : 'text-blue-200'}`}>{r.grades.PV.toFixed(1)}</td>
+                <td className={`px-2 py-1 text-right font-mono ${sort === 'FV' ? 'text-orange-300 font-bold' : 'text-fuchsia-200'}`}>{r.grades.FV.toFixed(1)}</td>
+                <td className={`px-2 py-1 text-right font-mono ${sort === 'OV' ? 'text-orange-300 font-bold' : 'text-orange-200/80'}`}>{r.grades.OV.toFixed(1)}</td>
               </tr>
             ))}
           </tbody>

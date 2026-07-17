@@ -4,27 +4,13 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { computeValue, presentMaturity, keeperAgeFactor, abilityCurve, ptFragility, earningPtBump, warDurability, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { computeValue, presentMaturity, keeperAgeFactor, overallValue, ptFragility, earningPtBump, warDurability, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import Tooltip from './Tooltip';
 import ValueBoard from './ValueBoard';
 
 const SETTINGS_KEY = 'hotsheet_league_settings';
-// Build lenses — deliberately just TWO clear postures (five was noise). Every
-// player has a per-season value projection (k=0 = his live PV this season; future
-// seasons follow the age curve, injuries rebound, prospects ramp in at arrival). A
-// lens scores him as a weighted average of those seasons over its window, blended
-// with a share of his keeper value (FV) — trade value is ASSET value, so ceiling
-// and control matter, and fvShare rises for the more future-leaning build.
-// Contender (default) weights the next few seasons; Rebuild ignores this season and
-// weights the years ahead.
-export const BUILDS: { key: string; label: string; short: string; weights: number[]; fvShare: number; blurb: string }[] = [
-  { key: 'contender', label: 'Contender', short: 'CTD', weights: [0.85, 1, 0.8, 0.4, 0.15, 0, 0], fvShare: 0.3,
-    blurb: 'Built to win soon — weights the next few seasons, without selling off the near future.' },
-  { key: 'rebuild', label: 'Rebuild', short: 'RBD', weights: [0, 0.5, 0.9, 1, 1, 0.9, 0.75], fvShare: 0.6,
-    blurb: 'Building for later — this season doesn’t count; youth and long-term upside rule.' },
-];
 
 interface TradeCheckerProps {
   isPremium: boolean;
@@ -32,7 +18,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, lens, pending, saves, pt, ip, ptBlended, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; lens?: { label: string; value: number; title: string }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, risk, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; risk?: { name: string; position: string; kind?: 'il' | 'depth' | 'crowd'; adjacent?: boolean }; role?: { label: string; factor: number } }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
@@ -94,8 +80,6 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const [showSettings, setShowSettings] = useState(false);
   const [settingsCustomized, setSettingsCustomized] = useState(true); // assume yes until load says otherwise (no flash)
   const [tool, setTool] = useState<'trade' | 'board'>('trade'); // trade checker vs bulk value board
-  const [buildKey, setBuildKey] = useState('contender'); // YOUR build lens (Contender / Rebuild)
-  const [theirKey, setTheirKey] = useState('contender'); // THEIR build — view the same trade from the other side's posture
   const [addingFa, setAddingFa] = useState(false); // FA-add mode (triggered from a column)
   const [showHow, setShowHow] = useState(false); // "How scoring works" explainer — collapsed by default (less wall-of-text)
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -115,9 +99,6 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       }
     } catch { /* ignore */ }
   }, []);
-  // Deliberately NOT persisted — the lens always starts on Contender (the default
-  // posture); switch to Rebuild per-trade as needed.
-  const updateBuild = useCallback((k: string) => setBuildKey(k), []);
   // Rest-of-season projections (uploaded daily from the Mac pipeline) — the
   // forward-looking rate PV prefers over current-year actuals.
   useEffect(() => {
@@ -633,78 +614,22 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const edge = (d: number, unit: string) =>
     Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
-  // ---- Multi-year value projection (feeds the build lenses) ----
-  const HORIZON = 6; // seasons out to project (0 = this year … 6)
-  const parkOf = (p: SearchResult) => homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P');
-  const arrivalYear = (lvl: string) => lvl.includes('AAA') ? 1 : lvl.includes('AA') ? 2 : 3;
-  // A minor leaguer's per-season value once he arrives: his MLB-level peak (level
-  // forced to majors so his current minors discount doesn't suppress his future),
-  // scaled by the age curve.
-  const peakAnnualMLB = (p: SearchResult) => {
-    const m = metrics[p.id];
-    if (!m) return 0;
-    return computeValue({
-      isPitcher: p.primaryPosition === 'P', position: p.primaryPosition,
-      war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20, hr: m.hr, sb: m.sb,
-      curWrcPlus: m.curWrcPlus, curEra20: m.curEra20, age: 27, level: 'MLB', marketBaseline: m.marketBaseline,
-    }, settings).present * parkOf(p);
-  };
-  // Value a player is worth in season now+k. Year 0 = his real current PV (injury/
-  // role baked in). Future years = his HEALTHY value shaped by the age curve — so
-  // an injured star rebounds next year, a young guy ramps toward peak, an old guy
-  // declines. Minor leaguers contribute nothing until their projected arrival.
-  const seasonValue = (p: SearchResult, k: number) => {
-    const m = metrics[p.id];
-    if (!m) return 0;
-    const isP = p.primaryPosition === 'P';
-    const lvl = (m.level ?? '').toUpperCase();
-    const inMajors = p.sportId === 1 || lvl.includes('MLB') || lvl.includes('MAJOR');
-    if (!inMajors) {
-      const arr = arrivalYear(lvl);
-      return k < arr ? 0 : peakAnnualMLB(p) * abilityCurve((m.age ?? 27) + k, isP);
-    }
-    if (k === 0) return pvOf(p);
-    const healthy = pvOf(p) / injuryMultOf(p);
-    const cur = abilityCurve(m.age, isP) || 1;
-    return healthy * (abilityCurve((m.age ?? 27) + k, isP) / cur);
-  };
-  // ---- Build-lens scoring: a player's lens value = weighted average of his
-  // projected seasons over the active build's window (see BUILDS). Same per-season
-  // scale as PV, so the chips read naturally next to it. The verdict compares the
-  // two sides through the active lens; PV and FV stay in the analysis untouched. ----
-  const build = BUILDS.find((b) => b.key === buildKey) ?? BUILDS[0];
-  const wSum = build.weights.reduce((a, b) => a + b, 0);
-  // Production over the build's window (per-season scale) + a share of his keeper value (FV) — the
-  // asset commands (fvShare of his keeper FV). The FV term is what makes a massive
-  // ceiling gap (J-Rod FV 17.8 vs Trout 6.5) surface in the verdict — production
-  // curves alone called Julio-for-Trout "fair," and nobody makes that trade.
-  const windowAvg = (p: SearchResult) => build.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / wSum;
-  const lensOf = (p: SearchResult) => (1 - build.fvShare) * windowAvg(p) + build.fvShare * fvOf(p);
-  const lensTitle = `${build.label} value — his projected production over the ${build.label.toLowerCase()} window, blended with his keeper value (FV)`;
-  // A theoretical consolidation keep gets the same blend: replacement production
-  // (PV_KEEP, flat) + the lens's market share of a keeper-worthy FV_KEEP.
-  const keepLens = (1 - build.fvShare) * PV_KEEP + build.fvShare * FV_KEEP;
-  const sumLens = (s: SearchResult[], side: Side) => {
-    let t = s.reduce((acc, p) => acc + lensOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + lensOf(p), 0) + diminish(theoreticalFill, keepLens);
+  // ---- Overall: the single, build-agnostic dynasty asset value = ¼ Now + ¾ Keep.
+  // No build lenses — Now (this season) and Keep (future seasons) ARE the win-now
+  // and rebuild views, so a contender reads Now, a rebuilder reads Keep, and Overall
+  // is the neutral total for everyone else. Different time windows, so blending them
+  // is honest, not double-counting. ----
+  const ovOf = (p: SearchResult) => overallValue(pvOf(p), fvOf(p));
+  const ovTitle = 'Overall — the dynasty asset value: ¼ this-season value + ¾ keeper value';
+  const ovKeep = overallValue(PV_KEEP, FV_KEEP); // a freed roster spot's overall worth
+  const sumOv = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + ovOf(p), 0);
+    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovOf(p), 0) + diminish(theoreticalFill, ovKeep);
     return t;
   };
-  const lensA = sumLens(sideA, 'A');
-  const lensB = sumLens(sideB, 'B');
-  const lensDiff = lensA - lensB;
-  // THEIR perspective: score BOTH sides through their build. They receive what you
-  // give (side B) and give up what you get (side A) — their gain is the mirror.
-  const theirBuild = BUILDS.find((b) => b.key === theirKey) ?? BUILDS[0];
-  const theirWSum = theirBuild.weights.reduce((a, b) => a + b, 0);
-  const theirWindowAvg = (p: SearchResult) => theirBuild.weights.reduce((acc, w, k) => acc + w * seasonValue(p, k), 0) / theirWSum;
-  const theirLensOf = (p: SearchResult) => (1 - theirBuild.fvShare) * theirWindowAvg(p) + theirBuild.fvShare * fvOf(p);
-  const theirKeep = (1 - theirBuild.fvShare) * PV_KEEP + theirBuild.fvShare * FV_KEEP;
-  const sumTheirLens = (ps: SearchResult[], side: Side) => {
-    let t = ps.reduce((acc, p) => acc + theirLensOf(p), 0);
-    if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + theirLensOf(p), 0) + diminish(theoreticalFill, theirKeep);
-    return t;
-  };
-  const theirDiff = sumTheirLens(sideB, 'B') - sumTheirLens(sideA, 'A'); // positive = good for THEM
+  const ovA = sumOv(sideA, 'A');
+  const ovB = sumOv(sideB, 'B');
+  const ovDiff = ovA - ovB;
 
   const renderColumn = (side: Side, players: SearchResult[]) => {
     const isOpened = side === openedSide;
@@ -717,7 +642,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         <span className="text-[11px] font-bold inline-flex gap-1">
           <Tooltip text="Total this-season value on this side."><span className="text-blue-200">Now {sumPv(players, side).toFixed(1)}</span></Tooltip> ·
           <Tooltip text="Total keeper value on this side."><span className="text-fuchsia-200">Keep {sumFv(players, side).toFixed(1)}</span></Tooltip> ·
-          <Tooltip text={lensTitle}><span className="text-orange-300">{build.label} {sumLens(players, side).toFixed(1)}</span></Tooltip>
+          <Tooltip text={ovTitle}><span className="text-orange-300">Overall {sumOv(players, side).toFixed(1)}</span></Tooltip>
         </span>
       </div>
       {players.length === 0 && !showFa && !showTheoretical ? (
@@ -727,8 +652,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">{build.label} {lensOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -737,8 +662,8 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">{build.label} {lensOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} lens={{ label: build.short, value: lensOf(p), title: lensTitle }} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} armRisk={armRiskOf(p) !== 1} risk={entrench(p) >= 1 ? undefined : ptRisk[p.id]} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
@@ -751,7 +676,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
                 <div className="flex flex-wrap gap-1 mt-0.5">
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now {pvFill(theoreticalFill).toFixed(1)}</span>
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep {fvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={lensTitle}>{build.label} {diminish(theoreticalFill, keepLens).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall {diminish(theoreticalFill, ovKeep).toFixed(1)}</span>
                 </div>
               </div>
             </div>
@@ -799,7 +724,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
             </button>
           </div>
           {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
-          <ValueBoard settings={settings} lenses={BUILDS} isFollowing={() => false} />
+          <ValueBoard settings={settings} isFollowing={() => false} />
         </>
       ) : (
       <>
@@ -862,54 +787,27 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
       </div>
       {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
-      {/* Build lens tabs — always visible, so you set your team's posture BEFORE
-          building the trade (starts on Contender every visit). */}
-      <div className="mb-4">
-        <div className="flex justify-center mb-1">
-          <div className="inline-flex rounded-md overflow-hidden border border-zinc-700" title="Score the trade through your team's build — each lens weighs the seasons it cares about (win-now = this season + next, contender = the next few, retooling = next year onward, rebuild = 2–3+ years out).">
-            {BUILDS.map((b) => (
-              <button key={b.key} onClick={() => updateBuild(b.key)}
-                className={`px-2.5 py-1 text-[11px] cursor-pointer ${buildKey === b.key ? 'bg-orange-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
-                {b.label}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="text-center text-[11px] text-zinc-600 max-w-xl mx-auto">{build.blurb}</div>
-        {(sideA.length > 0 || sideB.length > 0) && (() => {
-          const bigger = Math.max(lensA, lensB, 0.1);
-          const fair = Math.abs(lensDiff) < 0.08 * bigger || Math.abs(lensDiff) < 0.5;
-          const verdictColor = fair ? 'text-zinc-200' : lensDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
-          const verdict = fair ? 'Fair trade' : lensDiff > 0 ? `Favors you +${lensDiff.toFixed(1)}` : `Favors them +${(-lensDiff).toFixed(1)}`;
-          const tBig = Math.max(sumTheirLens(sideA, 'A'), sumTheirLens(sideB, 'B'), 0.1);
-          const tFair = Math.abs(theirDiff) < 0.08 * tBig || Math.abs(theirDiff) < 0.5;
-          const winWin = !fair && !tFair && lensDiff > 0 && theirDiff > 0;
-          return (
-          <div className="text-center mt-2">
+      {/* One build-agnostic verdict. Overall (¼ Now + ¾ Keep) is the headline;
+          the Now and Keeper lines let a contender or rebuilder read their own slice. */}
+      {(sideA.length > 0 || sideB.length > 0) && (() => {
+        const bigger = Math.max(ovA, ovB, 0.1);
+        const fair = Math.abs(ovDiff) < 0.08 * bigger || Math.abs(ovDiff) < 0.5;
+        const verdictColor = fair ? 'text-zinc-200' : ovDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
+        const verdict = fair ? 'Fair trade' : ovDiff > 0 ? `Favors you +${ovDiff.toFixed(1)}` : `Favors them +${(-ovDiff).toFixed(1)}`;
+        return (
+          <div className="text-center mb-4">
             <div className={`text-2xl font-bold ${verdictColor}`}>{verdict}</div>
-            {/* The lens totals ARE the fairness basis — most prominent line. */}
             <div className="text-base font-semibold text-zinc-300 mt-0.5">
-              {build.label} <span className="text-orange-300">{lensA.toFixed(1)}</span> <span className="text-zinc-500">vs</span> <span className="text-orange-200/80">{lensB.toFixed(1)}</span>
+              <Tooltip text={ovTitle}><span>Overall <span className="text-orange-300">{ovA.toFixed(1)}</span> <span className="text-zinc-500">vs</span> <span className="text-orange-200/80">{ovB.toFixed(1)}</span></span></Tooltip>
             </div>
-            <div className="text-[12px] mt-1 flex flex-wrap justify-center items-center gap-x-2">
-              <span className="text-zinc-500">From their side, scored as</span>
-              <select value={theirKey} onChange={(e) => setTheirKey(e.target.value)}
-                className="bg-zinc-800 border border-zinc-700 rounded px-1.5 py-0.5 text-[11px] text-zinc-200 cursor-pointer">
-                {BUILDS.map((b) => <option key={b.key} value={b.key}>{b.label}</option>)}
-              </select>
-              <span className={tFair ? 'text-zinc-300' : theirDiff > 0 ? 'text-emerald-300' : 'text-rose-300'}>
-                {tFair ? 'fair' : theirDiff > 0 ? `they gain +${theirDiff.toFixed(1)}` : `they lose ${theirDiff.toFixed(1)}`}
-              </span>
-              {winWin && <span className="px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-300 font-semibold" title="Each side comes out ahead through its own build — the trades that actually get accepted.">🤝 win-win by builds</span>}
-            </div>
-            <div className="text-[11px] mt-1.5 flex flex-wrap justify-center gap-x-4 text-zinc-500">
-              <span className="text-blue-200/80">{edge(pvDiff, 'Now')}</span>
-              <span className="text-fuchsia-200/80">{edge(fvDiff, 'Keeper')}</span>
+            {/* Read the line that fits your team: contending → Now, rebuilding → Keeper. */}
+            <div className="text-[12px] mt-1.5 flex flex-wrap justify-center gap-x-4">
+              <Tooltip text="Win-now value — read this if you're contending."><span className="text-blue-200/80">{edge(pvDiff, 'Now')}</span></Tooltip>
+              <Tooltip text="Keeper value — read this if you're rebuilding."><span className="text-fuchsia-200/80">{edge(fvDiff, 'Keeper')}</span></Tooltip>
             </div>
           </div>
-          );
-        })()}
-      </div>
+        );
+      })()}
 
       <div className="flex flex-col md:flex-row gap-3">
         {renderColumn('A', sideA)}
@@ -940,7 +838,7 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
         </button>
         {showHow && (
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — so young risers sit above their Now value and aging vets below. The big number is your <strong className="text-orange-300">build</strong>: <strong>Contender</strong> leans on the next few seasons, <strong>Rebuild</strong> sets this season aside and leans on the years ahead. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. The verdict compares both sides through your build. Still being calibrated.
+            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — so young risers sit above their Now value and aging vets below. <strong className="text-orange-300">Overall</strong> is the dynasty asset value: a blend of the two, ¼ Now + ¾ Keep. Read <strong className="text-blue-300">Now</strong> if you&apos;re contending, <strong className="text-fuchsia-300">Keep</strong> if you&apos;re rebuilding, <strong className="text-orange-300">Overall</strong> for the neutral total. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. Still being calibrated.
           </p>
         )}
       </div>

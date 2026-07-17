@@ -350,6 +350,16 @@ export function fantasyRate(inp: ValueInputs, s: LeagueSettings): number {
   return f;
 }
 
+// The single, build-agnostic OVERALL value — a player's total dynasty asset worth.
+// Now (this season) + Keep (all future seasons) are different time windows, so a
+// blend is honest, not double-counting. Weighted toward Keep (¼ Now / ¾ Keep)
+// because in a keeper league the years you hold him dwarf the current one; a
+// contender still reads Now directly, a rebuilder reads Keep directly.
+export const OV_NOW_WEIGHT = 0.25;
+export function overallValue(now: number, keep: number): number {
+  return OV_NOW_WEIGHT * now + (1 - OV_NOW_WEIGHT) * keep;
+}
+
 export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number } {
   if (inp.war === undefined) return { present: 0, future: 0 };
   const fmt = FORMAT[s.format];
