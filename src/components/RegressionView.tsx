@@ -138,7 +138,10 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
   const [gap, setGap] = useState(0.3);
   const [wrcCut, setWrcCut] = useState(100);  // hitters: peak wRC+ ≥
   const [wGap, setWGap] = useState(10);       // hitters: min |current − peak|
-  const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
+  // MLB ONLY. Regression-to-the-mean (current-year performance vs PEAK projection)
+  // is only apples-to-apples for big-leaguers. A minor leaguer's current stat is his
+  // MiLB line (different competition + no park factors) while the projection is his
+  // MLB peak — so the gap isn't a real buy-low/sell-high signal. MiLB is excluded.
 
   useEffect(() => {
     try {
@@ -149,8 +152,6 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
         if (typeof s.eraCut === 'number') setEraCut(s.eraCut);
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (typeof s.gap === 'number') setGap(s.gap);
-        // eslint-disable-next-line react-hooks/set-state-in-effect
-        if (Array.isArray(s.levels) && s.levels.length) setLevels(new Set(s.levels));
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (typeof s.wrcCut === 'number') setWrcCut(s.wrcCut);
         // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -163,30 +164,24 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, wrcCut, wGap, mode, regSide, levels: [...levels] })); } catch { /* ignore */ }
-  }, [eraCut, gap, wrcCut, wGap, mode, regSide, levels]);
-
-  const toggleLevel = (l: Level) => setLevels((prev) => {
-    const next = new Set(prev);
-    if (next.has(l)) next.delete(l); else next.add(l);
-    return next.size ? next : prev; // never allow zero levels
-  });
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ eraCut, gap, wrcCut, wGap, mode, regSide })); } catch { /* ignore */ }
+  }, [eraCut, gap, wrcCut, wGap, mode, regSide]);
 
   const { sellHighs, buyLows } = useMemo(() => {
-    const inScope = rows.filter((r) => r.peakEra20 <= eraCut && levels.has(levelBucket(r.level)));
+    const inScope = rows.filter((r) => r.peakEra20 <= eraCut && levelBucket(r.level) === 'MLB');
     return {
       sellHighs: inScope.filter((r) => r.delta <= -gap).sort((a, b) => a.delta - b.delta).slice(0, 60),
       buyLows: inScope.filter((r) => r.delta >= gap).sort((a, b) => b.delta - a.delta).slice(0, 60),
     };
-  }, [rows, eraCut, gap, levels]);
+  }, [rows, eraCut, gap]);
 
   const { hotBats, coldBats } = useMemo(() => {
-    const inScope = hitters.filter((r) => r.peakWrc >= wrcCut && levels.has(levelBucket(r.level)));
+    const inScope = hitters.filter((r) => r.peakWrc >= wrcCut && levelBucket(r.level) === 'MLB');
     return {
       hotBats: inScope.filter((r) => r.delta >= wGap).sort((a, b) => b.delta - a.delta).slice(0, 60),
       coldBats: inScope.filter((r) => r.delta <= -wGap).sort((a, b) => a.delta - b.delta).slice(0, 60),
     };
-  }, [hitters, wrcCut, wGap, levels]);
+  }, [hitters, wrcCut, wGap]);
 
   if (!isPremium) return <PremiumTeaser context="regression" />;
   if (loading && rows.length === 0) {
@@ -208,9 +203,9 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
       <>
       <p className="text-[11px] text-zinc-500 mb-3">
         <span className="px-1.5 py-0.5 rounded bg-amber-500/15 text-amber-300 font-semibold mr-1.5">EXPERIMENTAL</span>
-        Hitters whose <span className="text-zinc-300">current-year wRC+</span> has drifted from their{' '}
-        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's peak wRC+ projection — his ceiling season. A pre-peak player normally runs UNDER it; that's development, not decline.">peak wRC+ projection</span>.
-        Note the projection is <span className="text-zinc-300">peak</span>, so young pre-peak bats may not project this well right now (they get a <span className="text-sky-300">pre-peak</span> tag). Rest-of-season OOPSY projections may come later.
+        <span className="text-zinc-400">MLB only.</span> Hitters whose <span className="text-zinc-300">current-year MLB wRC+</span> has drifted from their{' '}
+        <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's peak wRC+ projection — his ceiling season. A young pre-peak player normally runs UNDER it; that's development, not decline.">peak wRC+ projection</span>.
+        Minor leaguers are excluded — their current stat is a MiLB line, not comparable to an MLB peak, so the gap wouldn&apos;t be a real buy/sell signal. Young MLB bats still under their peak get a <span className="text-sky-300">pre-peak</span> tag.
       </p>
 
       <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 mb-4 flex flex-wrap items-center gap-x-6 gap-y-3 text-xs">
@@ -222,15 +217,6 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
           Min gap <span className="font-mono font-bold text-zinc-100 w-8">{wGap}</span>
           <input type="range" min={5} max={40} step={1} value={wGap} onChange={(e) => setWGap(parseInt(e.target.value, 10))} className="accent-emerald-500 w-32 cursor-pointer" />
         </label>
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-500">Levels</span>
-          {LEVELS.map((l) => (
-            <button key={l} onClick={() => toggleLevel(l)}
-              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${levels.has(l) ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-              {l}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="flex rounded-lg overflow-hidden border border-zinc-700 w-fit mb-3">
@@ -244,9 +230,9 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
       ) : (
       <>
       <p className="text-[11px] text-zinc-500 mb-3">
-        Starters (SP &amp; SP prospects) whose <span className="text-zinc-300">actual current-year ERA</span> (live from the MLB/MiLB API, min {' '}20 IP) has drifted from their{' '}
+        <span className="text-zinc-400">MLB only.</span> Starters whose <span className="text-zinc-300">actual current-year MLB ERA</span> (live from the MLB API, min {' '}20 IP) has drifted from their{' '}
         <span className="text-zinc-300 underline decoration-dotted cursor-help" title="The sheet's 'era 20 tbf/g' column — the regressed true-talent projection: what he should pitch to over a full, normalized 20-batters-faced-per-game workload. (ERA/20 runs ~0.2 above traditional ERA, so on-talent arms sit slightly negative.)">peak (true-talent) ERA/20 projection</span> <span className="text-zinc-500">(park-neutral — 🏟 flags pitchers whose actual ERA is park-flattered/inflated)</span>
-        {' '}— the gap is the regression signal.
+        {' '}— the gap is the regression signal. Minor leaguers are excluded: a MiLB ERA isn&apos;t comparable to an MLB peak projection, so the gap wouldn&apos;t mean anything.
       </p>
 
       {/* Filters */}
@@ -259,15 +245,6 @@ export default function RegressionView({ rows, hitters, loading, isPremium, isFo
           Min gap <span className="font-mono font-bold text-zinc-100 w-9">{gap.toFixed(2)}</span>
           <input type="range" min={0.1} max={1.5} step={0.05} value={gap} onChange={(e) => setGap(parseFloat(e.target.value))} className="accent-emerald-500 w-32 cursor-pointer" />
         </label>
-        <div className="flex items-center gap-1.5">
-          <span className="text-zinc-500">Levels</span>
-          {LEVELS.map((l) => (
-            <button key={l} onClick={() => toggleLevel(l)}
-              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${levels.has(l) ? 'bg-emerald-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>
-              {l}
-            </button>
-          ))}
-        </div>
       </div>
 
       <div className="flex rounded-lg overflow-hidden border border-zinc-700 w-fit mb-3">
