@@ -477,12 +477,18 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
     if (ARM_RX.test(note)) return 0.85;                      // shorter-term arm note
     return 1;
   };
-  // Saves premium, risk-adjusted: the ninth-inning role carries value the
-  // WAR/rate model can't see — but a closer with a POOR run-prevention
-  // projection is a blown-save streak from losing the job (or getting traded
-  // into a setup role), so the premium fades as the projected ERA/20 climbs.
-  // Elite (≤3.4) keeps 100%; ~4.2 keeps ~80%; a 5.1-projection guy keeps ~57%.
+  // Saves premium — a FALLBACK only. The auction market already prices saves into
+  // a closer's dollar value (his Dollars, hence marketBaseline, includes the SV
+  // category), and present value is market-led — so for anyone IN the export the
+  // market carries saves and an explicit premium would DOUBLE-COUNT them (it was
+  // inflating closer PV and, via the sustained-keeper floor, their FV: Devin
+  // Williams read Now 3.9 / Keep 5.2 vs a market-honest ~1.4 / ~1.5). We keep the
+  // premium ONLY for a closer ABSENT from the export, where the market has no
+  // saves signal to price (the original "Jansen read PV 0.0" case). Risk-adjusted:
+  // a poor run-prevention projection is a blown-save streak from losing the job,
+  // so it fades as ERA/20 climbs (elite ≤3.4 keeps 100%; ~4.2 ~80%; 5.1 ~57%).
   const savesPremium = (p: SearchResult) => {
+    if (metrics[p.id]?.marketBaseline !== undefined) return 0; // market already prices saves
     const pace = savesPace[p.id] ?? 0;
     if (pace <= 0) return 0;
     const m = metrics[p.id];
