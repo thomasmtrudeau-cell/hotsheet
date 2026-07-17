@@ -439,7 +439,21 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   const seasonEnding = (p: SearchResult) => {
     const inj = injuries[p.id];
     if (!inj) return false;
-    return inj.code === 'D60' || inj.code === 'ILF' || SURGERY_RX.test(inj.note ?? '');
+    // Full-season IL or a confirmed season-ending surgery = done for the year.
+    if (inj.code === 'ILF' || SURGERY_RX.test(inj.note ?? '')) return true;
+    // The 60-day IL is NOT automatically season-ending — plenty return from it with
+    // the season still going (Trevor Story: sports hernia, already in full baseball
+    // activities, projected 167 PA). Trust the projection: if OOPSY still gives him
+    // meaningful ROS reps he's coming back; if it's written him off (absent from the
+    // export, or ~0 projected reps) he's effectively done (Snelling: TJ, empty note
+    // but no projection at all).
+    if (inj.code === 'D60') {
+      const a = AUCTION_VALUES[String(p.id)];
+      if (!a) return true;
+      const proj = p.primaryPosition === 'P' ? a.ip : a.pa;
+      return proj === undefined || proj <= 20;
+    }
+    return false;
   };
   // Injury dock scales with entrenchment: a fringe guy's IL stint threatens his job
   // (heavy dock), an entrenched everyday star (J-Rod) returns to his role (light
