@@ -55,8 +55,8 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {role && role.factor < 1 && !injured && <span className={`${chip} bg-zinc-600/40 text-zinc-300`} title="Recent usage looks part-time">{role.label.toLowerCase()}</span>}
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {risk && <span className={`${chip} bg-amber-500/20 text-amber-300`} title={`${risk.name} (${risk.position}) — ${risk.kind === 'crowd' ? 'shares the spot on the active roster' : risk.kind === 'depth' ? 'pushing up from the minors' : 'returning from the IL'}`}>reps at risk</span>}
-          {multiElig && <span className={`${chip} bg-indigo-500/20 text-indigo-300`} title="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)">🔀 {elig}</span>}
-          {belowRepl && <span className={`${chip} bg-zinc-600/40 text-zinc-400`} title="Below replacement — his overall value is under a freely-available keeper (for a prospect, a weak keeper ceiling), so in a trade he counts as just a roster spot: you'd drop him for a better available player. He can't pad a trade or out-rank a real one.">▼ below replacement</span>}
+          {multiElig && <Tooltip text="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)"><span className={`${chip} bg-indigo-500/20 text-indigo-300`}>🔀 {elig}</span></Tooltip>}
+          {belowRepl && <Tooltip text="Below replacement — his overall value is under a freely-available keeper, so in a trade he counts as just a roster spot: you'd drop him for a better available player. He can't pad a trade or out-rank a real one."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
         </div>
       )}
     </div>
@@ -619,10 +619,11 @@ export default function TradeChecker({ isPremium }: TradeCheckerProps) {
   // worse guy). Name the actual guy with ＋FA to override the default.
   const depthFactor = Math.sqrt(560 / Math.max(1, settings.teams * settings.keepers)); // 1.0 at Tom's 560; >1 shallower
   // Bare-minimum replacement a rosterable spot is worth (per Tom, deep 20-team):
-  // PV 0.7, FV 2.0 — a real kept player, not a wire scrub; scales up in shallower
-  // leagues where the marginal roster player is better.
+  // PV 0.7, FV 1.5 — a freely-available backfill keeper, not a star. Overall
+  // replacement derives to ¼·0.7 + ¾·1.5 = 1.3. All scale UP in shallower leagues
+  // (bigger depthFactor) where more talent sits on the wire / available to keep.
   const PV_KEEP = 0.7 * depthFactor;
-  const FV_KEEP = 2.0 * depthFactor;
+  const FV_KEEP = 1.5 * depthFactor;
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
   // Freed spots pay DIMINISHING returns: freeing 4 spots in one trade doesn't get
   // you four equally-good keepers — each successive back-fill is a worse player. So
