@@ -57,7 +57,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {repsAtRisk && <Tooltip text={riskText || 'His reps could be squeezed.'}><span className={`${chip} bg-amber-500/20 text-amber-300`}>reps at risk</span></Tooltip>}
           {multiElig && <Tooltip text="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)"><span className={`${chip} bg-indigo-500/20 text-indigo-300`}>🔀 {elig}</span></Tooltip>}
-          {belowRepl && <Tooltip text="Below replacement — you can generally find a more valuable player in free agency or on the back end of most rosters, so in a trade he counts as just a roster spot. He can't pad a trade or out-rank a real player."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
+          {belowRepl && <Tooltip text="Below replacement — you can generally find a comparable or better player in free agency or on the back end of most rosters, so he adds little value in a trade."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
         </div>
       )}
     </div>
@@ -661,9 +661,17 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   const ovOf = (p: SearchResult) => valueOf(p).overall;
   const ovKeep = overallValue(PV_KEEP, FV_KEEP);
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
-  const pvContrib = (p: SearchResult) => (belowRepl(p) ? PV_KEEP : pvOf(p));
-  const fvContrib = (p: SearchResult) => (belowRepl(p) ? FV_KEEP : fvOf(p));
-  const ovContrib = (p: SearchResult) => (belowRepl(p) ? ovKeep : ovOf(p));
+  // A player contributes his REAL value to a trade, floored at 0. We floor at 0
+  // (not at replacement) for two reasons: (1) it keeps the totals reconciling with
+  // the per-player grades you see on the cards — flooring a below-replacement guy
+  // UP to replacement made "You give" not add up (Sanoja showed Overall 1.1 but
+  // counted as 1.45); (2) flooring a GIVEN-AWAY player up to a roster spot
+  // double-counts the "+1 roster spot freed" line, which already prices the roster
+  // asymmetry. The 0 floor still blocks the original hack — a negative-value
+  // throw-in can't pad a side down. Below-replacement stays a UI badge (info only).
+  const pvContrib = (p: SearchResult) => Math.max(0, pvOf(p));
+  const fvContrib = (p: SearchResult) => Math.max(0, fvOf(p));
+  const ovContrib = (p: SearchResult) => Math.max(0, ovOf(p));
   // The side that gives up more players opens that many roster spots. You can fill
   // them with the REAL free agents you'd actually add (their true PV/FV), and any
   // spots you don't name get the theoretical replacement level. Extra FAs beyond
