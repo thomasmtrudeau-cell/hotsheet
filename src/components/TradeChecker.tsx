@@ -336,6 +336,20 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   };
   const remainingGames = Math.round(162 * (1 - seasonFrac()));
   const PA_PER_GAME = 4.15;
+  // Projected ROS role fraction straight from the projection export (PA rescaled
+  // to today's remaining games), 0–1.1. This is the GROUND-TRUTH playing-time
+  // signal — a near-zero value means the projections don't think he's in an MLB
+  // lineup (optioned, quad-A, buried), whatever his rate stats or WAR say. Undefined
+  // when we can't know (no export entry, pitcher, minors, or injured — the IL
+  // depresses PA for a reason handled elsewhere), so callers leave value untouched.
+  const projRole = (p: SearchResult): number | undefined => {
+    if (p.sportId !== 1 || p.primaryPosition === 'P' || injuries[p.id]) return undefined;
+    const aPa = AUCTION_VALUES[String(p.id)]?.pa;
+    if (aPa === undefined || !AUCTION_AS_OF) return undefined;
+    const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
+    const scaled = aPa * (remainingGames / exportRemain);
+    return Math.max(0, Math.min(1.1, scaled / (remainingGames * PA_PER_GAME)));
+  };
   const estRosPA = (p: SearchResult): { pa: number; blended: boolean } | undefined => {
     if (p.sportId !== 1 || p.primaryPosition === 'P') return undefined;
     if (seasonEnding(p)) return { pa: 0, blended: false }; // 60-day/full-season IL or post-surgery — done for the year
@@ -351,6 +365,12 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
     if (aPa === undefined || !AUCTION_AS_OF || injuries[p.id]) return { pa: Math.round(algoPA), blended: false };
     const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
     const scaledAuction = aPa * (remainingGames / exportRemain);       // rescale stale magnitude
+    // A near-zero ROS PA projection is a definitive "not in an MLB lineup" signal
+    // (optioned, quad-A, buried) — NOT a stale full-season number to rescale. Trust
+    // it directly; otherwise the everyday algo (which assumes a full role for any
+    // 40-man player via establishedRegular) inflates a 3-PA guy back up to ~90
+    // (Patrick Wisdom: 34, stuck in AAA, projected 3 PA yet read ~92).
+    if (scaledAuction < 0.15 * remainingGames * PA_PER_GAME) return { pa: Math.round(scaledAuction), blended: false };
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
     const wA = 0.66 * Math.max(0, 1 - ageDays / 28);                   // 66% DC when fresh -> 0 by ~4wk (they know Story/Semien play every day)
     return { pa: Math.round(wA * scaledAuction + (1 - wA) * algoPA), blended: wA > 0 };
@@ -375,7 +395,13 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   const ptCredit = (p: SearchResult) => {
     const est = estRosPA(p);
     if (!est) return ptRateOf(p); // pitchers / minors — keep live-usage rate
-    return Math.max(0.3, Math.min(1.05, est.pa / (remainingGames * PA_PER_GAME)));
+    const frac = est.pa / (remainingGames * PA_PER_GAME);
+    // Normally floor at 0.3 — a rostered player gets SOME reps, and we don't zero a
+    // deep part-timer. But a genuine near-zero projection (optioned/buried) is
+    // allowed to fall through: he's not an MLB contributor this season, so his
+    // present value should reflect that rather than being propped up at 30%.
+    const floor = frac < 0.15 ? 0.03 : 0.3;
+    return Math.max(floor, Math.min(1.05, frac));
   };
   // (The fantasy-production layer — current-form rate + scarce HR/SB counting ×
   // playing time — now lives in value-model's shared liveValue, fed the live
@@ -552,6 +578,24 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // assumes a full-time role is worth less if that role is tenuous — a returning/
   // pushing teammate (Arias behind Ramírez) or a part-time role now. Softer than
   // the present-value dock since keeper horizons give the logjam time to resolve.
+  // Keeper role reality: keeper value assumes future EVERYDAY reps. A player the
+  // projections give ~no ROS role isn't holding an MLB job, so his keeper "ceiling"
+  // is partly illusory — and the OLDER he is, the less likely he ever gets that role
+  // (a 34-yo quad-A masher is who he is; a 22-yo blocked prospect still has time).
+  // Docks the ceiling by how far below a real role he's projected, scaled by age.
+  // Complements roleF below, which needs an MLB game-log rate the minors lack and
+  // only covers ≤29. Injured / pitchers / absent-from-export → projRole undefined → 1,
+  // so everyday regulars and legit keepers are untouched (Patrick Wisdom: 34,
+  // projected 3 PA → ~0.2, obliterating his keeper ceiling).
+  const keeperRoleReality = (p: SearchResult) => {
+    const pr = projRole(p);
+    if (pr === undefined || pr >= 0.6) return 1;                       // has a real (or unknown) role
+    const age = metrics[p.id]?.age ?? 26;
+    const shortfall = Math.max(0, Math.min(1, (0.6 - pr) / 0.6));      // 0 at a 0.6 role → 1 at zero role
+    const ageSeverity = Math.max(0, Math.min(1, (age - 24) / 10));     // 24- → 0 … 34+ → 1
+    const maxDock = 0.15 + 0.65 * ageSeverity;                         // young: ≤15% off; old: up to 80% off
+    return 1 - maxDock * shortfall;
+  };
   const fvPtFactor = (p: SearchResult) => {
     // Same entrenchment logic as PV — a star's keeper value isn't threatened by a
     // returnee who'll bump a lesser teammate.
@@ -578,7 +622,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
       odds += Math.max(0, wrc - 105) * 0.008; // a real bat finds at-bats
       roleF = Math.max(0.6, Math.min(1, odds));
     }
-    return risk * roleF;
+    return risk * roleF * keeperRoleReality(p);
   };
   // Keeper value: the durability-tilted ceiling floored by sustained production —
   // now computed inside the shared liveValue (fed the fvPtFactor / saves / arm-risk
