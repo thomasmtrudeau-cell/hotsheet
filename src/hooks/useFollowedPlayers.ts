@@ -27,6 +27,10 @@ function rosterSignature(players: FollowedPlayer[]): string {
 export function useFollowedPlayers() {
   const [user, setUser] = useState<User | null>(null);
   const [players, setPlayers] = useState<FollowedPlayer[]>([]);
+  // Always-current mirror of `players`, so an in-flight background refresh can
+  // reconcile against the LIVE roster when it resolves (not the stale snapshot it
+  // started with) — otherwise a delete made mid-refresh gets silently undone.
+  const playersRef = useRef<FollowedPlayer[]>(players);
   const [groups, setGroups] = useState<Group[]>([]);
   // playerId -> groupIds[]
   const [memberships, setMemberships] = useState<Map<number, string[]>>(new Map());
@@ -59,11 +63,22 @@ export function useFollowedPlayers() {
       });
       if (events.length > 0) setNotifications(addNotifications(events));
 
-      // Persist the refreshed copies (now marked baselined) so future refreshes diff.
+      // Persist the refreshed copies (now marked baselined) so future refreshes
+      // diff. CRITICAL: reconcile against the LIVE roster (playersRef), not the
+      // `prev` snapshot this refresh started with. A player deleted while this was
+      // in flight is no longer live, so we must NOT re-cache, re-upsert, or re-add
+      // him — otherwise the delete silently comes back (the mobile bug: slow
+      // network widens the race between page-load's refresh and a quick delete).
       const baselined = fresh.map((p) => ({ ...p, baselined: true }));
-      store.setCachedPlayers(baselined);
-      await store.bulkUpsertCloudPlayers(baselined);
-      if (rosterSignature(baselined) !== rosterSignature(prev)) setPlayers(baselined);
+      const freshById = new Map(baselined.map((p) => [p.id, p]));
+      const live = playersRef.current;
+      const liveIds = new Set(live.map((p) => p.id));
+      const merged = live.map((p) => freshById.get(p.id) ?? p); // update in place; drop nothing, add nothing
+      store.setCachedPlayers(merged);
+      await store.bulkUpsertCloudPlayers(baselined.filter((p) => liveIds.has(p.id)));
+      if (rosterSignature(merged) !== rosterSignature(live)) {
+        setPlayers((cur) => cur.map((p) => freshById.get(p.id) ?? p));
+      }
     } catch {
       // Offline / API hiccup — diff again next load.
     }
@@ -197,7 +212,6 @@ export function useFollowedPlayers() {
 
   // Re-check the roster periodically so promotions/demotions of followed
   // players ping you during an open session, not only on load.
-  const playersRef = useRef(players);
   useEffect(() => { playersRef.current = players; }, [players]);
   useEffect(() => {
     if (!loaded || players.length === 0) return;
