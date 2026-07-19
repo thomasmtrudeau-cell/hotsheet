@@ -384,11 +384,17 @@ export async function searchPlayers(query: string): Promise<SearchResult[]> {
       const searchable = normalize(`${firstName} ${useName} ${nickName} ${lastName} ${fullName} ${fullFML}`);
       return searchTerms.every((term) => searchable.includes(term));
     })
-    .map((p) => {
+    .map((p): SearchResult | null => {
       const team = p.currentTeam as Record<string, unknown>;
       const teamId = team.id as number;
       const teamInfo = teamMap.get(teamId);
-      const sportId = teamInfo?.sportId ?? 1;
+      // Not in our MLB + affiliated-MiLB team lookup → the player's current team is
+      // a winter / foreign / independent league club (e.g. Venezuelan LVBP's
+      // Tiburones de La Guaira, or the Mexican League's Bravos de León). The app
+      // only supports the MLB system (plus opt-in NPB/KBO, handled separately), so
+      // defaulting these to sportId 1 mislabeled them as MLB. Drop them instead.
+      if (!teamInfo) return null;
+      const sportId = teamInfo.sportId;
       const pos = p.primaryPosition as Record<string, unknown> | undefined;
       return {
         id: p.id as number,
@@ -400,10 +406,11 @@ export async function searchPlayers(query: string): Promise<SearchResult[]> {
         },
         sportId,
         level: LEVEL_LABELS[sportId] || 'Unknown',
-        parentOrg: teamInfo?.parentOrgName,
-        parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
+        parentOrg: teamInfo.parentOrgName,
+        parentOrgAbbrev: teamInfo.parentOrgAbbrev,
       };
     })
+    .filter((r): r is SearchResult => r !== null)
     .slice(0, 20);
 }
 
