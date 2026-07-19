@@ -54,6 +54,34 @@ function getDateString(offset: number = 0): string {
   return `${year}-${month}-${day}`;
 }
 
+// --- "Playing Today" instant-paint cache (stale-while-revalidate) ---
+// The daily-stats fetch fans out to many MLB API calls, so it's the slowest part
+// of a home-page load. We cache the last payload per date in localStorage and
+// paint it INSTANTLY on the next visit while the fresh copy loads in the
+// background, so the page feels immediate instead of blank-until-the-fan-out.
+const DAILY_CACHE_PREFIX = 'hotsheet_daily_';
+function readDailyCache(date: string): DailyPlayerStats[] | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(DAILY_CACHE_PREFIX + date);
+    if (!raw) return null;
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as DailyPlayerStats[]) : null;
+  } catch { return null; }
+}
+function writeDailyCache(date: string, data: DailyPlayerStats[]): void {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.setItem(DAILY_CACHE_PREFIX + date, JSON.stringify(data));
+    // Keep only today's + yesterday's payloads so the cache can't grow unbounded.
+    const keep = new Set([DAILY_CACHE_PREFIX + getDateString(0), DAILY_CACHE_PREFIX + getDateString(-1)]);
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith(DAILY_CACHE_PREFIX) && !keep.has(k)) localStorage.removeItem(k);
+    }
+  } catch { /* quota / unavailable — cache is best-effort */ }
+}
+
 type SortableStat = DailyPlayerStats | SeasonPlayerStats;
 
 // Lightweight name key for matching sheet/discovery names to followed players
@@ -230,6 +258,14 @@ export default function Home() {
     isToday = false,
   ) => {
     if (playersRef.current.length === 0) { setter([]); return; }
+    // Stale-while-revalidate: paint the last cached payload for this date INSTANTLY
+    // (filtered to players still followed), then refresh in the background below.
+    const cached = readDailyCache(date);
+    if (cached && cached.length) {
+      const liveIds = new Set(playersRef.current.map((p) => p.id));
+      const painted = cached.filter((s) => liveIds.has(s.playerId));
+      if (painted.length) setter(painted);
+    }
     try {
       const res = await fetch('/api/stats/daily', {
         method: 'POST',
@@ -239,7 +275,9 @@ export default function Home() {
       const data = await res.json();
       if (Array.isArray(data)) {
         setter(data);
-        // Opportunity signals derived from today's lineup/boxscore.
+        writeDailyCache(date, data);
+        // Opportunity signals derived from today's lineup/boxscore. Only fire on the
+        // FRESH response, never the cached paint above (would replay stale alerts).
         if (isToday) {
           ingestNotifications(rehabNotifications(data, date));
           ingestNotifications(lineupNotifications(data, date));

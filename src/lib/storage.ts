@@ -45,6 +45,12 @@ export function clearLocalCache(): void {
   localStorage.removeItem(PLAYERS_KEY);
   localStorage.removeItem(GROUPS_KEY);
   localStorage.removeItem(MEMBERSHIPS_KEY);
+  // Also drop the per-date "Playing Today" instant-paint cache — it's account-
+  // agnostic by key, so don't let one user's cached daily stats survive a switch.
+  for (let i = localStorage.length - 1; i >= 0; i--) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith('hotsheet_daily_')) localStorage.removeItem(k);
+  }
 }
 
 // If the cached data belongs to a different account than the one now signed in
