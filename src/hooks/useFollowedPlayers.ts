@@ -109,6 +109,20 @@ export function useFollowedPlayers() {
     const localGroups0 = store.getCachedGroups();
     const localMemberships0 = store.getCachedMemberships();
 
+    // Optimistic first paint: the cache provably belongs to THIS user (the owner
+    // reconcile above wiped it otherwise), so paint the last-known roster INSTANTLY
+    // and let the cloud fetch below reconcile in the background. This is what makes
+    // a cold launch feel immediate instead of blocking on several Supabase round-
+    // trips before anything renders. Skipped on a fresh device (nothing cached).
+    const cachedPlayers = store.getCachedPlayers();
+    if (cachedPlayers.length > 0) {
+      setPlayers(cachedPlayers);
+      setGroups(localGroups0);
+      setMemberships(localMemberships0);
+      setNotifications(getNotifications());
+      setLoaded(true);
+    }
+
     let cloudPlayers = await store.fetchCloudPlayers();
     if (cloudPlayers.length === 0) {
       // First login for THIS account. Only import genuine pre-auth legacy data
@@ -170,7 +184,14 @@ export function useFollowedPlayers() {
       }
     }
 
-    setPlayers(cloudPlayers);
+    // Reconcile the optimistic paint with the cloud truth. Keep the existing
+    // players array reference when the roster is unchanged (the common relaunch
+    // case) so the stat-fetch effect doesn't fire a second, redundant fan-out.
+    setPlayers((cur) =>
+      rosterSignature(cur) === rosterSignature(cloudPlayers) && cur.length === cloudPlayers.length
+        ? cur
+        : cloudPlayers
+    );
     setGroups(cloudGroups);
     setMemberships(cloudMemberships);
     setNotifications(getNotifications());
