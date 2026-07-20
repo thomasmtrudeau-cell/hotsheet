@@ -31,6 +31,12 @@ export function useFollowedPlayers() {
   // reconcile against the LIVE roster when it resolves (not the stale snapshot it
   // started with) — otherwise a delete made mid-refresh gets silently undone.
   const playersRef = useRef<FollowedPlayer[]>(players);
+  // Player ids deleted this session. A slow page-load refresh can resolve AFTER a
+  // quick delete and re-upsert the player from the stale roster snapshot it
+  // started with (the mobile "deleted player comes back" bug). Tombstoning the id
+  // makes every refresh permanently skip it — for the local merge AND the cloud
+  // upsert — until the player is explicitly re-followed.
+  const deletedIdsRef = useRef<Set<number>>(new Set());
   const [groups, setGroups] = useState<Group[]>([]);
   // playerId -> groupIds[]
   const [memberships, setMemberships] = useState<Map<number, string[]>>(new Map());
@@ -69,15 +75,20 @@ export function useFollowedPlayers() {
       // in flight is no longer live, so we must NOT re-cache, re-upsert, or re-add
       // him — otherwise the delete silently comes back (the mobile bug: slow
       // network widens the race between page-load's refresh and a quick delete).
+      const deleted = deletedIdsRef.current;
       const baselined = fresh.map((p) => ({ ...p, baselined: true }));
       const freshById = new Map(baselined.map((p) => [p.id, p]));
-      const live = playersRef.current;
+      // Drop tombstoned ids from the live snapshot too — even if the ref hasn't
+      // caught up with a just-fired delete, a deleted player is never re-surfaced.
+      const live = playersRef.current.filter((p) => !deleted.has(p.id));
       const liveIds = new Set(live.map((p) => p.id));
       const merged = live.map((p) => freshById.get(p.id) ?? p); // update in place; drop nothing, add nothing
       store.setCachedPlayers(merged);
-      await store.bulkUpsertCloudPlayers(baselined.filter((p) => liveIds.has(p.id)));
-      if (rosterSignature(merged) !== rosterSignature(live)) {
-        setPlayers((cur) => cur.map((p) => freshById.get(p.id) ?? p));
+      // Never re-upsert a player who's been deleted (live OR tombstoned) — this is
+      // what stops the delete from silently coming back on the next load.
+      await store.bulkUpsertCloudPlayers(baselined.filter((p) => liveIds.has(p.id) && !deleted.has(p.id)));
+      if (rosterSignature(merged) !== rosterSignature(playersRef.current)) {
+        setPlayers((cur) => cur.filter((p) => !deleted.has(p.id)).map((p) => freshById.get(p.id) ?? p));
       }
     } catch {
       // Offline / API hiccup — diff again next load.
@@ -222,6 +233,7 @@ export function useFollowedPlayers() {
   // --- Player actions ---
 
   const follow = useCallback(async (player: FollowedPlayer, groupIds: string[] = []) => {
+    deletedIdsRef.current.delete(player.id); // re-following clears any tombstone
     const withTime = { ...player, followedAt: new Date().toISOString() };
     setPlayers((prev) => {
       if (prev.some((p) => p.id === player.id)) return prev;
@@ -245,6 +257,7 @@ export function useFollowedPlayers() {
   }, []);
 
   const unfollow = useCallback(async (playerId: number) => {
+    deletedIdsRef.current.add(playerId); // tombstone: no in-flight refresh may revive him
     setPlayers((prev) => {
       const updated = prev.filter((p) => p.id !== playerId);
       store.setCachedPlayers(updated);
@@ -296,6 +309,7 @@ export function useFollowedPlayers() {
     memberships.forEach((ids, pid) => {
       if (ids.includes(groupId) && ids.every((id) => id === groupId)) orphaned.add(pid);
     });
+    orphaned.forEach((pid) => deletedIdsRef.current.add(pid)); // tombstone so a refresh can't revive them
 
     setGroups((prev) => {
       const updated = prev.filter((g) => g.id !== groupId);
