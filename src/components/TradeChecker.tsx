@@ -731,7 +731,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
@@ -741,7 +741,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
@@ -831,7 +831,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
               <div key={r.id} className="flex items-center justify-between px-3 py-2 border-b border-zinc-700/50 last:border-0">
                 <div className="min-w-0">
                   <div className="text-sm text-zinc-100 truncate">{r.fullName}</div>
-                  <div className="text-[11px] text-zinc-500">{r.primaryPosition} · {r.currentTeam.name}</div>
+                  <div className="text-[11px] text-zinc-500">{r.primaryPosition} · {r.currentTeam.name}{r.parentOrgAbbrev ? <span className="text-zinc-400"> · {r.parentOrgAbbrev}</span> : ''}</div>
                 </div>
                 <div className="flex gap-1 shrink-0">
                   {addingFa ? (

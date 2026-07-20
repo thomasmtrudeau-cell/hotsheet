@@ -104,8 +104,8 @@ export default function ProjectionsView({ pitchers, hitters, week, loading, isPr
               </tr>
             </thead>
             <tbody>
-              {filteredHitters.map((h) => (
-                <tr key={h.nameKey} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
+              {filteredHitters.map((h, i) => (
+                <tr key={`${h.nameKey}-${i}`} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
                   <td className="px-2 py-1.5 text-zinc-500 tabular-nums">{h.rank}</td>
                   <td className="px-2 py-1.5 text-zinc-100">
                     {h.player}
@@ -132,8 +132,8 @@ export default function ProjectionsView({ pitchers, hitters, week, loading, isPr
               </tr>
             </thead>
             <tbody>
-              {filteredPitchers.map((p) => (
-                <tr key={p.nameKey} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
+              {filteredPitchers.map((p, i) => (
+                <tr key={`${p.nameKey}-${i}`} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
                   <td className="px-2 py-1.5 text-zinc-500 tabular-nums">{p.rank}</td>
                   <td className="px-2 py-1.5 text-zinc-100">
                     {p.player}

@@ -610,8 +610,9 @@ export default function Home() {
   // Initial auth check still resolving.
   if (!user && !loaded) {
     return (
-      <div className="flex justify-center items-center min-h-screen">
-        <div className="w-6 h-6 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
+      <div className="flex flex-col justify-center items-center gap-3 min-h-screen">
+        <div className="w-8 h-8 border-[3px] border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
+        <span className="text-sm text-zinc-500">Loading Hot Sheet…</span>
       </div>
     );
   }
@@ -776,7 +777,10 @@ export default function Home() {
             </button>
           )}
           {loading && (
-            <div className="w-3 h-3 border-2 border-zinc-700 border-t-blue-500 rounded-full animate-spin" />
+            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-blue-300">
+              <span className="w-3.5 h-3.5 border-2 border-blue-500/30 border-t-blue-400 rounded-full animate-spin" />
+              Refreshing…
+            </span>
           )}
           {lastRefresh && (
             <span className="text-[11px] text-zinc-600">
