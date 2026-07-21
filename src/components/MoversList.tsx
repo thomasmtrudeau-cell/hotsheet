@@ -44,16 +44,19 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
       </div>
     );
   }
-  // Group by mover date, newest date first. Premium sees the WAR-derived order
-  // (top guys first, as the API sends them); free users get ALPHABETICAL — the
-  // ranking itself is part of the premium layer.
+  // Group by mover date, newest date first. Premium sees WAR descending across
+  // the whole day (call-ups and promotions interleaved); free users get
+  // ALPHABETICAL — the ranking itself is part of the premium layer.
   const byDate = new Map<string, CallUp[]>();
   for (const c of items) {
     const k = c.calledUpDate || 'unknown';
     if (!byDate.has(k)) byDate.set(k, []);
     byDate.get(k)!.push(c);
   }
-  if (!isPremium) for (const arr of byDate.values()) arr.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  for (const arr of byDate.values()) {
+    if (isPremium) arr.sort((a, b) => (b.war ?? -Infinity) - (a.war ?? -Infinity));
+    else arr.sort((a, b) => a.fullName.localeCompare(b.fullName));
+  }
   const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
 
   const controls = (
