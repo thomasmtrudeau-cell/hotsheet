@@ -542,7 +542,8 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
       )}
 
       {/* Status row. Scheduled games show a compact time + lineup (no redundant
-          "Scheduled" pill); played games show the performance grade. */}
+          "Scheduled" pill); played games show the performance grade. No-game
+          days already say it once in the context row above, so no pill. */}
       {stats.gameStatus === 'Scheduled' ? (
         <div className="flex items-center gap-2 text-xs text-zinc-400">
           {stats.gameTime && <span>🕒 {stats.gameTime}</span>}
@@ -554,11 +555,11 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
             />
           )}
         </div>
-      ) : (
+      ) : stats.performanceGrade !== 'no_game' ? (
         <div className="flex items-center gap-2">
           <GradeBadge grade={stats.performanceGrade} reason={stats.gradeReason} />
         </div>
-      )}
+      ) : null}
 
       {/* Recent form + game log — revealed together via the chevron (keeps the
           default card lean; expand to see the L15 line + last 15 games). */}
