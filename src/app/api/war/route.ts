@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { buildPremiumSnapshot, fetchPremiumMap, premiumFromSnapshot, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS } from '@/lib/war';
+import { fetchPremiumMap, premiumFromSnapshot, repairPremiumSnapshot, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS, SNAPSHOT_VERSION } from '@/lib/war';
 import { FollowedPlayer } from '@/lib/types';
 
 // Per-instance cache of the Storage snapshot so warm requests don't re-download
@@ -18,7 +18,7 @@ async function getSnapshot(): Promise<PremiumSnapshot | null> {
   if (!data) return null;
   const snap = JSON.parse(await data.text()) as PremiumSnapshot;
   const fresh = snap?.capturedAt && Date.now() - Date.parse(snap.capturedAt) < SNAPSHOT_MAX_AGE_MS;
-  if (!fresh || snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return null;
+  if (snap?.version !== SNAPSHOT_VERSION || !fresh || snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return null;
   snapCache = { at: Date.now(), snap };
   return snap;
 }
@@ -30,13 +30,8 @@ async function repairSnapshot() {
   const sheetId = process.env.WAR_SHEET_ID;
   if (!sheetId) return;
   try {
-    const snap = await buildPremiumSnapshot(sheetId);
-    if (snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return;
-    const store = createServiceClient();
-    const { error } = await store.storage.from('war')
-      .upload('war_premium.json', JSON.stringify(snap), { upsert: true, contentType: 'application/json' });
-    if (error) console.error('snapshot self-heal upload:', error.message);
-    else snapCache = { at: Date.now(), snap };
+    const snap = await repairPremiumSnapshot(sheetId, createServiceClient().storage);
+    if (snap) snapCache = { at: Date.now(), snap };
   } catch (e) { console.error('snapshot self-heal failed:', e); }
 }
 

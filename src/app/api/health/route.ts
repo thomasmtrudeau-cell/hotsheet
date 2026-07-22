@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWarRows, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS } from '@/lib/war';
+import { getWarRows, repairPremiumSnapshot, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS, SNAPSHOT_VERSION } from '@/lib/war';
 import { getOopsy } from '@/lib/oopsy';
 import { createServiceClient } from '@/lib/supabase/service';
 
@@ -81,16 +81,23 @@ export async function GET() {
   try {
     const sb = createServiceClient();
     const { data } = await sb.storage.from('war').download('war_premium.json');
-    if (!data) {
-      checks.premiumSnapshot = { ok: true, detail: 'none stored — /api/war uses live sheet' };
+    const snap = data ? (JSON.parse(await data.text()) as PremiumSnapshot) : null;
+    const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
+    const size = snapshotSize(snap);
+    const usable = snap?.version === SNAPSHOT_VERSION && Number.isFinite(ageH)
+      && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
+    if (usable) {
+      checks.premiumSnapshot = { ok: true, detail: `${size} entries, captured ${ageH.toFixed(1)}h ago` };
+    } else if (sheetId) {
+      // Missing/stale/off-version snapshot: this endpoint is pinged by an
+      // external monitor around the clock, so repair here — otherwise every
+      // /api/war cold start pays the full sheet fetch until the daily cron.
+      const repaired = await repairPremiumSnapshot(sheetId, sb.storage).catch(() => null);
+      checks.premiumSnapshot = repaired
+        ? { ok: true, detail: `repaired — ${snapshotSize(repaired)} entries` }
+        : { ok: false, detail: `unusable (${size} entries, v${snap?.version ?? '?'}) and repair failed — /api/war falling back to live sheet` };
     } else {
-      const snap = JSON.parse(await data.text()) as PremiumSnapshot;
-      const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
-      const size = snapshotSize(snap);
-      const usable = Number.isFinite(ageH) && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
-      // An unusable stored snapshot only degrades performance (live fallback
-      // kicks in), so warn — the row-count floor is the load-bearing detail.
-      checks.premiumSnapshot = { ok: usable, detail: `${size} entries, captured ${Number.isFinite(ageH) ? ageH.toFixed(1) : '?'}h ago${usable ? '' : ' — UNUSABLE, /api/war falling back to live sheet'}` };
+      checks.premiumSnapshot = { ok: true, detail: 'no WAR sheet configured' };
     }
   } catch (e) {
     checks.premiumSnapshot = { ok: false, detail: e instanceof Error ? e.message : String(e) };

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getWarRows, buildPremiumSnapshot, snapshotSize, SNAPSHOT_MIN_ENTRIES } from '@/lib/war';
+import { getWarRows, repairPremiumSnapshot, snapshotSize } from '@/lib/war';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const maxDuration = 60;
@@ -86,21 +86,15 @@ export async function GET(request: NextRequest) {
     let premiumCached = false;
     let premiumEntries = 0;
     try {
-      const snap = await buildPremiumSnapshot(sheetId);
+      const store = createServiceClient();
+      await store.storage.createBucket('war', { public: false }); // idempotent; errors (already-exists) ignored below
+      // repairPremiumSnapshot refuses to store a truncated capture (sheet
+      // mid-recalc) — /api/war would serve "no data" for real players until
+      // the next cron.
+      const snap = await repairPremiumSnapshot(sheetId, store.storage);
       premiumEntries = snapshotSize(snap);
-      // A truncated capture (sheet mid-recalc) must never replace a good one —
-      // /api/war would serve "no data" for real players until the next cron.
-      if (premiumEntries < SNAPSHOT_MIN_ENTRIES) {
-        console.error(`premium snapshot skipped: only ${premiumEntries} entries (< ${SNAPSHOT_MIN_ENTRIES})`);
-      } else {
-        const store = createServiceClient();
-        await store.storage.createBucket('war', { public: false }); // idempotent; errors (already-exists) ignored below
-        const body = JSON.stringify(snap);
-        const { error: upErr } = await store.storage.from('war')
-          .upload('war_premium.json', body, { upsert: true, contentType: 'application/json' });
-        if (upErr) console.error('premium snapshot upload:', upErr.message);
-        else premiumCached = true;
-      }
+      premiumCached = snap !== null;
+      if (!premiumCached) console.error(`premium snapshot not stored (${premiumEntries} entries)`);
     } catch (e) { console.error('premium snapshot failed:', e); }
 
     return NextResponse.json({ capturedAt, inserted: records.length, premiumCached, premiumEntries });

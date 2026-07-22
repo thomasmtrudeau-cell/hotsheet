@@ -341,10 +341,16 @@ export async function fetchPremiumMap(
 // writes this to Storage so /api/war can join against it instead of pulling ~7MB of
 // gviz CSV on every cold start. Keyed by normalized name, same as the live maps.
 export interface PremiumSnapshot {
+  version?: number;
   capturedAt: string;
   hitters: Record<string, PremiumMetrics>;
   pitchers: Record<string, PremiumMetrics>;
 }
+// Bump to invalidate every stored snapshot at once (consumers reject other
+// versions and fall back to the live sheet until a good capture self-heals).
+// v2: 2026-07-22 — flushed a capture taken mid-sheet-recalc that was fresh and
+// large yet held blank-forfeited dedups (wrong Hao-Yu Lee row, no Doyle).
+export const SNAPSHOT_VERSION = 2;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
@@ -360,10 +366,29 @@ export function snapshotSize(snap: PremiumSnapshot | null | undefined): number {
 export async function buildPremiumSnapshot(sheetId: string): Promise<PremiumSnapshot> {
   const { hitters, pitchers } = await getPremiumMaps(sheetId);
   return {
+    version: SNAPSHOT_VERSION,
     capturedAt: new Date().toISOString(),
     hitters: Object.fromEntries(hitters),
     pitchers: Object.fromEntries(pitchers),
   };
+}
+// Rebuild the snapshot from the live sheet and store it when it passes the
+// quality bar. Shared by the daily cron, the /api/war live-fallback self-heal,
+// and the health check's repair path. Returns the stored snapshot, or null
+// when the rebuild didn't qualify (caller keeps whatever it had).
+export async function repairPremiumSnapshot(
+  sheetId: string,
+  storage: { from(bucket: string): { upload(path: string, body: string, opts: { upsert: boolean; contentType: string }): Promise<{ error: { message: string } | null }> } },
+): Promise<PremiumSnapshot | null> {
+  const snap = await buildPremiumSnapshot(sheetId);
+  if (snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return null;
+  const { error } = await storage.from('war')
+    .upload('war_premium.json', JSON.stringify(snap), { upsert: true, contentType: 'application/json' });
+  if (error) {
+    console.error('premium snapshot upload:', error.message);
+    return null;
+  }
+  return snap;
 }
 // Same name-join as fetchPremiumMap, but against a Storage snapshot (no fetch).
 export function premiumFromSnapshot(players: FollowedPlayer[], snap: PremiumSnapshot): Record<number, PremiumMetrics> {
