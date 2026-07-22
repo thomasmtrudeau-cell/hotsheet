@@ -41,7 +41,8 @@ export interface ValueInputs {
   age?: number;
   level?: string;
   marketBaseline?: number; // (auction $ − role's FA line) / DIV, role-correct
-  catcherFlex?: boolean;   // catcher who also plays 1B/DH (bat can carry off the dish)
+  catcherFlex?: boolean;   // catcher who also plays 1B/DH (bat can carry off the dish) — coarse fallback when catcherShare is unknown
+  catcherShare?: number;   // 0–1 fraction of his played games actually spent BEHIND THE PLATE (from the game log); scales the catcher haircuts
   defRuns?: number;      // hitters — raw sheet DEF runs (strip from WAR for fantasy)
   ipg?: number;          // pitchers — sheet IP/G (< 2.01 = reliever role)
 }
@@ -314,13 +315,29 @@ const FORMAT: Record<ScoringFormat, FormatWeights> = {
   avg:    { warW: 0.18, mktW: 0.60, prodW: 0.22, wrcFan: 0.82, hrFan: 1.05, sbFan: 0.90 },
 };
 
+// How much of the catcher haircut a "C" actually deserves, 0 (none) → 1 (full).
+// The haircuts exist because time BEHIND THE PLATE suppresses PA volume (rest
+// days, day-after-night) and inflates WAR with framing that doesn't score — both
+// scale with how often he actually squats, not with the roster label. So when we
+// can see his real position mix (game log), the penalty follows it: ≤40% of games
+// at C reads like any other bat (a C-eligible LF/DH — the label is upside, not a
+// tax), ≥80% is a true full-timer, linear in between. Without a share we fall
+// back to the coarse catcherFlex flag (half severity), else full. C-eligibility
+// UPSIDE (scarcity premium, gentler fragility/durability) is untouched — it keys
+// off eligibility, which any C games preserve.
+export function catcherSeverity(position?: string, catcherShare?: number, catcherFlex?: boolean): number {
+  if ((position ?? '') !== 'C') return 0;
+  if (catcherShare !== undefined) return clamp((catcherShare - 0.4) / 0.4, 0, 1);
+  return catcherFlex ? 0.5 : 1;
+}
+
 // WAR isn't fantasy value. Catcher WAR is inflated by framing/defense that
-// doesn't score, so it's haircut (less so for a flex catcher who can play 1B/DH,
-// since his bat carries off the dish). 1B/DH WAR is deflated by the positional
+// doesn't score, so it's haircut — scaled by cSev (catcherSeverity), how much of
+// his time is really spent catching. 1B/DH WAR is deflated by the positional
 // penalty even though their bat is the whole fantasy point, so we add it back —
 // a good-hitting low-WAR 1B (Schwarber-type) then clears the keeper bar on the
 // bat. Middle-infield/OF WAR translates roughly as-is (scarcity handles those).
-function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRuns?: number, defKeep = 0.3): number {
+function fantasyWar(war: number, position?: string, cSev = 1, defRuns?: number, defKeep = 0.3): number {
   const p = position ?? '';
   // Defense in fantasy (when the sheet's raw DEF is available): it produces no
   // stats, but it IS insurance — a plus glove holds the everyday job and extends
@@ -334,12 +351,13 @@ function fantasyWar(war: number, position?: string, catcherFlex?: boolean, defRu
   // the games-played reality of the position.
   if (defRuns !== undefined) {
     const offWar = war - (defRuns / 9.774) * (1 - defKeep);
-    // Catchers actually take ~15% fewer PA than other regulars (rest days,
+    // Full-time catchers take ~15% fewer PA than other regulars (rest days,
     // day-after-night) — their per-600 rates overstate real seasonal volume.
-    return p === 'C' ? offWar * (catcherFlex ? 0.92 : 0.85) : offWar;
+    // A part-time C (splits time at LF/DH/1B) loses proportionally less.
+    return p === 'C' ? offWar * (1 - 0.15 * cSev) : offWar;
   }
   // Legacy fallbacks when DEF isn't known (e.g. older cached payloads).
-  if (p === 'C') return war * (catcherFlex ? 0.92 : 0.80);
+  if (p === 'C') return war * (1 - 0.20 * cSev);
   if (p === 'DH') return war + 1.2;
   if (p === '1B') return war + 1.0;
   return war;
@@ -383,8 +401,9 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01;
   // Two defense-insurance rates: present keeps 30% of DEF (playing-time safety),
   // keeper keeps 40% (longevity + role retention over the horizon).
-  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns, 0.3);
-  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, inp.catcherFlex, inp.defRuns, 0.4);
+  const cSev = catcherSeverity(inp.position, inp.catcherShare, inp.catcherFlex);
+  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.3);
+  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.4);
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
@@ -401,8 +420,9 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // pitcher's ERA-based fantasy holds (run prevention ages more gracefully).
   const growth = growthPremium(inp.age, inp.isPitcher, inp.position);
   const fantasyFade = inp.isPitcher ? 1 : growth / 3;
-  // Catcher counting stats shrink with catcher PA volume too.
-  if (inp.position === 'C') fantasy *= 0.8;
+  // Catcher counting stats shrink with catcher PA volume too — proportional to
+  // how much he actually catches (a C/LF/DH's HR aren't squat-suppressed).
+  fantasy *= 1 - 0.2 * cSev;
   // Clearing the keeper bar used to be a hard step (0.15 → 1.0 the instant WAR
   // crossed the bar), which put a cliff in keeper value — a 1.9- and 2.1-WAR guy
   // graded 10× apart. Smooth it into a ramp across ±0.75 WAR around the bar so a

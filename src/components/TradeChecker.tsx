@@ -19,14 +19,15 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number } }) {
+function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
     return <div className="mt-1 text-[10px] text-zinc-500 animate-pulse">◍ pricing…</div>;
   }
   const multiElig = Boolean(elig && elig.includes('/'));
-  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || repsAtRisk || belowRepl || multiElig;
+  const partTimeC = cShare !== undefined && cShare < 0.8; // catcher haircut eased/removed by his real position mix
+  const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || repsAtRisk || belowRepl || multiElig || partTimeC;
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
@@ -57,6 +58,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
           {injured && <span className={`${chip} bg-red-500/20 text-red-400`} title={longTermIL ? 'Long-term IL (60-day / full-season / post-surgery) — no value the rest of this season; keeper value faded for the injury' : armRisk ? 'On the injured list — arm injury (shoulder/elbow); keeper value faded too' : 'On the injured list'}>{longTermIL ? (armRisk ? 'out · arm (long-term)' : 'out — long-term IL') : armRisk ? 'on IL · arm' : 'on IL'}</span>}
           {repsAtRisk && <Tooltip text={riskText || 'His reps could be squeezed.'}><span className={`${chip} bg-amber-500/20 text-amber-300`}>reps at risk</span></Tooltip>}
           {multiElig && <Tooltip text="Multi-position eligibility (from the projection's position list — a rough guide, may differ from your league's exact games-played rules)"><span className={`${chip} bg-indigo-500/20 text-indigo-300`}>🔀 {elig}</span></Tooltip>}
+          {partTimeC && <Tooltip text={`Catches in only ${Math.round(cShare! * 100)}% of his games (rest at LF/DH/1B etc.), so the catcher WAR/volume haircut is ${cShare! <= 0.4 ? 'removed' : 'reduced'} — his bat isn't squat-suppressed like a full-time catcher's, and he keeps C-eligibility scarcity.`}><span className={`${chip} bg-teal-500/20 text-teal-300`}>🧢 C {Math.round(cShare! * 100)}%</span></Tooltip>}
           {belowRepl && <Tooltip text="Below replacement — you can generally find a comparable or better player in free agency or on the back end of most rosters, so he adds little value in a trade."><span className={`${chip} bg-zinc-600/40 text-zinc-400`}>▼ below replacement</span></Tooltip>}
         </div>
       )}
@@ -75,6 +77,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   const [injuries, setInjuries] = useState<Record<number, InjuryStatus | undefined>>({});
   const [ptRisk, setPtRisk] = useState<Record<number, { name: string; position: string; kind?: 'il' | 'depth' | 'crowd' } | undefined>>({});
   const [roles, setRoles] = useState<Record<number, { label: string; factor: number; rate: number }>>({}); // actual playing-time (rate = fraction of games appeared in)
+  const [catcherShares, setCatcherShares] = useState<Record<number, number>>({}); // catchers: fraction of played games actually BEHIND THE PLATE (scales the C haircuts)
   const [batSides, setBatSides] = useState<Record<number, string | undefined>>({}); // L/R/S — for lefty platoon risk
   const [loadedIds, setLoadedIds] = useState<Set<number>>(new Set()); // ids whose sheet metrics have arrived (loading-skeleton gate)
   const [ros, setRos] = useState<{ asOf: string | null; hitters: Record<string, { wrc?: number; sv?: number }>; pitchers: Record<string, { era?: number; sv?: number }> }>({ asOf: null, hitters: {}, pitchers: {} });
@@ -137,7 +140,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
     const all = [...sideA, ...sideB, ...faFills];
     if (all.length === 0) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setBatSides({}); setLoadedIds(new Set()); setSavesPace({});
+      setMetrics({}); setInjuries({}); setPtRisk({}); setRoles({}); setCatcherShares({}); setBatSides({}); setLoadedIds(new Set()); setSavesPace({});
       fetchedRef.current = new Set();
       return;
     }
@@ -145,23 +148,38 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
     if (fresh.length === 0) return;
     for (const p of fresh) fetchedRef.current.add(p.id);
     // IL-aware playing-time role per hitter (few players in a trade, so per-player
-    // team-game-log fetches are fine). Majors-only — never dock prospects.
-    Promise.all(fresh.filter((p) => p.primaryPosition !== 'P' && p.sportId === 1).map(async (p) => {
+    // team-game-log fetches are fine). The role dock is majors-only — never dock
+    // prospects — but catchers at ANY level also get their position mix read here
+    // (share of played games actually behind the plate scales the C haircuts, so
+    // a C/LF/DH prospect isn't taxed like a full-time squatter).
+    Promise.all(fresh.filter((p) => p.primaryPosition !== 'P' && (p.sportId === 1 || p.primaryPosition === 'C')).map(async (p) => {
       try {
         const r = await fetch(`/api/stats/gamelog?playerId=${p.id}&sportId=${p.sportId}&pitcher=0&teamId=${p.currentTeam.id}`);
         const d = await r.json();
-        const entries: Array<{ dnp?: boolean }> = d.entries ?? [];
+        const entries: Array<{ dnp?: boolean; position?: string }> = d.entries ?? [];
+        // Catcher position mix: how often he ACTUALLY catches (a "C/LF" game counts —
+        // he squatted that day). Needs a real sample to override the roster label.
+        let cShare: number | undefined;
+        if (p.primaryPosition === 'C') {
+          const played = entries.filter((e) => !e.dnp && e.position);
+          if (played.length >= 8) cShare = played.filter((e) => e.position!.split('/').includes('C')).length / played.length;
+        }
         const hasDnp = entries.some((e) => e.dnp);
-        if (!hasDnp || entries.length < 10) return [p.id, null] as const;
+        if (p.sportId !== 1 || !hasDnp || entries.length < 10) return [p.id, null, cShare] as const;
         const rate = entries.filter((e) => !e.dnp).length / entries.length;
         const role = { rate, label: rate >= 0.8 ? 'Everyday' : rate >= 0.5 ? 'Part-time' : 'Bench', factor: rate >= 0.8 ? 1 : rate >= 0.5 ? 0.85 : 0.7 };
-        return [p.id, role] as const;
-      } catch { return [p.id, null] as const; }
-    })).then((pairs) => {
+        return [p.id, role, cShare] as const;
+      } catch { return [p.id, null, undefined] as const; }
+    })).then((triples) => {
       if (!mountedRef.current) return;
       setRoles((prev) => {
         const m = { ...prev };
-        for (const [id, role] of pairs) if (role) m[id] = role;
+        for (const [id, role] of triples) if (role) m[id] = role;
+        return m;
+      });
+      setCatcherShares((prev) => {
+        const m = { ...prev };
+        for (const [id, , cShare] of triples) if (cShare !== undefined) m[id] = cShare;
         return m;
       });
     });
@@ -283,6 +301,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
       defRuns: m.defRuns, ipg: m.ipg,
+      catcherShare: catcherShares[p.id],
     };
   };
   // Actual playing-time rate (fraction of team games he's appeared in), from the
@@ -732,7 +751,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -742,7 +761,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
