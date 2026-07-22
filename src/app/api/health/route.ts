@@ -25,6 +25,69 @@ async function reachable(url: string, ms = 6000): Promise<boolean> {
   }
 }
 
+type Check = { ok: boolean; detail?: string };
+let sheetChecksCache: { at: number; checks: Record<string, Check> } | null = null;
+const SHEET_CHECKS_TTL = 30 * 60_000;
+
+async function runSheetChecks(): Promise<Record<string, Check>> {
+  const checks: Record<string, Check> = {};
+
+  // WAR sheet parses (warning only — premium feature, not core).
+  const sheetId = process.env.WAR_SHEET_ID;
+  if (!sheetId) {
+    checks.warSheet = { ok: true, detail: 'not configured' };
+  } else {
+    try {
+      const rows = await getWarRows(sheetId);
+      checks.warSheet = { ok: rows.length > 0, detail: `${rows.length} rows parsed` };
+    } catch (e) {
+      checks.warSheet = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  // The Storage snapshot /api/war actually serves from — distinct from the
+  // war_snapshots TABLE (2026-07-22: a truncated war_premium.json served
+  // wrong/missing premium metrics for days while every other check stayed green).
+  try {
+    const sb = createServiceClient();
+    const { data } = await sb.storage.from('war').download('war_premium.json');
+    const snap = data ? (JSON.parse(await data.text()) as PremiumSnapshot) : null;
+    const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
+    const size = snapshotSize(snap);
+    const usable = snap?.version === SNAPSHOT_VERSION && Number.isFinite(ageH)
+      && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
+    if (usable) {
+      checks.premiumSnapshot = { ok: true, detail: `${size} entries, captured ${ageH.toFixed(1)}h ago` };
+    } else if (sheetId) {
+      // Missing/stale/off-version snapshot: repair here — otherwise every
+      // /api/war cold start pays the full sheet fetch until the daily cron.
+      const repaired = await repairPremiumSnapshot(sheetId, sb.storage).catch(() => null);
+      checks.premiumSnapshot = repaired
+        ? { ok: true, detail: `repaired — ${snapshotSize(repaired)} entries` }
+        : { ok: false, detail: `unusable (${size} entries, v${snap?.version ?? '?'}) and repair failed — /api/war falling back to live sheet` };
+    } else {
+      checks.premiumSnapshot = { ok: true, detail: 'no WAR sheet configured' };
+    }
+  } catch (e) {
+    checks.premiumSnapshot = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+
+  // OOPSY weekly projections sheet (warning only — premium feature).
+  const oopsyId = process.env.OOPSY_SHEET_ID;
+  if (!oopsyId) {
+    checks.oopsy = { ok: true, detail: 'OOPSY_SHEET_ID not set' };
+  } else {
+    try {
+      const { pitchers, hitters } = await getOopsy(oopsyId);
+      checks.oopsy = { ok: pitchers.length + hitters.length > 0, detail: `${pitchers.length} SP / ${hitters.length} H` };
+    } catch (e) {
+      checks.oopsy = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+    }
+  }
+
+  return checks;
+}
+
 export async function GET() {
   const checks: Record<string, { ok: boolean; detail?: string }> = {};
 
@@ -62,58 +125,18 @@ export async function GET() {
   checks.supabase = { ok: supabaseOk };
   checks.warSnapshot = { ok: snapshotOk, detail: snapshotDetail };
 
-  // 3) WAR sheet parses (warning only — premium feature, not core).
-  const sheetId = process.env.WAR_SHEET_ID;
-  if (!sheetId) {
-    checks.warSheet = { ok: true, detail: 'not configured' };
-  } else {
-    try {
-      const rows = await getWarRows(sheetId);
-      checks.warSheet = { ok: rows.length > 0, detail: `${rows.length} rows parsed` };
-    } catch (e) {
-      checks.warSheet = { ok: false, detail: e instanceof Error ? e.message : String(e) };
-    }
-  }
-
-  // 3b) The Storage snapshot /api/war actually serves from — distinct from the
-  // war_snapshots TABLE above (2026-07-22: a truncated war_premium.json served
-  // wrong/missing premium metrics for days while every other check stayed green).
-  try {
-    const sb = createServiceClient();
-    const { data } = await sb.storage.from('war').download('war_premium.json');
-    const snap = data ? (JSON.parse(await data.text()) as PremiumSnapshot) : null;
-    const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
-    const size = snapshotSize(snap);
-    const usable = snap?.version === SNAPSHOT_VERSION && Number.isFinite(ageH)
-      && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
-    if (usable) {
-      checks.premiumSnapshot = { ok: true, detail: `${size} entries, captured ${ageH.toFixed(1)}h ago` };
-    } else if (sheetId) {
-      // Missing/stale/off-version snapshot: this endpoint is pinged by an
-      // external monitor around the clock, so repair here — otherwise every
-      // /api/war cold start pays the full sheet fetch until the daily cron.
-      const repaired = await repairPremiumSnapshot(sheetId, sb.storage).catch(() => null);
-      checks.premiumSnapshot = repaired
-        ? { ok: true, detail: `repaired — ${snapshotSize(repaired)} entries` }
-        : { ok: false, detail: `unusable (${size} entries, v${snap?.version ?? '?'}) and repair failed — /api/war falling back to live sheet` };
-    } else {
-      checks.premiumSnapshot = { ok: true, detail: 'no WAR sheet configured' };
-    }
-  } catch (e) {
-    checks.premiumSnapshot = { ok: false, detail: e instanceof Error ? e.message : String(e) };
-  }
-
-  // 4) OOPSY weekly projections sheet (warning only — premium feature).
-  const oopsyId = process.env.OOPSY_SHEET_ID;
-  if (!oopsyId) {
-    checks.oopsy = { ok: true, detail: 'OOPSY_SHEET_ID not set' };
-  } else {
-    try {
-      const { pitchers, hitters } = await getOopsy(oopsyId);
-      checks.oopsy = { ok: pitchers.length + hitters.length > 0, detail: `${pitchers.length} SP / ${hitters.length} H` };
-    } catch (e) {
-      checks.oopsy = { ok: false, detail: e instanceof Error ? e.message : String(e) };
-    }
+  // 3 + 3b + 4) Sheet checks — served from a 30-min per-instance cache. These
+  // are the expensive part of the endpoint (getWarRows alone re-downloads and
+  // parses ~7MB of gviz CSV) and the uptime monitor pings around the clock, so
+  // running them per-ping made this route the team's biggest Fluid CPU line.
+  // They're degraded-warnings, not up/down signals — 30-min-late detection is
+  // fine. The critical checks above stay live on every ping.
+  const cached = sheetChecksCache && Date.now() - sheetChecksCache.at < SHEET_CHECKS_TTL
+    ? sheetChecksCache.checks
+    : (sheetChecksCache = { at: Date.now(), checks: await runSheetChecks() }).checks;
+  const staleMin = sheetChecksCache ? Math.round((Date.now() - sheetChecksCache.at) / 60_000) : 0;
+  for (const [k, v] of Object.entries(cached)) {
+    checks[k] = staleMin >= 1 ? { ...v, detail: `${v.detail} (checked ${staleMin}m ago)` } : v;
   }
 
   // Critical checks decide up/down; snapshot age + sheets are "degraded" warnings.
