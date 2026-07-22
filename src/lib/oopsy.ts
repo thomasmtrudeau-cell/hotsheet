@@ -40,14 +40,22 @@ async function fetchWeekLabel(sheetId: string): Promise<string | undefined> {
   } catch { return undefined; }
 }
 
-const col = (header: string[], name: string) => header.findIndex((h) => h.trim().toLowerCase() === name.toLowerCase());
+const col = (header: string[], ...names: string[]) => {
+  for (const name of names) {
+    const i = header.findIndex((h) => h.trim().toLowerCase() === name.toLowerCase());
+    if (i >= 0) return i;
+  }
+  return -1;
+};
 const startsWith = (header: string[], prefix: string) => header.findIndex((h) => h.trim().toLowerCase().startsWith(prefix));
 
 function parsePitchers(csv: string): OopsyPitcher[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) return [];
   const h = rows[0];
-  const pi = col(h, 'Player'), di = col(h, 'Day'), ei = col(h, 'ERA'), oi = col(h, 'Opponent'), ki = col(h, 'Park'), ti = col(h, 'Team');
+  // Column A flips between "Player" and "Name" across weekly exports (7/20
+  // shipped as "Name" and the whole tab parsed to zero) — accept both.
+  const pi = col(h, 'Player', 'Name'), di = col(h, 'Day'), ei = col(h, 'ERA'), oi = col(h, 'Opponent'), ki = col(h, 'Park'), ti = col(h, 'Team');
   const out: OopsyPitcher[] = [];
   for (let r = 1; r < rows.length; r++) {
     const c = rows[r];
@@ -69,7 +77,7 @@ function parseHitters(csv: string): OopsyHitter[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) return [];
   const h = rows[0];
-  const pi = col(h, 'Player'), gi = col(h, 'Projected games'), pai = col(h, 'Projected PA');
+  const pi = col(h, 'Player', 'Name'), gi = col(h, 'Projected games'), pai = col(h, 'Projected PA');
   const wi = startsWith(h, 'wrc+'), fi = startsWith(h, 'fantasy value'), ri = col(h, 'Rank');
   const out: OopsyHitter[] = [];
   for (let r = 1; r < rows.length; r++) {
