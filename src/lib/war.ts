@@ -345,6 +345,18 @@ export interface PremiumSnapshot {
   hitters: Record<string, PremiumMetrics>;
   pitchers: Record<string, PremiumMetrics>;
 }
+// Quality bar shared by every snapshot producer/consumer. The full sheet holds
+// ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
+// mid-recalc parses far fewer (blank metric cells drop the row), so anything
+// under the floor is a broken capture — never serve or store it. Age cap is
+// 36h: the cron refreshes daily, so older means the refresh pipeline is broken
+// and live data beats a days-old join.
+export const SNAPSHOT_MIN_ENTRIES = 3000;
+export const SNAPSHOT_MAX_AGE_MS = 36 * 3_600_000;
+export function snapshotSize(snap: PremiumSnapshot | null | undefined): number {
+  if (!snap?.hitters || !snap?.pitchers) return 0;
+  return Object.keys(snap.hitters).length + Object.keys(snap.pitchers).length;
+}
 export async function buildPremiumSnapshot(sheetId: string): Promise<PremiumSnapshot> {
   const { hitters, pitchers } = await getPremiumMaps(sheetId);
   return {

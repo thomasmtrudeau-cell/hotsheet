@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getWarRows, buildPremiumSnapshot } from '@/lib/war';
+import { getWarRows, buildPremiumSnapshot, snapshotSize, SNAPSHOT_MIN_ENTRIES } from '@/lib/war';
 import { createServiceClient } from '@/lib/supabase/service';
 
 export const maxDuration = 60;
@@ -84,18 +84,26 @@ export async function GET(request: NextRequest) {
     // instead of pulling ~7MB of sheet CSV on every cold start. Non-fatal — pricing
     // falls back to the live fetch if this is missing/stale.
     let premiumCached = false;
+    let premiumEntries = 0;
     try {
       const snap = await buildPremiumSnapshot(sheetId);
-      const store = createServiceClient();
-      await store.storage.createBucket('war', { public: false }); // idempotent; errors (already-exists) ignored below
-      const body = JSON.stringify(snap);
-      const { error: upErr } = await store.storage.from('war')
-        .upload('war_premium.json', body, { upsert: true, contentType: 'application/json' });
-      if (upErr) console.error('premium snapshot upload:', upErr.message);
-      else premiumCached = Object.keys(snap.hitters).length + Object.keys(snap.pitchers).length > 0;
+      premiumEntries = snapshotSize(snap);
+      // A truncated capture (sheet mid-recalc) must never replace a good one —
+      // /api/war would serve "no data" for real players until the next cron.
+      if (premiumEntries < SNAPSHOT_MIN_ENTRIES) {
+        console.error(`premium snapshot skipped: only ${premiumEntries} entries (< ${SNAPSHOT_MIN_ENTRIES})`);
+      } else {
+        const store = createServiceClient();
+        await store.storage.createBucket('war', { public: false }); // idempotent; errors (already-exists) ignored below
+        const body = JSON.stringify(snap);
+        const { error: upErr } = await store.storage.from('war')
+          .upload('war_premium.json', body, { upsert: true, contentType: 'application/json' });
+        if (upErr) console.error('premium snapshot upload:', upErr.message);
+        else premiumCached = true;
+      }
     } catch (e) { console.error('premium snapshot failed:', e); }
 
-    return NextResponse.json({ capturedAt, inserted: records.length, premiumCached });
+    return NextResponse.json({ capturedAt, inserted: records.length, premiumCached, premiumEntries });
   } catch (error) {
     console.error('war-snapshot error:', error);
     const detail = error instanceof Error ? error.message

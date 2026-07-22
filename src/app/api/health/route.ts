@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWarRows } from '@/lib/war';
+import { getWarRows, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS } from '@/lib/war';
 import { getOopsy } from '@/lib/oopsy';
 import { createServiceClient } from '@/lib/supabase/service';
 
@@ -75,6 +75,27 @@ export async function GET() {
     }
   }
 
+  // 3b) The Storage snapshot /api/war actually serves from — distinct from the
+  // war_snapshots TABLE above (2026-07-22: a truncated war_premium.json served
+  // wrong/missing premium metrics for days while every other check stayed green).
+  try {
+    const sb = createServiceClient();
+    const { data } = await sb.storage.from('war').download('war_premium.json');
+    if (!data) {
+      checks.premiumSnapshot = { ok: true, detail: 'none stored — /api/war uses live sheet' };
+    } else {
+      const snap = JSON.parse(await data.text()) as PremiumSnapshot;
+      const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
+      const size = snapshotSize(snap);
+      const usable = Number.isFinite(ageH) && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
+      // An unusable stored snapshot only degrades performance (live fallback
+      // kicks in), so warn — the row-count floor is the load-bearing detail.
+      checks.premiumSnapshot = { ok: usable, detail: `${size} entries, captured ${Number.isFinite(ageH) ? ageH.toFixed(1) : '?'}h ago${usable ? '' : ' — UNUSABLE, /api/war falling back to live sheet'}` };
+    }
+  } catch (e) {
+    checks.premiumSnapshot = { ok: false, detail: e instanceof Error ? e.message : String(e) };
+  }
+
   // 4) OOPSY weekly projections sheet (warning only — premium feature).
   const oopsyId = process.env.OOPSY_SHEET_ID;
   if (!oopsyId) {
@@ -90,7 +111,7 @@ export async function GET() {
 
   // Critical checks decide up/down; snapshot age + sheets are "degraded" warnings.
   const critical = checks.mlbApi.ok && checks.supabase.ok;
-  const allOk = critical && checks.warSnapshot.ok && checks.warSheet.ok && checks.oopsy.ok;
+  const allOk = critical && checks.warSnapshot.ok && checks.warSheet.ok && checks.premiumSnapshot.ok && checks.oopsy.ok;
   const status = !critical ? 'down' : allOk ? 'ok' : 'degraded';
 
   if (status === 'down' && process.env.SLACK_WEBHOOK_URL) {
