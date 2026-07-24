@@ -6,7 +6,7 @@ import { getTeamLookup } from './mlb-api';
 // once, then matches typo-tolerantly (prefixes + edit distance) in memory.
 
 const MLB_API = 'https://statsapi.mlb.com/api/v1';
-const INDEX_SPORT_IDS = [1, 11, 12, 13, 14];
+const INDEX_SPORT_IDS = [1, 11, 12, 13, 14, 16]; // 16 = Rookie/Complex (ACL, FCL, DSL)
 const INDEX_TTL = 12 * 60 * 60 * 1000;
 
 interface IndexedPlayer {
