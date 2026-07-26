@@ -1,4 +1,4 @@
-import { FollowedPlayer, PremiumMetrics, RegressionRow, HitterRegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
+import { FollowedPlayer, PremiumMetrics, ProspectRanks, MetricRank, RegressionRow, HitterRegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
 import { AUCTION_VALUES, AuctionRole } from './auction-values';
 import { computeValue, DEFAULT_SETTINGS } from './value-model';
 
@@ -207,6 +207,47 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   return out;
 }
 
+// Competition-style ranking (ties share the better rank) over one metric.
+// Only players carrying the metric count toward `of`.
+function rankBy<T>(items: T[], val: (t: T) => number | undefined, asc = false): Map<T, MetricRank> {
+  const ranked = items
+    .map((t) => ({ t, v: val(t) }))
+    .filter((x): x is { t: T; v: number } => x.v !== undefined && Number.isFinite(x.v));
+  ranked.sort((a, b) => (asc ? a.v - b.v : b.v - a.v));
+  const out = new Map<T, MetricRank>();
+  for (let i = 0, r = 1; i < ranked.length; i++) {
+    if (i > 0 && ranked[i].v !== ranked[i - 1].v) r = i + 1;
+    out.set(ranked[i].t, { r, of: ranked.length });
+  }
+  return out;
+}
+
+// Stamp every player's rank in the StS universe onto his metrics, per role
+// population: hitters on peak WAR / peak wRC+ / combined HR+SB, pitchers on
+// peak WAR / ERA-20 (ascending). Runs once per sheet parse, so the snapshot,
+// /api/war, and the scouting join all carry the SAME ranks.
+function assignProspectRanks(hitters: Map<string, PremiumMetrics>, pitchers: Map<string, PremiumMetrics>): void {
+  const hs = [...hitters.values()], ps = [...pitchers.values()];
+  const hWar = rankBy(hs, (m) => m.war);
+  const hWrc = rankBy(hs, (m) => m.peakWrcPlus);
+  const hHrSb = rankBy(hs, (m) => (m.hr !== undefined && m.sb !== undefined ? m.hr + m.sb : undefined));
+  for (const m of hs) {
+    const ranks: ProspectRanks = {};
+    const w = hWar.get(m); if (w) ranks.war = w;
+    const c = hWrc.get(m); if (c) ranks.wrc = c;
+    const d = hHrSb.get(m); if (d) ranks.hrSb = d;
+    if (ranks.war || ranks.wrc || ranks.hrSb) m.ranks = ranks;
+  }
+  const pWar = rankBy(ps, (m) => m.war);
+  const pEra = rankBy(ps, (m) => m.era20, true);
+  for (const m of ps) {
+    const ranks: ProspectRanks = {};
+    const w = pWar.get(m); if (w) ranks.war = w;
+    const e = pEra.get(m); if (e) ranks.era = e;
+    if (ranks.war || ranks.era) m.ranks = ranks;
+  }
+}
+
 // Short in-memory cache of the parsed sheet, keyed by sheet id. Kept brief so
 // edits to the Google Sheet surface on the site within ~a minute. Hitting and
 // pitching are kept SEPARATE — some names appear in both (position players who
@@ -263,6 +304,7 @@ async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, P
     if (hitters.size === 0 && pitchers.size === 0 && cache && cache.sheetId === sheetId) {
       return cache;
     }
+    assignProspectRanks(hitters, pitchers);
     cache = { sheetId, at: now, hitters, pitchers };
     return cache;
   } catch (err) {
@@ -350,7 +392,8 @@ export interface PremiumSnapshot {
 // versions and fall back to the live sheet until a good capture self-heals).
 // v2: 2026-07-22 — flushed a capture taken mid-sheet-recalc that was fresh and
 // large yet held blank-forfeited dedups (wrong Hao-Yu Lee row, no Doyle).
-export const SNAPSHOT_VERSION = 2;
+// v3: 2026-07-26 — snapshots now carry per-metric StS-universe ranks.
+export const SNAPSHOT_VERSION = 3;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
@@ -646,7 +689,17 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
 
 export async function getScouting(sheetId: string): Promise<{ rows: ScoutingRow[] }> {
   const [hitCsv, pitCsv] = await Promise.all([fetchCsvTab(sheetId, HIT_TAB), fetchCsvTab(sheetId, PIT_TAB)]);
-  return { rows: [...parseScoutTab(hitCsv, 'name', false), ...parseScoutTab(pitCsv, 'player', true)] };
+  const rows = [...parseScoutTab(hitCsv, 'name', false), ...parseScoutTab(pitCsv, 'player', true)];
+  // Join the StS-universe ranks from the premium maps (same parse, usually
+  // cache-warm) so scouting shows the identical ranks the cards do.
+  try {
+    const maps = await getPremiumMaps(sheetId);
+    for (const r of rows) {
+      const ranks = (r.isPitcher ? maps.pitchers : maps.hitters).get(r.nameKey)?.ranks;
+      if (ranks) r.ranks = ranks;
+    }
+  } catch { /* ranks are an enrichment — never fail the list over them */ }
+  return { rows };
 }
 
 // WAR-only join (playerId -> WAR), used to sort the call-up / promotion

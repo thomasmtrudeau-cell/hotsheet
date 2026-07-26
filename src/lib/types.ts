@@ -58,7 +58,20 @@ export type ToolGrade = 'plus' | 'double-plus';
 // Defense is bidirectional (can be a liability or an asset).
 export type DefGrade = 'double-plus' | 'plus' | 'minus' | 'double-minus';
 
+// Rank within the ScoutTheStatline projection universe, per role population
+// (hitters ranked among all projected hitters, pitchers among pitchers).
+// r = 1 is best; of = how many players carry that metric. Premium-only —
+// these ride only premium payloads.
+export interface MetricRank { r: number; of: number }
+export interface ProspectRanks {
+  war?: MetricRank;
+  wrc?: MetricRank;   // hitters — peak wRC+
+  hrSb?: MetricRank;  // hitters — combined projected HR + SB
+  era?: MetricRank;   // pitchers — ERA/20, ranked ascending (1 = lowest)
+}
+
 export interface PremiumMetrics {
+  ranks?: ProspectRanks; // rank in the StS universe per headline metric
   war?: number;         // peak WAR
   peakWrcPlus?: number; // hitters — peak wRC+
   era20?: number;       // pitchers — ERA per 20 TBF/game
@@ -363,6 +376,7 @@ export interface ScoutingRow {
   power?: ToolGrade;
   dual?: ToolGrade;
   def?: DefGrade;
+  ranks?: ProspectRanks; // same StS-universe ranks the cards show (joined from the premium maps)
 }
 
 export interface RegressionRow {

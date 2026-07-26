@@ -7,6 +7,7 @@ import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
 import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
+import RanksToggle from './RanksToggle';
 import Tooltip from './Tooltip';
 import ValueBoard from './ValueBoard';
 
@@ -47,6 +48,7 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
         {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Speed">⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
         {m && !isPitcher && m.def && <span className={`${chip} ${m.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`} title="Defense — mostly playing-time insurance in fantasy">🧤{m.def === 'double-plus' ? '++' : m.def === 'plus' ? '+' : m.def === 'double-minus' ? '−−' : '−'}</span>}
         {isPitcher && saves !== undefined && saves >= 10 && <span className={`${chip} bg-teal-500/20 text-teal-300`} title="Projected saves at his current pace, risk-adjusted for a shaky closer">🧯 ~{saves} SV</span>}
+        <RanksToggle ranks={m?.ranks} isPitcher={isPitcher} compact />
       </div>
       {/* reps / status */}
       {repsRow && (

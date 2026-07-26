@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { ScoutingRow, SearchResult, FollowedPlayer, Group } from '@/lib/types';
 import PremiumTeaser from './PremiumTeaser';
+import RanksToggle from './RanksToggle';
 
 interface ScoutingViewProps {
   rows: ScoutingRow[];
@@ -194,6 +195,9 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
                   </span>
                 )}
               </div>
+              {/* Last child on purpose: the collapsed chip sits at the row's end and
+                  the expanded basis-full line wraps BELOW the row without reordering it. */}
+              <RanksToggle ranks={r.ranks} isPitcher={r.isPitcher} compact />
             </div>
             );
           })}
