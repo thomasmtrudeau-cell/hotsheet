@@ -2,11 +2,15 @@ import { parseCsv, normalizeName } from './war';
 import { OopsyPitcher, OopsyHitter } from './types';
 
 // OOPSY weekly projections — a separate published Google Sheet with two tabs.
-// Read by STABLE gid (the tabs are renamed with the week date each update, but
-// the gid never changes). Premium-only; the API route enforces that. Dormant
-// unless OOPSY_SHEET_ID is configured.
-const PITCH_GID = '854749414';
-const HIT_GID = '1891665849';
+// Tab gids are resolved by NAME from the published htmlview each fetch: the
+// 7/27 export replaced the tabs outright (new gids) instead of renaming them,
+// and gviz silently serves the FIRST tab when asked for a dead gid — so a
+// hardcoded gid can return the wrong tab's data without erroring. The old gids
+// survive only as a last-resort fallback when the htmlview parse fails.
+// Premium-only; the API route enforces that. Dormant unless OOPSY_SHEET_ID is
+// configured.
+const FALLBACK_PITCH_GID = '854749414';
+const FALLBACK_HIT_GID = '1891665849';
 const TTL = 5 * 60_000; // 5 min
 
 let cache: { sheetId: string; at: number; pitchers: OopsyPitcher[]; hitters: OopsyHitter[]; week?: string } | null = null;
@@ -18,26 +22,44 @@ async function fetchCsvByGid(sheetId: string, gid: string): Promise<string> {
   return res.text();
 }
 
-// The tabs are renamed with the projection week's Monday each update (e.g.
-// "7/13 pitching"), and the published sheet's htmlview lists those names — so the
-// week label comes from the DATA, not the calendar (a stale sheet shows its real
-// week). Returns e.g. "Jul 13–19" or undefined if the parse fails; never throws.
+// The published sheet's htmlview embeds every tab's name and gid.
+type Tab = { name: string; gid: string };
+async function fetchTabs(sheetId: string): Promise<Tab[]> {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
+  if (!res.ok) return [];
+  const html = await res.text();
+  const tabs: Tab[] = [];
+  const re = /\{name: "([^"]*)", pageUrl: "[^"]*?gid=(\d+)/g;
+  let m;
+  while ((m = re.exec(html))) tabs.push({ name: m[1].replace(/\\\//g, '/'), gid: m[2] });
+  return tabs;
+}
+
+// Tabs are named for the projection week's Monday, e.g. "7/27 pitching".
+const tabDate = (name: string): number => {
+  const m = name.match(/(\d{1,2})\/(\d{1,2})/);
+  return m ? parseInt(m[1], 10) * 100 + parseInt(m[2], 10) : -1;
+};
+// "hitting" is a substring-safe test only because /hit/ never matches "pitching".
+function pickTab(tabs: Tab[], want: 'pitching' | 'hitting'): Tab | undefined {
+  const c = tabs.filter((t) => (want === 'pitching' ? /pitch/i.test(t.name) : /hit/i.test(t.name) && !/pitch/i.test(t.name)));
+  if (c.length === 0) return undefined;
+  return c.reduce((a, b) => (tabDate(b.name) >= tabDate(a.name) ? b : a));
+}
+
+// Week label comes from the tab NAME, not the calendar — a stale sheet shows
+// its real week. Returns e.g. "Jul 13–19" or undefined; never throws.
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-async function fetchWeekLabel(sheetId: string): Promise<string | undefined> {
-  try {
-    const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
-    if (!res.ok) return undefined;
-    const html = await res.text();
-    const m = html.match(/name: "(\d{1,2})\\?\/(\d{1,2})[^"]*"/);
-    if (!m) return undefined;
-    const mo = parseInt(m[1], 10), day = parseInt(m[2], 10);
-    if (!mo || !day || mo > 12 || day > 31) return undefined;
-    // Week runs Mon..Sun from the tab's date.
-    const year = new Date().getFullYear();
-    const end = new Date(year, mo - 1, day + 6);
-    const sameMonth = end.getMonth() === mo - 1;
-    return `${MONTHS[mo - 1]} ${day}–${sameMonth ? '' : `${MONTHS[end.getMonth()]} `}${end.getDate()}`;
-  } catch { return undefined; }
+function weekLabel(tabName: string | undefined): string | undefined {
+  const m = tabName?.match(/(\d{1,2})\/(\d{1,2})/);
+  if (!m) return undefined;
+  const mo = parseInt(m[1], 10), day = parseInt(m[2], 10);
+  if (!mo || !day || mo > 12 || day > 31) return undefined;
+  // Week runs Mon..Sun from the tab's date.
+  const year = new Date().getFullYear();
+  const end = new Date(year, mo - 1, day + 6);
+  const sameMonth = end.getMonth() === mo - 1;
+  return `${MONTHS[mo - 1]} ${day}–${sameMonth ? '' : `${MONTHS[end.getMonth()]} `}${end.getDate()}`;
 }
 
 const col = (header: string[], ...names: string[]) => {
@@ -77,7 +99,9 @@ function parseHitters(csv: string): OopsyHitter[] {
   const rows = parseCsv(csv);
   if (rows.length < 2) return [];
   const h = rows[0];
-  const pi = col(h, 'Player', 'Name'), gi = col(h, 'Projected games'), pai = col(h, 'Projected PA');
+  // The 7/27 export renamed "Projected games/PA" to bare "G"/"PA" and dropped
+  // the fantasy-value and Rank columns — accept both generations.
+  const pi = col(h, 'Player', 'Name'), gi = col(h, 'Projected games', 'G'), pai = col(h, 'Projected PA', 'PA');
   const wi = startsWith(h, 'wrc+'), fi = startsWith(h, 'fantasy value'), ri = col(h, 'Rank');
   const out: OopsyHitter[] = [];
   for (let r = 1; r < rows.length; r++) {
@@ -99,7 +123,14 @@ export async function getOopsy(sheetId: string): Promise<{ pitchers: OopsyPitche
   if (cache && cache.sheetId === sheetId && now - cache.at < TTL) {
     return { pitchers: cache.pitchers, hitters: cache.hitters, week: cache.week };
   }
-  const [pc, hc, week] = await Promise.all([fetchCsvByGid(sheetId, PITCH_GID), fetchCsvByGid(sheetId, HIT_GID), fetchWeekLabel(sheetId)]);
+  const tabs = await fetchTabs(sheetId).catch(() => [] as Tab[]);
+  const pitchTab = pickTab(tabs, 'pitching');
+  const hitTab = pickTab(tabs, 'hitting');
+  const week = weekLabel(pitchTab?.name ?? hitTab?.name);
+  const [pc, hc] = await Promise.all([
+    fetchCsvByGid(sheetId, pitchTab?.gid ?? FALLBACK_PITCH_GID),
+    fetchCsvByGid(sheetId, hitTab?.gid ?? FALLBACK_HIT_GID),
+  ]);
   const pitchers = parsePitchers(pc);
   const hitters = parseHitters(hc);
   cache = { sheetId, at: now, pitchers, hitters, week };

@@ -22,9 +22,15 @@ function dailyPoints(points: { at: string; war: number }[]): { day: string; war:
 }
 
 function TrendChart({ series }: { series: TrendSeries[] }) {
+  // Hovered day index — a crosshair tooltip snaps to the nearest day, so the
+  // exact values are readable instantly (native <title> tooltips on the tiny
+  // point circles had a ~1s browser delay and a near-impossible hit target).
+  const [hover, setHover] = useState<number | null>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
   const daily = series.map((s) => dailyPoints(s.points));
   const days = Array.from(new Set(daily.flat().map((p) => p.day))).sort();
   if (days.length === 0) return null;
+  const byDay = daily.map((pts) => new Map(pts.map((p) => [p.day, p.war])));
   const wars = daily.flat().map((p) => p.war);
   let lo = Math.min(...wars), hi = Math.max(...wars);
   if (hi - lo < 0.5) { const mid = (hi + lo) / 2; lo = mid - 0.25; hi = mid + 0.25; } // don't zoom into noise
@@ -41,8 +47,38 @@ function TrendChart({ series }: { series: TrendSeries[] }) {
   const step = Math.max(1, Math.ceil(days.length / 6));
   const yTicks = 4;
 
+  const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (!rect || rect.width === 0) return;
+    const px = ((e.clientX - rect.left) / rect.width) * W;
+    if (px < mL - 10 || px > W - mR + 10) { setHover(null); return; }
+    const t = days.length === 1 ? 0 : (px - mL) / (W - mL - mR);
+    setHover(Math.max(0, Math.min(days.length - 1, Math.round(t * (days.length - 1)))));
+  };
+
+  // Tooltip rows for the hovered day (series without a capture that day drop out).
+  const hoverDay = hover !== null ? days[hover] : null;
+  const rows = hoverDay
+    ? series
+        .map((s, si) => ({ player: s.player, color: COLORS[si % COLORS.length], war: byDay[si].get(hoverDay) }))
+        .filter((r): r is { player: string; color: string; war: number } => r.war !== undefined)
+        .sort((a, b) => b.war - a.war)
+    : [];
+  const tipW = Math.min(180, Math.max(96, 44 + Math.max(0, ...rows.map((r) => r.player.length)) * 4.4));
+  const tipH = 14 + rows.length * 11;
+  const tipX = hoverDay && x(hoverDay) + 10 + tipW > W - mR ? x(hoverDay) - 10 - tipW : hoverDay ? x(hoverDay) + 10 : 0;
+
   return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" style={{ maxHeight: 300 }} preserveAspectRatio="xMidYMid meet">
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${W} ${H}`}
+      className="w-full"
+      style={{ maxHeight: 300, touchAction: 'pan-y' }}
+      preserveAspectRatio="xMidYMid meet"
+      onPointerMove={onMove}
+      onPointerDown={onMove}
+      onPointerLeave={() => setHover(null)}
+    >
       {Array.from({ length: yTicks + 1 }, (_, i) => {
         const v = lo + ((hi - lo) * i) / yTicks;
         return (
@@ -59,12 +95,26 @@ function TrendChart({ series }: { series: TrendSeries[] }) {
         const color = COLORS[si % COLORS.length];
         const path = pts.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.day).toFixed(1)},${y(p.war).toFixed(1)}`).join(' ');
         return (
-          <g key={si}>
+          <g key={si} pointerEvents="none">
             <path d={path} fill="none" stroke={color} strokeWidth={1.75} />
-            {pts.map((p) => <circle key={p.day} cx={x(p.day)} cy={y(p.war)} r={1.8} fill={color}><title>{`${series[si].player} · ${fmtDay(p.day)} · ${p.war.toFixed(2)} WAR`}</title></circle>)}
+            {pts.map((p) => <circle key={p.day} cx={x(p.day)} cy={y(p.war)} r={p.day === hoverDay ? 3 : 1.8} fill={color} />)}
           </g>
         );
       })}
+      {hoverDay && (
+        <g pointerEvents="none">
+          <line x1={x(hoverDay)} y1={mT} x2={x(hoverDay)} y2={H - mB} stroke="#52525b" strokeWidth={0.75} strokeDasharray="3 2" />
+          <rect x={tipX} y={mT + 2} width={tipW} height={tipH} rx={4} fill="#18181b" stroke="#3f3f46" strokeWidth={0.75} opacity={0.96} />
+          <text x={tipX + 7} y={mT + 12} className="fill-zinc-400" style={{ fontSize: 8, fontWeight: 600 }}>{fmtDay(hoverDay)}</text>
+          {rows.map((r, i) => (
+            <g key={r.player}>
+              <circle cx={tipX + 10} cy={mT + 19.5 + i * 11} r={2.2} fill={r.color} />
+              <text x={tipX + 16} y={mT + 22 + i * 11} className="fill-zinc-200" style={{ fontSize: 8 }}>{r.player}</text>
+              <text x={tipX + tipW - 7} y={mT + 22 + i * 11} textAnchor="end" className="fill-zinc-100" style={{ fontSize: 8, fontWeight: 600, fontFamily: 'ui-monospace, monospace' }}>{r.war.toFixed(2)}</text>
+            </g>
+          ))}
+        </g>
+      )}
     </svg>
   );
 }

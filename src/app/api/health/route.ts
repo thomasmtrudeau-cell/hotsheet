@@ -79,7 +79,9 @@ async function runSheetChecks(): Promise<Record<string, Check>> {
   } else {
     try {
       const { pitchers, hitters } = await getOopsy(oopsyId);
-      checks.oopsy = { ok: pitchers.length + hitters.length > 0, detail: `${pitchers.length} SP / ${hitters.length} H` };
+      // BOTH sides must parse — the 7/27 export shipped 0 SP / 378 H and a
+      // sum-based check called it healthy.
+      checks.oopsy = { ok: pitchers.length > 0 && hitters.length > 0, detail: `${pitchers.length} SP / ${hitters.length} H` };
     } catch (e) {
       checks.oopsy = { ok: false, detail: e instanceof Error ? e.message : String(e) };
     }
