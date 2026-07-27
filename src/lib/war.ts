@@ -1,6 +1,7 @@
 import { FollowedPlayer, PremiumMetrics, ProspectRanks, MetricRank, RegressionRow, HitterRegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
 import { AUCTION_VALUES, AuctionRole } from './auction-values';
 import { computeValue, DEFAULT_SETTINGS } from './value-model';
+import { getNamePositionPairs } from './player-index';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
 // the API route enforces that. Dormant unless WAR_SHEET_ID is configured.
@@ -646,6 +647,7 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
   let ageI = header.findIndex((x) => x.toLowerCase() === 'max age');
   if (ageI < 0) ageI = header.findIndex((x) => x.toLowerCase() === 'age');
   const lvlI = header.findIndex((x) => x.toLowerCase() === 'highest level');
+  const rpI = isPitcher ? header.findIndex((x) => x.toLowerCase() === '1 if rp') : -1;
   if (pi < 0 || warCol.primary < 0) return [];
 
   const byKey = new Map<string, ScoutingRow>();
@@ -677,6 +679,10 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
       : undefined;
     byKey.set(key, {
       nameKey: key, player: name, level: lvlI >= 0 ? c[lvlI] : undefined, isPitcher, war,
+      // Pitcher role comes straight off the sheet; hitter positions are joined
+      // by name from the roster index in getScouting (the sheet has no pos
+      // column, and its id column is FanGraphs, not MLBAM — no id join possible).
+      pos: rpI >= 0 ? (c[rpI]?.trim() === '1' ? 'RP' : 'SP') : undefined,
       age: Number.isFinite(age) ? age : undefined,
       wrcPlus: Number.isFinite(wrc) ? Math.round(wrc) : undefined,
       era20: Number.isFinite(era) ? era : undefined,
@@ -685,6 +691,16 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
     keptStale.set(key, stale);
   }
   return [...byKey.values()];
+}
+
+// Fold the MLB API's position abbreviations into the filterable buckets the
+// scouting UI offers. Unknown/unmatched players keep pos undefined and only
+// appear under "All".
+function bucketPos(abbrev: string): string | undefined {
+  if (['C', '1B', '2B', '3B', 'SS', 'DH'].includes(abbrev)) return abbrev;
+  if (['LF', 'CF', 'RF', 'OF'].includes(abbrev)) return 'OF';
+  if (abbrev === 'TWP') return 'DH'; // two-way player's hitting row
+  return undefined;
 }
 
 export async function getScouting(sheetId: string): Promise<{ rows: ScoutingRow[] }> {
@@ -699,6 +715,29 @@ export async function getScouting(sheetId: string): Promise<{ rows: ScoutingRow[
       if (ranks) r.ranks = ranks;
     }
   } catch { /* ranks are an enrichment — never fail the list over them */ }
+  // Hitter positions: name join against the full-roster index (the sheet has no
+  // position column and its ids are FanGraphs, so a name join is the only way;
+  // pitchers already got SP/RP from the "1 if RP" column). Index entries whose
+  // position is P are other people (pitchers) from the hitter row's perspective
+  // and are skipped; two same-named HITTERS at different positions are genuinely
+  // ambiguous, so those names stay unlabeled rather than risk a wrong label.
+  try {
+    const pairs = await getNamePositionPairs();
+    const posByName = new Map<string, string | null>(); // null = ambiguous
+    for (const { name, pos } of pairs) {
+      const bucket = bucketPos(pos);
+      if (!bucket) continue;
+      const key = normalizeName(name);
+      const existing = posByName.get(key);
+      if (existing === undefined) posByName.set(key, bucket);
+      else if (existing !== bucket) posByName.set(key, null);
+    }
+    for (const r of rows) {
+      if (r.isPitcher) continue;
+      const p = posByName.get(r.nameKey);
+      if (p) r.pos = p;
+    }
+  } catch { /* positions are an enrichment — never fail the list over them */ }
   return { rows };
 }
 

@@ -17,6 +17,16 @@ import {
 // Signature of the fields whose changes matter (level, team, IL status) —
 // used to skip state updates (and the stat refetch they trigger) when a
 // background refresh comes back identical.
+// Key-order-insensitive stringify, for change detection against rows that
+// round-tripped through Postgres jsonb (which sorts object keys).
+function stableJson(v: unknown): string {
+  return JSON.stringify(v, (_k, val) =>
+    val && typeof val === 'object' && !Array.isArray(val)
+      ? Object.fromEntries(Object.entries(val as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)))
+      : val
+  );
+}
+
 function rosterSignature(players: FollowedPlayer[]): string {
   return players
     .map((p) => `${p.id}:${p.sportId}:${p.currentTeam.id}:${p.injury?.code ?? ''}`)
@@ -84,9 +94,15 @@ export function useFollowedPlayers() {
       const liveIds = new Set(live.map((p) => p.id));
       const merged = live.map((p) => freshById.get(p.id) ?? p); // update in place; drop nothing, add nothing
       store.setCachedPlayers(merged);
-      // Never re-upsert a player who's been deleted (live OR tombstoned) — this is
-      // what stops the delete from silently coming back on the next load.
-      await store.bulkUpsertCloudPlayers(baselined.filter((p) => liveIds.has(p.id) && !deleted.has(p.id)));
+      // Persist refreshed rows UPDATE-only (an upsert would re-insert a player
+      // deleted from another device — the classic "he came back" bug), and only
+      // rows whose data actually changed (stable-key compare: cloud jsonb
+      // reorders keys, so a naive stringify would flag every row every time).
+      const changed = baselined.filter((p) => {
+        if (!liveIds.has(p.id) || deleted.has(p.id)) return false;
+        return stableJson(p) !== stableJson(prevById.get(p.id));
+      });
+      await store.bulkUpdateCloudPlayers(changed);
       if (rosterSignature(merged) !== rosterSignature(playersRef.current)) {
         setPlayers((cur) => cur.filter((p) => !deleted.has(p.id)).map((p) => freshById.get(p.id) ?? p));
       }
@@ -103,6 +119,12 @@ export function useFollowedPlayers() {
     // account can inherit (or be shown) another account's list.
     await store.reconcileCacheOwner();
 
+    // Replay deletes that never reached the cloud (mobile kills backgrounded
+    // tabs mid-request) and tombstone them for this whole session, so neither
+    // the cached paint nor the cloud fetch below can show them again.
+    const pendingDeletes = await store.flushPendingDeletes();
+    pendingDeletes.forEach((id) => deletedIdsRef.current.add(id));
+
     // Snapshot pre-account local data BEFORE any cloud fetch. The fetch helpers
     // overwrite the localStorage cache with the (possibly empty) cloud copy, so
     // reading the cache *after* fetching would wipe the very data we migrate.
@@ -114,7 +136,7 @@ export function useFollowedPlayers() {
     // and let the cloud fetch below reconcile in the background. This is what makes
     // a cold launch feel immediate instead of blocking on several Supabase round-
     // trips before anything renders. Skipped on a fresh device (nothing cached).
-    const cachedPlayers = store.getCachedPlayers();
+    const cachedPlayers = store.getCachedPlayers().filter((p) => !deletedIdsRef.current.has(p.id));
     if (cachedPlayers.length > 0) {
       setPlayers(cachedPlayers);
       setGroups(localGroups0);
@@ -123,7 +145,7 @@ export function useFollowedPlayers() {
       setLoaded(true);
     }
 
-    let cloudPlayers = await store.fetchCloudPlayers();
+    let cloudPlayers = (await store.fetchCloudPlayers()).filter((p) => !deletedIdsRef.current.has(p.id));
     if (cloudPlayers.length === 0) {
       // First login for THIS account. Only import genuine pre-auth legacy data
       // (a one-time, globally-guarded blob import) — NEVER this browser's live
@@ -184,19 +206,23 @@ export function useFollowedPlayers() {
       }
     }
 
-    // Reconcile the optimistic paint with the cloud truth. Keep the existing
+    // Reconcile the optimistic paint with the cloud truth. Re-filter through the
+    // tombstones — a delete tapped DURING the group/membership fetches above
+    // would otherwise be undone by this stale snapshot. Keep the existing
     // players array reference when the roster is unchanged (the common relaunch
     // case) so the stat-fetch effect doesn't fire a second, redundant fan-out.
+    const finalPlayers = cloudPlayers.filter((p) => !deletedIdsRef.current.has(p.id));
+    store.setCachedPlayers(finalPlayers);
     setPlayers((cur) =>
-      rosterSignature(cur) === rosterSignature(cloudPlayers) && cur.length === cloudPlayers.length
+      rosterSignature(cur) === rosterSignature(finalPlayers) && cur.length === finalPlayers.length
         ? cur
-        : cloudPlayers
+        : finalPlayers
     );
     setGroups(cloudGroups);
     setMemberships(cloudMemberships);
     setNotifications(getNotifications());
     setLoaded(true);
-    refreshAndDiff(cloudPlayers);
+    refreshAndDiff(finalPlayers);
   }, [refreshAndDiff]);
 
   // Track auth state.
@@ -255,6 +281,7 @@ export function useFollowedPlayers() {
 
   const follow = useCallback(async (player: FollowedPlayer, groupIds: string[] = []) => {
     deletedIdsRef.current.delete(player.id); // re-following clears any tombstone
+    store.removePendingDelete(player.id);    // …including the durable one
     const withTime = { ...player, followedAt: new Date().toISOString() };
     setPlayers((prev) => {
       if (prev.some((p) => p.id === player.id)) return prev;

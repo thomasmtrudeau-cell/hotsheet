@@ -15,6 +15,10 @@ const CACHE_OWNER_KEY = 'hotsheet_cache_owner';
 // Legacy keys from the old name-login + Vercel Blob era (one-time import).
 const LEGACY_USER_KEY = 'hotsheet_username';
 const LEGACY_IMPORTED_KEY = 'hotsheet_blob_imported';
+// Player ids whose cloud delete hasn't been CONFIRMED yet. Mobile browsers kill
+// backgrounded tabs mid-request, so a delete can succeed locally but never reach
+// Supabase — the queue survives the session and is replayed on the next launch.
+const PENDING_DELETES_KEY = 'hotsheet_pending_deletes';
 
 async function currentUserId(): Promise<string | null> {
   const supabase = createClient();
@@ -45,6 +49,9 @@ export function clearLocalCache(): void {
   localStorage.removeItem(PLAYERS_KEY);
   localStorage.removeItem(GROUPS_KEY);
   localStorage.removeItem(MEMBERSHIPS_KEY);
+  // Pending deletes are per-account too — a leftover id from another account
+  // must never tombstone the incoming account's players.
+  localStorage.removeItem(PENDING_DELETES_KEY);
   // Also drop the per-date "Playing Today" instant-paint cache — it's account-
   // agnostic by key, so don't let one user's cached daily stats survive a switch.
   for (let i = localStorage.length - 1; i >= 0; i--) {
@@ -99,6 +106,30 @@ export function setCachedMemberships(map: Map<number, string[]>): void {
   write(MEMBERSHIPS_KEY, obj);
 }
 
+// --- Pending-delete queue (durable tombstones) ---
+
+export function getPendingDeletes(): number[] {
+  return read<number[]>(PENDING_DELETES_KEY, []);
+}
+
+function setPendingDeletes(ids: number[]): void {
+  if (typeof window === 'undefined') return;
+  write(PENDING_DELETES_KEY, ids);
+}
+
+export function removePendingDelete(playerId: number): void {
+  setPendingDeletes(getPendingDeletes().filter((id) => id !== playerId));
+}
+
+// Replay deletes that never reached the cloud. Returns the ids that were
+// pending BEFORE the replay so the caller can tombstone them for the whole
+// session — even if this replay attempt fails too, they stay queued.
+export async function flushPendingDeletes(): Promise<number[]> {
+  const pending = getPendingDeletes();
+  if (pending.length > 0) await Promise.all(pending.map((id) => deleteCloudPlayer(id)));
+  return pending;
+}
+
 // --- Cloud: followed players ---
 
 export async function fetchCloudPlayers(): Promise<FollowedPlayer[]> {
@@ -137,6 +168,12 @@ export async function upsertCloudPlayer(player: FollowedPlayer): Promise<void> {
 }
 
 export async function deleteCloudPlayer(playerId: number): Promise<void> {
+  // Queue BEFORE attempting: if the tab dies mid-request (the mobile
+  // "deleted player comes back" bug), the next launch replays the delete.
+  // Only a confirmed cloud delete dequeues it.
+  const pending = getPendingDeletes();
+  if (!pending.includes(playerId)) setPendingDeletes([...pending, playerId]);
+
   const supabase = createClient();
   const userId = await currentUserId();
   if (!userId) return;
@@ -146,7 +183,11 @@ export async function deleteCloudPlayer(playerId: number): Promise<void> {
     .delete()
     .eq('user_id', userId)
     .eq('player_id', playerId);
-  if (error) console.error('deleteCloudPlayer:', error.message);
+  if (error) {
+    console.error('deleteCloudPlayer:', error.message);
+    return; // stays queued for the next launch
+  }
+  removePendingDelete(playerId);
 }
 
 export async function bulkUpsertCloudPlayers(players: FollowedPlayer[]): Promise<void> {
@@ -165,6 +206,27 @@ export async function bulkUpsertCloudPlayers(players: FollowedPlayer[]): Promise
     .from('followed_players')
     .upsert(rows, { onConflict: 'user_id,player_id' });
   if (error) console.error('bulkUpsertCloudPlayers:', error.message);
+}
+
+// UPDATE-only persistence for background refreshes. An upsert here would
+// re-INSERT any player deleted from another device/session (their in-memory
+// roster still has him), silently undoing the delete forever. An update on a
+// deleted row simply affects 0 rows, so deletes always win.
+export async function bulkUpdateCloudPlayers(players: FollowedPlayer[]): Promise<void> {
+  const supabase = createClient();
+  const userId = await currentUserId();
+  if (!userId || players.length === 0) return;
+
+  await Promise.all(
+    players.map(async (p) => {
+      const { error } = await supabase
+        .from('followed_players')
+        .update({ data: p, followed_at: p.followedAt })
+        .eq('user_id', userId)
+        .eq('player_id', p.id);
+      if (error) console.error('bulkUpdateCloudPlayers:', error.message);
+    })
+  );
 }
 
 // --- Cloud: groups ("All Players" is implicit and never stored) ---

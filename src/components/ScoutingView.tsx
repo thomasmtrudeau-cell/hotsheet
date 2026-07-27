@@ -18,6 +18,8 @@ const FILTERS_KEY = 'hotsheet_scouting_filters';
 const LEVELS = ['MLB', 'AAA', 'AA', 'A+', 'A', 'Rk'] as const;
 type Level = (typeof LEVELS)[number];
 type Pos = 'all' | 'hitter' | 'pitcher';
+const HITTER_POSITIONS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH'] as const;
+const PITCHER_POSITIONS = ['SP', 'RP'] as const;
 
 function levelBucket(lvl?: string): Level {
   const l = (lvl ?? '').toUpperCase();
@@ -46,6 +48,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
   const [q, setQ] = useState('');
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [pos, setPos] = useState<Pos>('all');
+  const [posDetail, setPosDetail] = useState<string | null>(null); // specific position chip (C/1B/…/SP/RP)
   const [rowState, setRowState] = useState<Record<string, 'busy' | 'fail' | undefined>>({});
   const [openList, setOpenList] = useState<string | null>(null); // rowKey with the list-picker open
 
@@ -95,12 +98,14 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
         if (Array.isArray(s.levels) && s.levels.length) setLevels(new Set(s.levels));
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (s.pos === 'all' || s.pos === 'hitter' || s.pos === 'pitcher') setPos(s.pos);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (typeof s.posDetail === 'string') setPosDetail(s.posDetail);
       }
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ minWar, levels: [...levels], pos })); } catch { /* ignore */ }
-  }, [minWar, levels, pos]);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ minWar, levels: [...levels], pos, posDetail })); } catch { /* ignore */ }
+  }, [minWar, levels, pos, posDetail]);
 
   const toggleLevel = (l: Level) => setLevels((prev) => {
     const next = new Set(prev);
@@ -108,10 +113,23 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
     return next.size ? next : prev;
   });
 
+  // Chips shown depend on the side toggle; switching sides drops an incompatible chip.
+  const visibleChips: readonly string[] =
+    pos === 'hitter' ? HITTER_POSITIONS : pos === 'pitcher' ? PITCHER_POSITIONS : [...HITTER_POSITIONS, ...PITCHER_POSITIONS];
+  const pickSide = (p: Pos) => {
+    setPos(p);
+    setPosDetail((d) => {
+      if (!d) return d;
+      if (p === 'hitter' && !(HITTER_POSITIONS as readonly string[]).includes(d)) return null;
+      if (p === 'pitcher' && !(PITCHER_POSITIONS as readonly string[]).includes(d)) return null;
+      return d;
+    });
+  };
+
   const filtered = useMemo(() => { const f = q.trim().toLowerCase(); return rows
-    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher) && (!f || r.player.toLowerCase().includes(f)))
+    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher) && (!posDetail || r.pos === posDetail) && (!f || r.player.toLowerCase().includes(f)))
     .sort((a, b) => b.war - a.war)
-    .slice(0, 200); }, [rows, minWar, levels, pos, q]);
+    .slice(0, 200); }, [rows, minWar, levels, pos, posDetail, q]);
 
   if (!isPremium) return <PremiumTeaser context="scouting" />;
   if (loading && rows.length === 0) {
@@ -139,10 +157,17 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
         </div>
         <div className="flex rounded overflow-hidden border border-zinc-700">
           {(['all', 'hitter', 'pitcher'] as const).map((p) => (
-            <button key={p} onClick={() => setPos(p)}
+            <button key={p} onClick={() => pickSide(p)}
               className={`px-2 py-0.5 text-[11px] cursor-pointer ${pos === p ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'}`}>
               {p === 'all' ? 'All' : p === 'hitter' ? 'Hitters' : 'Pitchers'}
             </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-zinc-500">Pos</span>
+          {visibleChips.map((p) => (
+            <button key={p} onClick={() => setPosDetail((d) => (d === p ? null : p))}
+              className={`px-1.5 py-0.5 rounded text-[11px] font-semibold cursor-pointer ${posDetail === p ? 'bg-blue-600 text-white' : 'bg-zinc-800 text-zinc-500 hover:text-zinc-300'}`}>{p}</button>
           ))}
         </div>
         <span className="text-zinc-600 ml-auto">{filtered.length} shown</span>
@@ -160,7 +185,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
             <div key={rowKey} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 py-1.5 text-xs">
               <div className="min-w-0 flex-1 basis-[240px] flex items-center gap-1.5">
                 <span className="text-zinc-100 truncate">{r.player}</span>
-                <span className="text-[10px] text-zinc-500">{r.isPitcher ? 'P' : 'H'}</span>
+                <span className="text-[10px] text-zinc-500">{r.pos ?? (r.isPitcher ? 'P' : 'H')}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
                 {r.age !== undefined && <span className="text-[10px] text-zinc-600">{Number.isInteger(r.age) ? r.age : r.age.toFixed(1)}yo</span>}
                 {followed && <span className="text-[10px] text-blue-300" title="In your list">★</span>}

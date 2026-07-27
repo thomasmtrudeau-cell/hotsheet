@@ -368,6 +368,7 @@ export interface ScoutingRow {
   player: string;
   level?: string;
   isPitcher: boolean;
+  pos?: string;         // bucketed position: C/1B/2B/3B/SS/OF/DH for hitters, SP/RP for pitchers
   war: number;          // peak WAR ceiling
   age?: number;
   wrcPlus?: number;     // hitters — peak wRC+
