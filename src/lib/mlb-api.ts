@@ -140,6 +140,7 @@ export interface TeamInfo {
   sportId: number;
   sportName: string;
   teamName?: string;
+  abbreviation?: string;
   parentOrgName?: string;
   parentOrgAbbrev?: string;
 }
@@ -171,6 +172,7 @@ export async function getTeamLookup(): Promise<Map<number, TeamInfo>> {
       sportId: (sport?.id as number) || 1,
       sportName: (sport?.name as string) || 'MLB',
       teamName: t.name as string | undefined,
+      abbreviation: t.abbreviation as string | undefined,
       parentOrgName: t.parentOrgName as string | undefined,
       parentOrgAbbrev: parentOrgId ? orgAbbrevs.get(parentOrgId) : undefined,
     });

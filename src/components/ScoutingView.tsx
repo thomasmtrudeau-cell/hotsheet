@@ -49,6 +49,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
   const [levels, setLevels] = useState<Set<Level>>(new Set(LEVELS));
   const [pos, setPos] = useState<Pos>('all');
   const [posDetail, setPosDetail] = useState<string | null>(null); // specific position chip (C/1B/…/SP/RP)
+  const [org, setOrg] = useState(''); // parent-org full name; '' = all orgs
   const [rowState, setRowState] = useState<Record<string, 'busy' | 'fail' | undefined>>({});
   const [openList, setOpenList] = useState<string | null>(null); // rowKey with the list-picker open
 
@@ -100,12 +101,14 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
         if (s.pos === 'all' || s.pos === 'hitter' || s.pos === 'pitcher') setPos(s.pos);
         // eslint-disable-next-line react-hooks/set-state-in-effect
         if (typeof s.posDetail === 'string') setPosDetail(s.posDetail);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        if (typeof s.org === 'string') setOrg(s.org);
       }
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
-    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ minWar, levels: [...levels], pos, posDetail })); } catch { /* ignore */ }
-  }, [minWar, levels, pos, posDetail]);
+    try { localStorage.setItem(FILTERS_KEY, JSON.stringify({ minWar, levels: [...levels], pos, posDetail, org })); } catch { /* ignore */ }
+  }, [minWar, levels, pos, posDetail, org]);
 
   const toggleLevel = (l: Level) => setLevels((prev) => {
     const next = new Set(prev);
@@ -126,10 +129,14 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
     });
   };
 
+  // Orgs present in the data (some rows stay org-less — unsigned draftees or
+  // ambiguous name joins — and only show under All Orgs).
+  const orgs = useMemo(() => [...new Set(rows.map((r) => r.org).filter((o): o is string => !!o))].sort(), [rows]);
+
   const filtered = useMemo(() => { const f = q.trim().toLowerCase(); return rows
-    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher) && (!posDetail || r.pos === posDetail) && (!f || r.player.toLowerCase().includes(f)))
+    .filter((r) => r.war >= minWar && levels.has(levelBucket(r.level)) && (pos === 'all' || (pos === 'pitcher') === r.isPitcher) && (!posDetail || r.pos === posDetail) && (!org || r.org === org) && (!f || r.player.toLowerCase().includes(f)))
     .sort((a, b) => b.war - a.war)
-    .slice(0, 200); }, [rows, minWar, levels, pos, posDetail, q]);
+    .slice(0, 200); }, [rows, minWar, levels, pos, posDetail, org, q]);
 
   if (!isPremium) return <PremiumTeaser context="scouting" />;
   if (loading && rows.length === 0) {
@@ -163,6 +170,14 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
             </button>
           ))}
         </div>
+        <label className="flex items-center gap-1.5 text-zinc-500">
+          Org
+          <select value={org} onChange={(e) => setOrg(e.target.value)}
+            className={`px-2 py-1 bg-zinc-900 border rounded text-[11px] cursor-pointer focus:outline-none focus:border-amber-500 max-w-[150px] ${org ? 'border-amber-600 text-amber-300' : 'border-zinc-800 text-zinc-300'}`}>
+            <option value="">All orgs</option>
+            {orgs.map((o) => <option key={o} value={o}>{o}</option>)}
+          </select>
+        </label>
         <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-zinc-500">Pos</span>
           {visibleChips.map((p) => (
@@ -187,6 +202,7 @@ export default function ScoutingView({ rows, loading, isPremium, isFollowing, on
                 <span className="text-zinc-100 truncate">{r.player}</span>
                 <span className="text-[10px] text-zinc-500">{r.pos ?? (r.isPitcher ? 'P' : 'H')}</span>
                 <span className="text-[10px] text-amber-400/80">{levelBucket(r.level)}</span>
+                {r.orgAbbrev && <span className="text-[10px] text-zinc-500" title={r.org}>{r.orgAbbrev}</span>}
                 {r.age !== undefined && <span className="text-[10px] text-zinc-600">{Number.isInteger(r.age) ? r.age : r.age.toFixed(1)}yo</span>}
                 {followed && <span className="text-[10px] text-blue-300" title="In your list">★</span>}
                 <Tools r={r} />

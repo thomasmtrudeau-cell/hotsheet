@@ -369,6 +369,8 @@ export interface ScoutingRow {
   level?: string;
   isPitcher: boolean;
   pos?: string;         // bucketed position: C/1B/2B/3B/SS/OF/DH for hitters, SP/RP for pitchers
+  org?: string;         // parent MLB org full name (name-joined from the roster index)
+  orgAbbrev?: string;   // e.g. NYY — shown on the row
   war: number;          // peak WAR ceiling
   age?: number;
   wrcPlus?: number;     // hitters — peak wRC+

@@ -715,29 +715,48 @@ export async function getScouting(sheetId: string): Promise<{ rows: ScoutingRow[
       if (ranks) r.ranks = ranks;
     }
   } catch { /* ranks are an enrichment — never fail the list over them */ }
-  // Hitter positions: name join against the full-roster index (the sheet has no
-  // position column and its ids are FanGraphs, so a name join is the only way;
-  // pitchers already got SP/RP from the "1 if RP" column). Index entries whose
-  // position is P are other people (pitchers) from the hitter row's perspective
-  // and are skipped; two same-named HITTERS at different positions are genuinely
-  // ambiguous, so those names stay unlabeled rather than risk a wrong label.
+  // Hitter positions + orgs: name join against the full-roster index (the sheet
+  // has no position/org column and its ids are FanGraphs, so a name join is the
+  // only way; pitchers already got SP/RP from the "1 if RP" column). For
+  // positions, index entries whose position is P are other people (pitchers)
+  // from the hitter row's perspective and are skipped; two same-named HITTERS at
+  // different positions are genuinely ambiguous, so those names stay unlabeled
+  // rather than risk a wrong label. Orgs join the same way but side-aware
+  // (pitcher rows match P entries, hitter rows non-P), with the same
+  // ambiguity-means-unlabeled rule.
   try {
     const pairs = await getNamePositionPairs();
     const posByName = new Map<string, string | null>(); // null = ambiguous
-    for (const { name, pos } of pairs) {
-      const bucket = bucketPos(pos);
-      if (!bucket) continue;
+    type OrgInfo = { org: string; orgAbbrev?: string };
+    const orgBySideName = new Map<string, OrgInfo | null>(); // "h|key" / "p|key"; null = ambiguous
+    const noteOrg = (sideKey: string, org: string, orgAbbrev?: string) => {
+      const existing = orgBySideName.get(sideKey);
+      if (existing === undefined) orgBySideName.set(sideKey, { org, orgAbbrev });
+      else if (existing !== null && existing.org !== org) orgBySideName.set(sideKey, null);
+    };
+    for (const { name, pos, org, orgAbbrev } of pairs) {
       const key = normalizeName(name);
-      const existing = posByName.get(key);
-      if (existing === undefined) posByName.set(key, bucket);
-      else if (existing !== bucket) posByName.set(key, null);
+      const bucket = bucketPos(pos);
+      if (bucket) {
+        const existing = posByName.get(key);
+        if (existing === undefined) posByName.set(key, bucket);
+        else if (existing !== bucket) posByName.set(key, null);
+      }
+      if (org) {
+        // TWP plays both sides — index him under both so either row finds him.
+        if (pos === 'P' || pos === 'TWP') noteOrg(`p|${key}`, org, orgAbbrev);
+        if (pos !== 'P') noteOrg(`h|${key}`, org, orgAbbrev);
+      }
     }
     for (const r of rows) {
-      if (r.isPitcher) continue;
-      const p = posByName.get(r.nameKey);
-      if (p) r.pos = p;
+      if (!r.isPitcher) {
+        const p = posByName.get(r.nameKey);
+        if (p) r.pos = p;
+      }
+      const o = orgBySideName.get(`${r.isPitcher ? 'p' : 'h'}|${r.nameKey}`);
+      if (o) { r.org = o.org; r.orgAbbrev = o.orgAbbrev; }
     }
-  } catch { /* positions are an enrichment — never fail the list over them */ }
+  } catch { /* positions/orgs are an enrichment — never fail the list over them */ }
   return { rows };
 }
 

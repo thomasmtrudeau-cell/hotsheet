@@ -177,14 +177,24 @@ function tokenScore(qt: string, player: IndexedPlayer): number {
   return best;
 }
 
-// (fullName, primaryPosition) pairs for every rostered player at every level,
-// from the same 12h-TTL index. Lets sheet-driven views (scouting) attach real
-// positions by name join — the projection sheet has no position column and its
-// id column is FanGraphs, not MLBAM, so a name join is the only option.
+// (fullName, primaryPosition, org) tuples for every rostered player at every
+// level, from the same 12h-TTL index. Lets sheet-driven views (scouting) attach
+// real positions/orgs by name join — the projection sheet has no position or
+// org column and its id column is FanGraphs, not MLBAM, so a name join is the
+// only option. org is the parent club's full name (an MLB player's own team IS
+// his org); orgAbbrev is the matching MLB abbreviation.
 // Duplicate names are included as-is; the consumer decides how to disambiguate.
-export async function getNamePositionPairs(): Promise<Array<{ name: string; pos: string }>> {
-  const index = await getIndex();
-  return index.map((p) => ({ name: p.result.fullName, pos: p.result.primaryPosition }));
+export async function getNamePositionPairs(): Promise<Array<{ name: string; pos: string; org?: string; orgAbbrev?: string }>> {
+  const [index, teamMap] = await Promise.all([getIndex(), getTeamLookup()]);
+  return index.map((p) => {
+    const isMlb = p.result.sportId === 1;
+    return {
+      name: p.result.fullName,
+      pos: p.result.primaryPosition,
+      org: isMlb ? p.result.currentTeam.name : p.result.parentOrg,
+      orgAbbrev: isMlb ? teamMap.get(p.result.currentTeam.id)?.abbreviation : p.result.parentOrgAbbrev,
+    };
+  });
 }
 
 export async function fuzzySearchPlayers(query: string, limit = 20): Promise<SearchResult[]> {
