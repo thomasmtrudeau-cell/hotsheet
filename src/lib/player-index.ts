@@ -91,42 +91,91 @@ async function buildIndex(): Promise<IndexedPlayer[]> {
 
   const seen = new Set<number>();
   const players: IndexedPlayer[] = [];
+  const addPerson = (p: ApiPerson, sportId: number) => {
+    if (!p.id || seen.has(p.id) || p.active === false) return;
+    const teamId = p.currentTeam?.id;
+    if (!teamId) return;
+    seen.add(p.id);
+    const teamInfo = teamMap.get(teamId);
+    const displayFirst = p.useName || p.firstName || '';
+    const displayName = p.fullName || `${displayFirst} ${p.lastName ?? ''}`.trim();
+    const tokens = Array.from(
+      new Set(
+        normalizeName(
+          `${p.firstName ?? ''} ${p.useName ?? ''} ${p.lastName ?? ''} ${p.nameSuffix ?? ''}`
+        )
+          .split(' ')
+          .filter(Boolean)
+      )
+    );
+    if (tokens.length === 0) return;
+    players.push({
+      tokens,
+      joined: tokens.join(''),
+      result: {
+        id: p.id,
+        fullName: displayName,
+        primaryPosition: p.primaryPosition?.abbreviation || 'Unknown',
+        currentTeam: { id: teamId, name: p.currentTeam?.name || teamInfo?.teamName || '' },
+        sportId,
+        level: LEVEL_LABELS[sportId] || 'Unknown',
+        parentOrg: teamInfo?.parentOrgName,
+        parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
+      },
+    });
+  };
   // MLB first so a player listed at two levels indexes at the higher one.
   for (const { sportId, people } of levels) {
-    for (const p of people) {
-      if (!p.id || seen.has(p.id) || p.active === false) continue;
-      const teamId = p.currentTeam?.id;
-      if (!teamId) continue;
-      seen.add(p.id);
-      const teamInfo = teamMap.get(teamId);
-      const displayFirst = p.useName || p.firstName || '';
-      const displayName = p.fullName || `${displayFirst} ${p.lastName ?? ''}`.trim();
-      const tokens = Array.from(
-        new Set(
-          normalizeName(
-            `${p.firstName ?? ''} ${p.useName ?? ''} ${p.lastName ?? ''} ${p.nameSuffix ?? ''}`
-          )
-            .split(' ')
-            .filter(Boolean)
-        )
-      );
-      if (tokens.length === 0) continue;
-      players.push({
-        tokens,
-        joined: tokens.join(''),
-        result: {
-          id: p.id,
-          fullName: displayName,
-          primaryPosition: p.primaryPosition?.abbreviation || 'Unknown',
-          currentTeam: { id: teamId, name: p.currentTeam?.name || teamInfo?.teamName || '' },
-          sportId,
-          level: LEVEL_LABELS[sportId] || 'Unknown',
-          parentOrg: teamInfo?.parentOrgName,
-          parentOrgAbbrev: teamInfo?.parentOrgAbbrev,
-        },
-      });
-    }
+    for (const p of people) addPerson(p, sportId);
   }
+
+  // The sports/{id}/players endpoints only list players who've been on an
+  // ACTIVE roster this season — anyone parked on the 60-day / full-season IL
+  // (or restricted list etc.) all year is invisible to them (~500 players
+  // league-wide as of mid-2026). Each MLB org's fullRoster DOES carry those
+  // lists, so sweep all 30 and batch-fetch whoever the sports endpoints
+  // missed. Level comes from currentTeam, so an injured MiLB guy indexes at
+  // his affiliate, not the parent club.
+  try {
+    const mlbTeamIds = [...teamMap.entries()]
+      .filter(([, info]) => info.sportId === 1)
+      .map(([id]) => id);
+    const rosters = await Promise.all(
+      mlbTeamIds.map((tid) =>
+        fetch(`${MLB_API}/teams/${tid}/roster?rosterType=fullRoster&season=${season}`, {
+          headers: { 'User-Agent': 'Mozilla/5.0' },
+        })
+          .then((r) => (r.ok ? r.json() : { roster: [] }))
+          .then((d: { roster?: Array<{ person?: { id?: number } }> }) => d.roster ?? [])
+          .catch(() => [])
+      )
+    );
+    const missingIds = Array.from(
+      new Set(
+        rosters
+          .flat()
+          .map((e) => e.person?.id)
+          .filter((id): id is number => !!id && !seen.has(id))
+      )
+    );
+    const chunks: number[][] = [];
+    for (let i = 0; i < missingIds.length; i += 100) chunks.push(missingIds.slice(i, i + 100));
+    const batches = await Promise.all(
+      chunks.map((ids) =>
+        fetch(
+          `${MLB_API}/people?personIds=${ids.join(',')}&hydrate=currentTeam&fields=${fields}`,
+          { headers: { 'User-Agent': 'Mozilla/5.0' } }
+        )
+          .then((r) => (r.ok ? r.json() : { people: [] }))
+          .then((d: { people?: ApiPerson[] }) => d.people ?? [])
+          .catch(() => [] as ApiPerson[])
+      )
+    );
+    for (const p of batches.flat()) {
+      const sportId = teamMap.get(p.currentTeam?.id ?? -1)?.sportId ?? 1;
+      addPerson(p, sportId);
+    }
+  } catch { /* IL sweep is best-effort — the core index still works without it */ }
   return players;
 }
 
