@@ -131,6 +131,9 @@ export default function Home() {
   const [levelFilter, setLevelFilter] = useState<LevelFilter>('all');
   const [positionFilter, setPositionFilter] = useState<'all' | 'hitter' | 'pitcher'>('all');
   const [nameFilter, setNameFilter] = useState('');
+  // Daily-view ordering: 'time' reads like a schedule; 'war' puts the top guys
+  // at the top (peak WAR desc, schedule order breaks ties). Persisted.
+  const [dailySort, setDailySort] = useState<'time' | 'war'>('time');
   // Bulk-select mode for tagging many players into a group at once.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
@@ -384,6 +387,17 @@ export default function Home() {
     } catch { /* ignore */ }
   }, []);
 
+  // Restore the saved daily sort preference.
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('hotsheet_daily_sort') === 'war') setDailySort('war');
+    } catch { /* ignore */ }
+  }, []);
+  const changeDailySort = useCallback((mode: 'time' | 'war') => {
+    setDailySort(mode);
+    try { localStorage.setItem('hotsheet_daily_sort', mode); } catch { /* ignore */ }
+  }, []);
+
   const openBilling = useCallback(async () => {
     try {
       const res = await fetch('/api/billing/portal', { method: 'POST' });
@@ -497,6 +511,14 @@ export default function Home() {
       const aDnpPitcher = ad.position === 'P' && ad.statLine === 'DNP';
       const bDnpPitcher = bd.position === 'P' && bd.statLine === 'DNP';
       if (aDnpPitcher !== bDnpPitcher) return aDnpPitcher ? 1 : -1;
+      // WAR sort: top guys first regardless of game status. Players without a
+      // projection sink below those with one; the schedule ordering below
+      // breaks ties.
+      if (dailySort === 'war') {
+        const aw = premiumMap[ad.playerId]?.war;
+        const bw = premiumMap[bd.playerId]?.war;
+        if (aw !== bw) return (bw ?? -Infinity) - (aw ?? -Infinity);
+      }
       // Status tier first (Live → Final → Scheduled). Within a status, surface
       // VALUE, not just the game clock:
       const statusDiff = statusTier(ad.gameStatus) - statusTier(bd.gameStatus);
@@ -740,6 +762,12 @@ export default function Home() {
             onPositionChange={setPositionFilter}
             nameFilter={nameFilter}
             onNameChange={setNameFilter}
+            sortMode={
+              (activeTab === 'today' || activeTab === 'yesterday') && showPremium && Object.keys(premiumMap).length > 0
+                ? dailySort
+                : undefined
+            }
+            onSortChange={changeDailySort}
           />
         </div>
       )}

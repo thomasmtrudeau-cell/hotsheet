@@ -10,6 +10,10 @@ interface FilterBarProps {
   onPositionChange: (pos: 'all' | 'hitter' | 'pitcher') => void;
   nameFilter: string;
   onNameChange: (name: string) => void;
+  // Daily-view ordering. Omitted on tabs where it doesn't apply (season/range)
+  // and for accounts with no WAR data to sort by.
+  sortMode?: 'time' | 'war';
+  onSortChange?: (mode: 'time' | 'war') => void;
 }
 
 // NPB/KBO are hidden by default — most users only care about MLB/MiLB, and the
@@ -31,6 +35,11 @@ const positionOptions: { value: 'all' | 'hitter' | 'pitcher'; label: string }[] 
   { value: 'pitcher', label: 'Pitchers' },
 ];
 
+const sortOptions: { value: 'time' | 'war'; label: string; title: string }[] = [
+  { value: 'time', label: 'Time', title: 'Order by game start time' },
+  { value: 'war', label: 'WAR', title: 'Top projected WAR first' },
+];
+
 export default function FilterBar({
   levelFilter,
   onLevelChange,
@@ -38,6 +47,8 @@ export default function FilterBar({
   onPositionChange,
   nameFilter,
   onNameChange,
+  sortMode,
+  onSortChange,
 }: FilterBarProps) {
   const [showIntl, setShowIntl] = useState(false);
 
@@ -103,6 +114,29 @@ export default function FilterBar({
           </button>
         ))}
       </div>
+
+      {/* Sort — game start time vs top projected WAR */}
+      {sortMode && onSortChange && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[11px] text-zinc-500">Sort</span>
+          <div className="flex rounded-lg overflow-hidden border border-zinc-700">
+            {sortOptions.map((opt) => (
+              <button
+                key={opt.value}
+                onClick={() => onSortChange(opt.value)}
+                title={opt.title}
+                className={`px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${
+                  sortMode === opt.value
+                    ? 'bg-blue-600 text-white'
+                    : 'bg-zinc-800 text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Name filter */}
       <input
