@@ -256,9 +256,49 @@ function assignProspectRanks(hitters: Map<string, PremiumMetrics>, pitchers: Map
 let cache: { sheetId: string; at: number; hitters: Map<string, PremiumMetrics>; pitchers: Map<string, PremiumMetrics> } | null = null;
 const TTL = 600_000; // 10 minutes — the sheet updates a few times a day, not by the second
 
+// The published sheet's htmlview embeds every tab's name and gid (shared with
+// oopsy.ts, which pioneered the name→gid lookup after the 7/27 dead-gid trap).
+export type SheetTab = { name: string; gid: string };
+export async function fetchSheetTabs(sheetId: string): Promise<SheetTab[]> {
+  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
+  if (!res.ok) return [];
+  const html = await res.text();
+  const tabs: SheetTab[] = [];
+  const re = /\{name: "([^"]*)", pageUrl: "[^"]*?gid=(\d+)/g;
+  let m;
+  while ((m = re.exec(html))) tabs.push({ name: m[1].replace(/\\\//g, '/'), gid: m[2] });
+  return tabs;
+}
+
+// gviz/tq?tqx=out:csv RESPECTS an active basic filter on the tab. 2026-07-31 a
+// filter left on 'peak hitting raw' hid every established MLB hitter from gviz
+// (Tom saw the full tab; the app got 3.4k prospect rows) — Kwan priced at 0.0
+// and the stale sa-id Hao-Yu Lee dup was the only Lee left to serve. The
+// /export?format=csv endpoint ignores filters and returns the full grid, so it
+// is the primary read; gviz-by-tab-name survives only as the fallback when the
+// htmlview gid lookup fails.
+let tabGidCache: { sheetId: string; at: number; byName: Map<string, string> } | null = null;
+const TAB_GID_TTL = 6 * 3600_000;
+async function gidFor(sheetId: string, tab: string): Promise<string | undefined> {
+  if (!tabGidCache || tabGidCache.sheetId !== sheetId || Date.now() - tabGidCache.at > TAB_GID_TTL) {
+    try {
+      const tabs = await fetchSheetTabs(sheetId);
+      if (tabs.length > 0) tabGidCache = { sheetId, at: Date.now(), byName: new Map(tabs.map((t) => [t.name.trim().toLowerCase(), t.gid])) };
+    } catch { /* keep whatever we had; caller falls back to gviz */ }
+  }
+  return tabGidCache?.sheetId === sheetId ? tabGidCache.byName.get(tab.trim().toLowerCase()) : undefined;
+}
+
 async function fetchCsvTab(sheetId: string, tab: string): Promise<string> {
-  // Cache-bust Google's CDN and bypass Next's fetch cache so we always read the
-  // latest published sheet, not a stale copy.
+  const gid = await gidFor(sheetId, tab);
+  if (gid !== undefined) {
+    const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}&_cb=${Math.floor(Date.now() / 3600_000)}`;
+    const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
+    if (res.ok) return res.text();
+  }
+  // Fallback: gviz by tab name (filter-sensitive — see above — but better than
+  // nothing when the htmlview lookup is unavailable). Cache-bust Google's CDN
+  // and bypass Next's fetch cache so we always read the latest published sheet.
   const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&sheet=${encodeURIComponent(tab)}&_cb=${Math.floor(Date.now() / 3600_000)}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
   if (!res.ok) throw new Error(`WAR sheet fetch ${res.status}`);
@@ -301,9 +341,12 @@ async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, P
       }
     }
     // A transient bad/empty response must not clobber good data — keep the last
-    // good cache rather than blanking every player's metrics to zero.
-    if (hitters.size === 0 && pitchers.size === 0 && cache && cache.sheetId === sheetId) {
-      return cache;
+    // good cache rather than blanking every player's metrics to zero. Same for a
+    // parse with no established-MLB anchor (a filtered/partial tab read): the
+    // prospect rows look plentiful but every regular would price at 0.0.
+    const anchored = [...hitters.values()].some((m) => (m.war ?? 0) >= SNAPSHOT_ANCHOR_WAR);
+    if ((hitters.size === 0 && pitchers.size === 0) || !anchored) {
+      if (cache && cache.sheetId === sheetId) return cache;
     }
     assignProspectRanks(hitters, pitchers);
     cache = { sheetId, at: now, hitters, pitchers };
@@ -394,7 +437,9 @@ export interface PremiumSnapshot {
 // v2: 2026-07-22 — flushed a capture taken mid-sheet-recalc that was fresh and
 // large yet held blank-forfeited dedups (wrong Hao-Yu Lee row, no Doyle).
 // v3: 2026-07-26 — snapshots now carry per-metric StS-universe ranks.
-export const SNAPSHOT_VERSION = 3;
+// v4: 2026-07-31 — flushed captures taken through gviz while a basic filter on
+// 'peak hitting raw' hid every established MLB hitter (Kwan 0.0, stale Lee 2.7).
+export const SNAPSHOT_VERSION = 4;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
@@ -403,6 +448,20 @@ export const SNAPSHOT_VERSION = 3;
 // and live data beats a days-old join.
 export const SNAPSHOT_MIN_ENTRIES = 3000;
 export const SNAPSHOT_MAX_AGE_MS = 36 * 3_600_000;
+// A structurally-valid capture can still be missing its ESTABLISHED-MLB rows
+// while thousands of prospect rows sail past the size floor (the 07-31 filter
+// incident: 3.4k rows, no Judge/Kwan/Soto). A full hitter parse always contains
+// at least one 5+ WAR star, so a capture without one is a partial universe.
+export const SNAPSHOT_ANCHOR_WAR = 5;
+export function snapshotHasMlbAnchor(snap: PremiumSnapshot | null | undefined): boolean {
+  return Object.values(snap?.hitters ?? {}).some((m) => (m.war ?? 0) >= SNAPSHOT_ANCHOR_WAR);
+}
+// The one quality bar every consumer should apply before serving a snapshot.
+export function snapshotUsable(snap: PremiumSnapshot | null | undefined): boolean {
+  if (!snap || snap.version !== SNAPSHOT_VERSION) return false;
+  const fresh = Boolean(snap.capturedAt) && Date.now() - Date.parse(snap.capturedAt) < SNAPSHOT_MAX_AGE_MS;
+  return fresh && snapshotSize(snap) >= SNAPSHOT_MIN_ENTRIES && snapshotHasMlbAnchor(snap);
+}
 export function snapshotSize(snap: PremiumSnapshot | null | undefined): number {
   if (!snap?.hitters || !snap?.pitchers) return 0;
   return Object.keys(snap.hitters).length + Object.keys(snap.pitchers).length;
@@ -425,7 +484,7 @@ export async function repairPremiumSnapshot(
   storage: { from(bucket: string): { upload(path: string, body: string, opts: { upsert: boolean; contentType: string }): Promise<{ error: { message: string } | null }> } },
 ): Promise<PremiumSnapshot | null> {
   const snap = await buildPremiumSnapshot(sheetId);
-  if (snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return null;
+  if (snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES || !snapshotHasMlbAnchor(snap)) return null;
   const { error } = await storage.from('war')
     .upload('war_premium.json', JSON.stringify(snap), { upsert: true, contentType: 'application/json' });
   if (error) {

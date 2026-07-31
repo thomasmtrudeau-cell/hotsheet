@@ -1,4 +1,4 @@
-import { parseCsv, normalizeName } from './war';
+import { parseCsv, normalizeName, fetchSheetTabs } from './war';
 import { OopsyPitcher, OopsyHitter } from './types';
 
 // OOPSY weekly projections — a separate published Google Sheet with two tabs.
@@ -15,25 +15,21 @@ const TTL = 5 * 60_000; // 5 min
 
 let cache: { sheetId: string; at: number; pitchers: OopsyPitcher[]; hitters: OopsyHitter[]; week?: string } | null = null;
 
+// /export?format=csv rather than gviz: gviz respects an active basic filter on
+// the tab (the 07-31 WAR-sheet incident hid every MLB hitter from the app);
+// export always returns the full grid, and a dead gid 404s loudly instead of
+// gviz's silent first-tab fallback.
 async function fetchCsvByGid(sheetId: string, gid: string): Promise<string> {
-  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:csv&gid=${gid}&_cb=${Date.now()}`;
+  const url = `https://docs.google.com/spreadsheets/d/${sheetId}/export?format=csv&gid=${gid}&_cb=${Date.now()}`;
   const res = await fetch(url, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
   if (!res.ok) throw new Error(`OOPSY sheet fetch ${res.status}`);
   return res.text();
 }
 
-// The published sheet's htmlview embeds every tab's name and gid.
+// The published sheet's htmlview embeds every tab's name and gid (shared parser
+// lives in war.ts).
 type Tab = { name: string; gid: string };
-async function fetchTabs(sheetId: string): Promise<Tab[]> {
-  const res = await fetch(`https://docs.google.com/spreadsheets/d/${sheetId}/htmlview`, { headers: { 'User-Agent': 'HotSheet/1.0' }, cache: 'no-store' });
-  if (!res.ok) return [];
-  const html = await res.text();
-  const tabs: Tab[] = [];
-  const re = /\{name: "([^"]*)", pageUrl: "[^"]*?gid=(\d+)/g;
-  let m;
-  while ((m = re.exec(html))) tabs.push({ name: m[1].replace(/\\\//g, '/'), gid: m[2] });
-  return tabs;
-}
+const fetchTabs = (sheetId: string): Promise<Tab[]> => fetchSheetTabs(sheetId);
 
 // Tabs are named for the projection week's Monday, e.g. "7/27 pitching".
 const tabDate = (name: string): number => {

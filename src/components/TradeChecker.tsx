@@ -471,7 +471,9 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
     if (!marginal && !named) return { atRisk: false, text: '' };
     const parts: string[] = [];
     if (marginal) parts.push('Modest WAR/wRC+ for the spot — a slump, platoon, or call-up away from losing reps.');
-    if (named) parts.push(`${named.name} (${named.position}) ${named.kind === 'crowd' ? 'shares his spot on the active roster' : named.kind === 'depth' ? 'is pushing up from the minors' : 'is returning from the IL'}.`);
+    // A named threat now means a genuine SEAT SQUEEZE (more quality bats than
+    // lineup spots in his position group), not just one teammate existing.
+    if (named) parts.push(`More quality bats than spots in his position group — ${named.name} (${named.position}) ${named.kind === 'crowd' ? 'shares the lineup seats' : named.kind === 'depth' ? 'is pushing up from the minors' : 'is returning from the IL'}.`);
     return { atRisk: true, text: parts.join(' ') };
   };
   // Season-ending / long-term injury. MLB roster NOTES are often empty for

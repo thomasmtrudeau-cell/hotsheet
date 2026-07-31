@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getWarRows, repairPremiumSnapshot, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS, SNAPSHOT_VERSION } from '@/lib/war';
+import { getWarRows, repairPremiumSnapshot, snapshotSize, snapshotUsable, PremiumSnapshot } from '@/lib/war';
 import { getOopsy } from '@/lib/oopsy';
 import { createServiceClient } from '@/lib/supabase/service';
 
@@ -54,8 +54,9 @@ async function runSheetChecks(): Promise<Record<string, Check>> {
     const snap = data ? (JSON.parse(await data.text()) as PremiumSnapshot) : null;
     const ageH = (Date.now() - Date.parse(snap?.capturedAt ?? '')) / 3_600_000;
     const size = snapshotSize(snap);
-    const usable = snap?.version === SNAPSHOT_VERSION && Number.isFinite(ageH)
-      && ageH <= SNAPSHOT_MAX_AGE_MS / 3_600_000 && size >= SNAPSHOT_MIN_ENTRIES;
+    // Shared bar (version + age + size + established-MLB anchor) — the 07-31
+    // filtered capture passed the old size-only check while missing every star.
+    const usable = snapshotUsable(snap);
     if (usable) {
       checks.premiumSnapshot = { ok: true, detail: `${size} entries, captured ${ageH.toFixed(1)}h ago` };
     } else if (sheetId) {

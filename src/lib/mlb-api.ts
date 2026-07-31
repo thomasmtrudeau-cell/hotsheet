@@ -1428,35 +1428,37 @@ async function getPitcherMatchups(players: FollowedPlayer[], teamGames: Map<numb
   return out;
 }
 
-// Playing-time risk: a same-org teammate in the same position area who threatens
-// a followed hitter's reps — either returning from the IL (e.g. José Ramírez
-// coming back) or a quality bat pushing up from the minors (e.g. a AAA prospect
-// blocking a pre-peak regular). A threat only counts if it's a GENUINE one: we
-// gate by peak WAR so a replacement-level utility guy on the IL doesn't ding a
-// real starter. That WAR gate needs the premium sheet; without it we fall back
-// to IL-return detection only (no gate), which is the conservative case.
+// Playing-time risk is about SEATS, not one scary teammate. Positions come in
+// groups that share a pool of lineup seats, and players slide within the group:
+// two quality SS just means one moves to 3B or 2B (unless those seats are held
+// by better players — which the seat count captures), and the three OF spots
+// rotate around CF. A followed hitter only has reps genuinely at risk when his
+// group holds MORE quality bats than seats — i.e. he'd have to out-rank the
+// crowd to keep playing. One prospect pushing up behind Kwan in a thin
+// Guardians outfield is not pressure; Kwan surrounded by three better
+// outfielders would be.
+// Quality is gated by peak WAR (needs the premium sheet); without WAR data we
+// fall back to same-position IL-return detection only, the conservative case.
 // MLB hitters only; team rosters cached ~1h.
-// Playing time is position-specific, and the threat direction is ASYMMETRIC: a
-// player only takes reps at a spot he can actually play. A 3B can slide to 1B
-// (so a returning 3B threatens a 1B), but a 1B/DH can't man the dirt infield
-// (so Willson Contreras 1B does NOT threaten Caleb Durbin 3B). Keyed by the
-// FOLLOWED player, each list = positions whose returnee could take his reps.
-const POS_ADJ: Record<string, string[]> = {
-  // Infielders at DISTINCT positions co-exist (a 3B and a 1B both start), so no
-  // cross-slide adjacency — a genuine same-position crowd (two SS, two 1B) is still
-  // caught by the exact-match check. Only real overlaps remain: the OF spots rotate,
-  // and 1B/DH compete for the same bat/lineup slot.
-  '1B': ['DH'], DH: ['1B'],
-  LF: ['CF', 'RF', 'OF'], CF: ['LF', 'RF', 'OF'], RF: ['LF', 'CF', 'OF'], OF: ['LF', 'CF', 'RF'],
-  '3B': [], SS: [], '2B': [], C: [],
+const OF_GROUP = ['LF', 'CF', 'RF', 'OF'];
+const DIRT_GROUP = ['SS', '2B', '3B'];
+const BAT_GROUP = ['1B', 'DH'];
+const POS_GROUP: Record<string, string[]> = {
+  LF: OF_GROUP, CF: OF_GROUP, RF: OF_GROUP, OF: OF_GROUP,
+  SS: DIRT_GROUP, '2B': DIRT_GROUP, '3B': DIRT_GROUP,
+  '1B': BAT_GROUP, DH: BAT_GROUP,
+  C: ['C'],
 };
-// A position is "playable" (has reps to lose) if it's in the adjacency map.
-const playablePos = (pos: string) => pos === 'C' || pos in POS_ADJ;
-// null = not a threat to this position; 'exact' = same spot; 'adjacent' = logjam.
-function posRelevance(myPos: string, matePos: string): 'exact' | 'adjacent' | null {
-  if (myPos === matePos) return 'exact';
-  return (POS_ADJ[myPos] ?? []).includes(matePos) ? 'adjacent' : null;
-}
+// Seats the followed player can actually occupy. The OF has 3, but CF is the
+// demanding one — a corner-only OF is really fighting for the 2 corner spots
+// (any CF-capable mate can slide down into a corner, so all group mates still
+// count as rivals). The dirt infield's 3 spots are interchangeable enough that
+// the loser of an SS logjam just moves to 2B/3B. 1B/DH share the two bat-first
+// slots. A catcher's seat is his alone (the backup C is a genuine split).
+const seatsFor = (pos: string): number =>
+  pos === 'C' ? 1 : pos === '1B' || pos === 'DH' ? 2 : pos === 'LF' || pos === 'RF' ? 2 : 3;
+// A position is "playable" (has reps to lose) if it's in a seat group.
+const playablePos = (pos: string) => pos in POS_GROUP;
 type RiskInfo = { name: string; position: string; kind: 'il' | 'depth' | 'crowd'; adjacent?: boolean };
 export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map<number, RiskInfo>> {
   const out = new Map<number, RiskInfo>();
@@ -1478,15 +1480,16 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
     } catch { /* skip this team */ }
   }));
 
-  // Candidate threats per followed hitter: same position group, not himself —
-  // an IL returnee, a non-active (optioned) roster-mate, or an ACTIVE teammate
-  // sharing the spot (roster crowd: Volpe and Caballero both playing SS impact
-  // each other; the WAR gate below keeps scrub backups from flagging anyone).
+  // Candidate rivals per followed hitter: everyone in his seat group, not
+  // himself — an IL returnee, a non-active (optioned) roster-mate, or an ACTIVE
+  // teammate sharing the pool (roster crowd: Volpe and Caballero both playing
+  // SS impact each other; the WAR gate below keeps scrub backups from counting).
   const candidates = new Map<number, Mate[]>();
   const threatNames = new Set<string>();
   for (const p of hitters) {
     const roster = rosterByTeam.get(p.currentTeam.id) ?? [];
-    const c = roster.filter((e) => e.id !== p.id && e.name && posRelevance(p.primaryPosition, e.pos) !== null);
+    const group = POS_GROUP[p.primaryPosition] ?? [];
+    const c = roster.filter((e) => e.id !== p.id && e.name && group.includes(e.pos));
     if (c.length) { candidates.set(p.id, c); c.forEach((e) => threatNames.add(e.name)); }
   }
   if (candidates.size === 0) return out;
@@ -1516,22 +1519,32 @@ export async function getPlayingTimeRisk(players: FollowedPlayer[]): Promise<Map
   for (const p of hitters) {
     const c = candidates.get(p.id);
     if (!c) continue;
-    const myWar = warByKey.get(p.fullName.toLowerCase()) ?? 0;
+    const myWar = warByKey.get(p.fullName.toLowerCase());
+    // No WAR data (sheet down) or no row for HIM (can't rank him in the crowd):
+    // conservative — flag only a same-position IL returnee, the one imminent
+    // threat that needs no quality ranking. The old `?? 0` default here was the
+    // false-flag machine: a follower missing from the sheet read as 0 WAR and
+    // ANY warm body "threatened" him (Kwan flagged over a lower-WAR prospect).
+    if (!gated || myWar === undefined) {
+      const il = c.find((m) => m.kind === 'il' && m.pos === p.primaryPosition);
+      if (il) out.set(p.id, { name: il.name, position: il.pos, kind: 'il' });
+      continue;
+    }
+    // Quality rivals: at least as good as the guy (0.3 WAR grace); an ACTIVE
+    // roster-crowd mate carries a higher bar — everyday-caliber (2.0+), not
+    // just any warm body sharing the pool.
+    const rivals = c
+      .map((mate) => ({ mate, w: warByKey.get(mate.name.toLowerCase()) }))
+      .filter(({ mate, w }) => w !== undefined && w >= myWar - 0.3 && !(mate.kind === 'active' && w < 2.0));
+    // Seat math: him + the quality rivals vs the seats he can occupy. If they
+    // all fit (two good SS → one plays 3B; two good OF in a three-seat outfield)
+    // nobody's reps are at risk — someone just slides over. Only a genuine
+    // squeeze (more quality bats than seats) flags.
+    if (rivals.length + 1 <= seatsFor(p.primaryPosition)) continue;
+    // Name the most relevant rival: same-position first, then highest WAR.
     let best: { mate: Mate; score: number; adjacent: boolean } | undefined;
-    for (const mate of c) {
-      const w = warByKey.get(mate.name.toLowerCase());
-      if (gated) {
-        // Only a genuine threat: at least as good as the guy (0.3 WAR grace).
-        if (w === undefined || w < myWar - 0.3) continue;
-        // Active roster-crowd threats carry a higher bar — an everyday-caliber
-        // teammate (2.0+) sharing the spot, not just any warm body.
-        if (mate.kind === 'active' && w < 2.0) continue;
-      } else {
-        // No WAR data → conservative: IL returns only (skip pushers + crowds).
-        if (mate.kind !== 'il') continue;
-      }
-      const adjacent = posRelevance(p.primaryPosition, mate.pos) === 'adjacent';
-      // Prefer a direct (same-position) threat over a positional logjam, then WAR.
+    for (const { mate, w } of rivals) {
+      const adjacent = mate.pos !== p.primaryPosition;
       const score = (adjacent ? 0 : 100) + (w ?? 0);
       if (!best || score > best.score) best = { mate, score, adjacent };
     }

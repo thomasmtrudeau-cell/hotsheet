@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { createServiceClient } from '@/lib/supabase/service';
-import { fetchPremiumMap, premiumFromSnapshot, repairPremiumSnapshot, snapshotSize, PremiumSnapshot, SNAPSHOT_MIN_ENTRIES, SNAPSHOT_MAX_AGE_MS, SNAPSHOT_VERSION } from '@/lib/war';
+import { fetchPremiumMap, premiumFromSnapshot, repairPremiumSnapshot, snapshotUsable, PremiumSnapshot } from '@/lib/war';
 import { FollowedPlayer } from '@/lib/types';
 
 // Per-instance cache of the Storage snapshot so warm requests don't re-download
@@ -17,8 +17,7 @@ async function getSnapshot(): Promise<PremiumSnapshot | null> {
   const { data } = await store.storage.from('war').download('war_premium.json');
   if (!data) return null;
   const snap = JSON.parse(await data.text()) as PremiumSnapshot;
-  const fresh = snap?.capturedAt && Date.now() - Date.parse(snap.capturedAt) < SNAPSHOT_MAX_AGE_MS;
-  if (snap?.version !== SNAPSHOT_VERSION || !fresh || snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES) return null;
+  if (!snapshotUsable(snap)) return null;
   snapCache = { at: Date.now(), snap };
   return snap;
 }
