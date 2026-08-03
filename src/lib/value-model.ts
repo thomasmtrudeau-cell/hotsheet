@@ -434,7 +434,24 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // a no-bat glove wizard still can't out-keep a real bat on defense alone.
   const cSev = catcherSeverity(inp.position, inp.catcherShare, inp.catcherFlex);
   const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.3);
-  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.7 * sbAgeFactor(inp.age));
+  // Keeper WAR doesn't inherit WAR's NEGATIVE positional adjustments (1B −12.5,
+  // DH −17.5, corner OF −7.5 runs/season): they're real-baseball replacement
+  // accounting, and fantasy already prices position via the roster-slot scarcity
+  // model — charging both hammers every 1B/DH bat twice (Casas-at-3.2 problem).
+  // Deliberately ASYMMETRIC: positive adjustments (C/SS/CF...) stay in, because
+  // scarce eligibility is genuine fantasy value (a 120 wRC+ catcher > a 120 wRC+
+  // first baseman in any dynasty league) — common eligibility isn't a penalty,
+  // just the absence of that premium. The remainder after removing the label
+  // charge approximates actual FIELDING, so a genuinely bad-glove corner bat
+  // still carries his (retained, age-decayed) DH-crowding risk.
+  const NEG_POS_ADJ: Record<string, number> = { LF: -7.5, RF: -7.5, '1B': -12.5, DH: -17.5 };
+  // Only when DEF is known: fantasyWar's legacy no-DEF fallback already credits
+  // 1B/DH (+1.0/+1.2), so stripping there too would double-count.
+  const negPosRuns = inp.defRuns !== undefined ? (NEG_POS_ADJ[inp.position ?? ''] ?? 0) : 0;
+  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(
+    inp.war - negPosRuns / 9.774, inp.position, cSev,
+    inp.defRuns === undefined ? undefined : inp.defRuns - negPosRuns,
+    0.7 * sbAgeFactor(inp.age));
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
