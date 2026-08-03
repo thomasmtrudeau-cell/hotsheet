@@ -89,6 +89,18 @@ export function growthPremium(age?: number, isPitcher = false, position?: string
   return Math.max(1.5, 3 - Math.max(0, age - onset) * slope);
 }
 
+// Speed melts before the bat does. Delta-method aging curves put the SB peak at
+// 25-26 with decline starting immediately — 20+ SB burners lose ~7 steals off
+// peak by age 30 and ~16 by 38 — while ageRetention is flat until 30. This fills
+// that 27-30 gap for the SB share of keeper counting value, shaded slightly
+// steep because FV is forward-looking (a 30-yo's keeper SB credit should read
+// his age-31/32 rate). Stacks with keeperAgeFactor's post-30 decline to give
+// speed its steep tail; HR is untouched (power holds through the late 20s).
+export function sbAgeFactor(age?: number): number {
+  if (age === undefined) return 1;
+  return clamp(1 - Math.max(0, age - 26) * 0.05, 0.5, 1);
+}
+
 // Distance from the majors discounts a keeper ceiling.
 export function proximityMultiplier(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -413,7 +425,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   } else {
     if (inp.peakWrcPlus !== undefined) fantasy += fmt.wrcFan * Math.max(0, (inp.peakWrcPlus - 100) / 20);
     if (inp.hr !== undefined) fantasy += fmt.hrFan * (inp.hr / 25);
-    if (inp.sb !== undefined) fantasy += fmt.sbFan * (inp.sb / 25);
+    if (inp.sb !== undefined) fantasy += fmt.sbFan * (inp.sb / 25) * sbAgeFactor(inp.age);
   }
   // Growth premium fades with age (see growthPremium). An aging hitter's counting
   // stats erode alongside, so his fantasy credit fades on the same schedule; a
