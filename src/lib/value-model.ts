@@ -521,7 +521,14 @@ export interface ValueLayers {
 // Fantasy PRODUCTION rate scaled by playing time — the non-WAR, usage-responsive
 // layer that lets a live bat/arm move present value. Majors-only (a prospect's
 // production doesn't count toward THIS season, so it stays on the neutral base).
-function fantasyProd(inp: ValueInputs, L: ValueLayers): number {
+// The counting term is deliberately shape-blind for PRESENT value — the OOPSY
+// auction/ROS market anchor already prices category scarcity into Now, so
+// weighting here would double-apply it. When this rate feeds the sustained
+// KEEPER floor, though, present production is being banked into future seasons,
+// so the floor path (floorFmt set) values counting at future prices: the format
+// shape weights × the speed age decay, same as the ceiling — otherwise an aging
+// SB-heavy floor-rider escapes the decay the ceiling correctly applies.
+function fantasyProd(inp: ValueInputs, L: ValueLayers, floorFmt?: FormatWeights): number {
   if (!L.isMLB) return 0;
   const mat = presentMaturity(inp.age); // pre-peak guys don't produce their peak rate yet
   if (inp.isPitcher) {
@@ -531,7 +538,9 @@ function fantasyProd(inp: ValueInputs, L: ValueLayers): number {
   }
   const w = L.rosWrc ?? inp.curWrcPlus ?? inp.peakWrcPlus;
   const rateProd = w === undefined ? 0 : Math.max(0, (w - 90) / 12);       // OBP/rate value
-  const countingProd = ((inp.hr ?? 0) + (inp.sb ?? 0)) / 18;              // scarce HR+SB — worth more than their WAR share
+  const countingProd = floorFmt
+    ? (floorFmt.hrFan * (inp.hr ?? 0) + floorFmt.sbFan * sbAgeFactor(inp.age) * (inp.sb ?? 0)) / 18
+    : ((inp.hr ?? 0) + (inp.sb ?? 0)) / 18;                               // scarce HR+SB — worth more than their WAR share
   return Math.max(rateProd, countingProd) * (L.ptCredit ?? 1) * mat;
 }
 
@@ -542,10 +551,12 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   // mild continuous PT haircut; the fantasy layer already bakes in actual usage.
   const ptHaircut = L.isMLB && !inp.isPitcher ? 0.6 + 0.4 * ptCredit : 1;
   const injuryMult = L.injuryMult ?? 1;
-  const present = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L) + (L.savesPremium ?? 0))
-    * injuryMult * (L.armPvMult ?? 1)
+  // Every live present multiplier except the injury dock (the floor un-docks it).
+  const pvMults = (L.armPvMult ?? 1)
     * (L.ptDockEff ?? 1) * (L.jobSecurity ?? 1) * (L.earnBump ?? 1)
     * (L.platoonDock ?? 1) * (L.homePark ?? 1);
+  const present = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L) + (L.savesPremium ?? 0))
+    * injuryMult * pvMults;
   // Keeper: the durability-tilted ceiling, floored by sustained production.
   const durable = warDurability(inp.war ?? 0, inp.isPitcher ? undefined : inp.position);
   const ceiling = base.future * (L.fvPtFactor ?? 1) * durable;
@@ -556,7 +567,10 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   // (keeper value is about future healthy seasons). Phased in with a smooth WAR
   // taper so a genuine scrub keeps little of it and a 1.5-WAR+ regular most.
   const sustainTaper = clamp((war - 0.4) / 1.4, 0, 1);
-  const healthyPv = present / injuryMult;
+  // The floor re-prices the production layer's counting at FUTURE prices (shape
+  // weights + speed decay — see fantasyProd) before banking it forward; the
+  // present shown to the user keeps the raw market-led counting.
+  const healthyPv = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
   const sustained = sustainTaper * (healthyPv / presentMaturity(inp.age)) * keeperAgeFactor(inp.age, inp.isPitcher);
   const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
   const future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
