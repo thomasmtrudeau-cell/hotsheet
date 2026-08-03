@@ -89,13 +89,15 @@ export function growthPremium(age?: number, isPitcher = false, position?: string
   return Math.max(1.5, 3 - Math.max(0, age - onset) * slope);
 }
 
-// Speed melts before the bat does. Delta-method aging curves put the SB peak at
-// 25-26 with decline starting immediately — 20+ SB burners lose ~7 steals off
-// peak by age 30 and ~16 by 38 — while ageRetention is flat until 30. This fills
-// that 27-30 gap for the SB share of keeper counting value, shaded slightly
-// steep because FV is forward-looking (a 30-yo's keeper SB credit should read
-// his age-31/32 rate). Stacks with keeperAgeFactor's post-30 decline to give
-// speed its steep tail; HR is untouched (power holds through the late 20s).
+// ATHLETICISM decays before the bat does. Delta-method aging curves put the SB
+// peak at 25-26 with decline starting immediately — 20+ SB burners lose ~7
+// steals off peak by age 30 and ~16 by 38 — while ageRetention is flat until
+// 30. This fills that 27-30 gap, shaded slightly steep because FV is forward-
+// looking (a 30-yo's keeper SB credit should read his age-31/32 rate). Stacks
+// with keeperAgeFactor's post-30 decline to give speed its steep tail; HR is
+// untouched (power holds through the late 20s). SHARED by the two athleticism-
+// driven keeper inputs: the SB share of counting value, and the defense share
+// retained in keeper WAR (range erodes like speed — same physical skill).
 export function sbAgeFactor(age?: number): number {
   if (age === undefined) return 1;
   return clamp(1 - Math.max(0, age - 26) * 0.05, 0.5, 1);
@@ -422,11 +424,17 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // most of the ceiling (an elite RP arm is a rotation-conversion lottery
   // ticket; the trade view's saves premium adds closer value back on top).
   const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01;
-  // Two defense-insurance rates: present keeps 30% of DEF (playing-time safety),
-  // keeper keeps 40% (longevity + role retention over the horizon).
+  // Two defense-insurance rates. Present keeps a flat 30% of DEF (playing-time
+  // safety this season). Keeper keeps 70% × sbAgeFactor — defense doesn't score,
+  // but it's what brings the bat's fantasy skills to life through PLAYING TIME
+  // over the horizon (a young ++ glove secures a decade of everyday jobs), and
+  // that glove is itself an athleticism asset that erodes on the same age curve
+  // as speed (70% at ≤26 → ~56% at 30 → ~46% at 33). The 70% young-age anchor
+  // (not 100%) is the guardrail that keeps FV starting from the hitting profile:
+  // a no-bat glove wizard still can't out-keep a real bat on defense alone.
   const cSev = catcherSeverity(inp.position, inp.catcherShare, inp.catcherFlex);
   const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.3);
-  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.4);
+  const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.7 * sbAgeFactor(inp.age));
 
   // ---- Future (keeper) value ----
   const bar = keeperBar(s);
