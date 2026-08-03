@@ -321,10 +321,21 @@ export function scarcityMult(pos: string | undefined, s: LeagueSettings): number
 // player has NO market signal (missing from the auction export) we fall back to
 // WAR-led present so he isn't zeroed — see computeValue.
 interface FormatWeights { warW: number; mktW: number; prodW: number; wrcFan: number; hrFan: number; sbFan: number; }
+// Category-league counting weights favor SB over HR ~1.5:1 for two stacked
+// reasons: (1) scarcity — league-wide HR outnumber SB and the SB pool is more
+// concentrated, so a marginal SB moves category standings more (z-score studies
+// put 1 SB ≈ 1.3–1.7 HR even after the 2023 rules fattened the SB pool); and
+// (2) orthogonality — HR is already partly credited through the wRC+ term (a
+// 30-HR bat IS a high-wRC+ bat), while steals contribute nothing to wRC+, so an
+// equal HR weight double-counts power. Rebalanced within a constant hrFan+sbFan
+// sum so a 20/20 bat grades exactly as before — only the SHAPE moves. Points
+// formats are untouched: points scoring rewards HR directly and has no category
+// scarcity. Age interaction: sbFan × sbAgeFactor means an old burner's effective
+// SB weight falls below hrFan by ~33 (speed melts; power holds).
 const FORMAT: Record<ScoringFormat, FormatWeights> = {
-  obp:    { warW: 0.18, mktW: 0.62, prodW: 0.20, wrcFan: 1.00, hrFan: 1.00, sbFan: 1.00 },
+  obp:    { warW: 0.18, mktW: 0.62, prodW: 0.20, wrcFan: 1.00, hrFan: 0.80, sbFan: 1.20 },
   points: { warW: 0.34, mktW: 0.46, prodW: 0.20, wrcFan: 0.90, hrFan: 1.15, sbFan: 0.60 },
-  avg:    { warW: 0.18, mktW: 0.60, prodW: 0.22, wrcFan: 0.82, hrFan: 1.05, sbFan: 0.90 },
+  avg:    { warW: 0.18, mktW: 0.60, prodW: 0.22, wrcFan: 0.82, hrFan: 0.78, sbFan: 1.17 },
 };
 
 // How much of the catcher haircut a "C" actually deserves, 0 (none) → 1 (full).
