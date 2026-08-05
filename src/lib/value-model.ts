@@ -705,36 +705,51 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   // — the keeper asset value is the only signal there.
   let outlook: { next3: number; peakSeason: number } | undefined;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  if (inp.age !== undefined && L.isMLB) {
-    const surv = base.surv ?? [];
-    // MLB anchor is RELATIVE: his current value already embodies his current
-    // age's spot on the curve (a 34-yo producing 8.9 IS his age-34 level), so
-    // divide by today's shape and re-apply each future season's — walking the
-    // curve forward at its RATE, not re-imposing the whole decline from peak.
-    const annualPeakVal = healthyPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
-    const seasons = Array.from({ length: 7 }, (_, i) => {
-      const a = inp.age! + i + 1;
-      return annualPeakVal * futureSeasonShape(a, inp.isPitcher) * (surv[i] ?? 1);
-    });
-    outlook = { next3: rr((seasons[0] + seasons[1] + seasons[2]) / 3), peakSeason: rr(Math.max(...seasons)) };
-  } else if (inp.age !== undefined) {
-    // Prospect: price his PEAK SEASON through the same machinery that prices an
-    // MLB player's Now — his peak WAR / wRC+ / HR / SB as an everyday MLB
-    // player at peak age. With the market input deliberately dropped (any
-    // auction $ he carries prices his ROS role, not a peak season), the WAR-led
-    // fallback + the fantasy-production layer at a full role approximate what
-    // the auction calculator would say about that season preseason. Best yr =
-    // that CEILING, undiscounted — bust/arrival risk lives in Keep, not here.
-    // 3yr = the realistic near years: the ceiling bent by the maturation ramp
-    // at his age and the arrival/bust deferral (a 19-yo in A-ball gives you
-    // little over the NEXT three seasons even when the peak is big).
-    const peakNow = liveValue(
-      { ...inp, age: 27, level: 'MLB', marketBaseline: undefined, curWrcPlus: undefined, curEra20: undefined },
-      s, { isMLB: true, ptCredit: 1 },
-    ).present;
-    const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
-    const near = [1, 2, 3].map((k) => peakNow * futureSeasonShape(inp.age! + k, inp.isPitcher) * defer);
-    outlook = { next3: rr((near[0] + near[1] + near[2]) / 3), peakSeason: rr(peakNow) };
+  if (inp.age !== undefined) {
+    // Two lenses, take the better of each field:
+    //
+    // 1) WALK-FORWARD (players with a real Now): his current healthy value
+    //    walked RELATIVELY along the aging curve — divide by today's shape,
+    //    re-apply each future season's (a 34-yo producing 8.9 is already at
+    //    his age-34 level; decline applies at the curve's RATE, never re-
+    //    imposed from peak) × the quality-conditioned survival odds. The
+    //    anchor un-docks an INJURED player's zeroed reps (ptCredit → 1): 0 PA
+    //    on the IL is a this-season artifact, not his role — without this a
+    //    hurt star's future seasons inherit his empty present.
+    let walkNext3 = 0, walkPeak = 0;
+    if (L.isMLB) {
+      const oL = (L.injuryMult ?? 1) < 1 ? { ...L, ptCredit: 1 } : L;
+      const oHaircut = !inp.isPitcher ? 0.6 + 0.4 * (oL.ptCredit ?? 1) : 1;
+      const anchorPv = (base.present * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
+      const surv = base.surv ?? [];
+      const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
+      const seasons = Array.from({ length: 7 }, (_, i) =>
+        annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1));
+      walkNext3 = (seasons[0] + seasons[1] + seasons[2]) / 3;
+      walkPeak = Math.max(...seasons);
+    }
+    // 2) PEAK-PRICED (anyone whose peak is still AHEAD: prospects and pre-peak
+    //    MLB players — a 20-yo rookie on the IL has no meaningful Now to walk
+    //    from, the Konnor Griffin case): price his peak WAR / wRC+ / HR / SB
+    //    as an everyday MLB player at peak age through the same machinery that
+    //    prices Now. Market input deliberately dropped (his auction $, if any,
+    //    prices the ROS role, not a peak season) — the WAR-led fallback + the
+    //    production layer at a full role approximate a preseason auction-calc
+    //    price for that season. Best yr = that CEILING, undiscounted (bust
+    //    risk lives in Keep); 3yr bends it by the maturation ramp and the
+    //    arrival deferral (1.0 once he's in the majors).
+    let peakNext3 = 0, peakBest = 0;
+    if (!L.isMLB || inp.age < 26) {
+      const peakNow = liveValue(
+        { ...inp, age: 27, level: 'MLB', marketBaseline: undefined, curWrcPlus: undefined, curEra20: undefined },
+        s, { isMLB: true, ptCredit: 1 },
+      ).present;
+      const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
+      const near = [1, 2, 3].map((k) => peakNow * futureSeasonShape(inp.age! + k, inp.isPitcher) * defer);
+      peakNext3 = (near[0] + near[1] + near[2]) / 3;
+      peakBest = peakNow;
+    }
+    outlook = { next3: rr(Math.max(walkNext3, peakNext3)), peakSeason: rr(Math.max(walkPeak, peakBest)) };
   }
   return { present, future, overall: overallValue(present, future), outlook };
 }
