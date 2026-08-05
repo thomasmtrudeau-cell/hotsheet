@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, futureOutlook, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -20,7 +20,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number }) {
+function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next3: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
@@ -36,6 +36,8 @@ function Chips({ m, isPitcher, pv, fv, pending, saves, pt, ip, ptBlended, injure
         <span className={lbl}>value</span>
         <Tooltip text="What he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {pv.toFixed(1)}</span></Tooltip>
         <Tooltip text="What he's worth held as a keeper across future seasons."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
+        {outlook && <Tooltip text="Average per-season value over the NEXT 3 seasons (this one excluded) — Keep sliced along the aging curve, on the same scale as Now."><span className={`${chip} bg-violet-500/25 text-violet-200`}>3yr {outlook.next3.toFixed(1)}</span></Tooltip>}
+        {outlook && <Tooltip text="His best single season AFTER this one — future-upside proxy. Above Now for a pre-peak guy, below it for a declining vet."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Best yr {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
       </div>
       {/* ability */}
       <div className="flex flex-wrap items-center gap-1">
@@ -651,6 +653,9 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // now computed inside the shared liveValue (fed the fvPtFactor / saves / arm-risk
   // layers above), so the board and trade calc grade Keep identically.
   const fvOf = (p: SearchResult) => valueOf(p).future;
+  // Per-season slices of Keep: avg of the next 3 seasons + best single future
+  // season (upside beyond this year). Hidden when age is unknown.
+  const outlookOf = (p: SearchResult) => futureOutlook(valueOf(p).future, metrics[p.id]?.age, p.primaryPosition === 'P');
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
   // roster, who in a deep league is well above replacement (good players never hit
@@ -755,7 +760,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -765,7 +770,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>

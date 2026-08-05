@@ -405,6 +405,35 @@ export function fantasyRate(inp: ValueInputs, s: LeagueSettings): number {
   return f;
 }
 
+// ---- Per-season slices of Keep: the "what's a season of him worth LATER"
+// numbers (owner ask 2026-08-05). Keep is calibrated as ≈ annual-peak value ×
+// keeperAgeFactor (the sustained floor literally banks healthyPv/presentMaturity
+// × keeperAgeFactor), so dividing the factor back out recovers the model-implied
+// PEAK-season value; each future season is then that peak shaped by the same
+// curves the model already uses — ageRetention (post-prime decline) and
+// presentMaturity (pre-prime ramp). Deliberately NO year-discount (that's time
+// preference, not ability) and NO survival hazard (Keep never included it, so
+// slices must not either or they wouldn't re-aggregate to Keep).
+//   next3      = average per-season value over seasons +1..+3 (Now-comparable)
+//   peakSeason = best single FUTURE season (+1..horizon) — the upside-beyond-
+//                this-year proxy: below Now for a declining 30+ bat, above it
+//                for a pre-peak guy.
+// Undefined when age is unknown (the curves have nothing to shape).
+export function futureOutlook(keep: number, age?: number, isPitcher = false): { next3: number; peakSeason: number } | undefined {
+  if (age === undefined) return undefined;
+  const kaf = keeperAgeFactor(age, isPitcher);
+  if (kaf < 0.05 || keep <= 0) return { next3: 0, peakSeason: 0 };
+  const annualPeak = keep / kaf;
+  const season = (k: number) =>
+    annualPeak * Math.min(1, ageRetention(age + k, isPitcher)) * presentMaturity(age + k);
+  const seasons = Array.from({ length: KEEPER_HORIZON }, (_, i) => season(i + 1));
+  const r = (n: number) => Math.round(n * 10) / 10;
+  return {
+    next3: r((seasons[0] + seasons[1] + seasons[2]) / 3),
+    peakSeason: r(Math.max(...seasons)),
+  };
+}
+
 // The single, build-agnostic OVERALL value — a player's total dynasty asset worth.
 // Now (this season) + Keep (all future seasons) are different time windows, so a
 // blend is honest, not double-counting. Weighted toward Keep (¼ Now / ¾ Keep)
