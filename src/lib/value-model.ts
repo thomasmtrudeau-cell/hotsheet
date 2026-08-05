@@ -67,6 +67,27 @@ function ageRetention(a: number, isPitcher = false): number {
   return Math.max(0, Math.min(1.0, 1.05 - Math.max(0, a - onset) * slope));
 }
 const KEEPER_NORM = 2.76;     // normalize so a prime-age (26) player lands ≈ 1.15
+
+// Per-season keeper aggregation — the engine behind "below-replacement seasons
+// aren't material" (Tom, 2026-08-05). The old shape decayed the NET surplus
+// (value above the bar) by keeperAgeFactor, which silently pays out seasons
+// where the decayed GROSS ability has fallen below the bar — a 33-yo 2.8-WAR
+// bat's age-36 season is gross 1.9 vs a 2.0 bar and should be worth ZERO, but
+// surplus-decay credited 0.8 × 0.69 = 0.55 for it. This instead decays the
+// gross along the aging curve and lets the caller re-derive each season's
+// value (netting against the bar yearly, floored at 0) before the discounted
+// sum. seasonVal(ret) maps one season's retention to its value; prime seasons
+// (retention 1) reproduce the legacy math exactly, so young/prime players are
+// untouched — only decline-phase seasons get cut.
+function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (ret: number) => number): number {
+  if (age === undefined) return seasonVal(1); // legacy: unknown age aggregates at ×1.0
+  let sum = 0;
+  for (let k = 1; k <= KEEPER_HORIZON; k++) {
+    sum += Math.pow(YEAR_DISCOUNT, k - 1) * seasonVal(ageRetention(age + k, isPitcher));
+  }
+  return sum / KEEPER_NORM;
+}
+
 export function keeperAgeFactor(age?: number, isPitcher = false): number {
   if (age === undefined) return 1.0;
   let sum = 0;
@@ -268,6 +289,24 @@ const totalKeepers = (s: LeagueSettings) => Math.max(1, Math.round(s.teams * s.k
 // so the swing is sane across league sizes.
 export function keeperBar(s: LeagueSettings): number {
   return clamp(2.0 * Math.sqrt(560 / totalKeepers(s)), 0.8, 5.0);
+}
+
+// The bar depends on the POSITION PROFILE (Tom, 2026-08-05): one 2.0 line
+// doesn't match who actually gets kept in a 560-keeper pool.
+//  - Hitters outside 1B/DH carry defensive/positional WAR that doesn't score in
+//    fantasy — you'd almost never see one kept at 2.0 raw WAR; their real line
+//    is ≈ 2.4 (a 2.2-WAR glove-first SS with an 88 wRC+ is not a keeper).
+//  - 1B/DH keep the base bar, judged on their STRIPPED keeper WAR (negative
+//    positional adjustment removed) — the "$15 Jake Burger at 1.5 WAR" case: a
+//    mashing corner is kept on the bat. His margin for error is thin by
+//    construction — the per-season netting cuts him off quickly once the
+//    decayed bat crosses the bar.
+//  - Pitchers ≈ 1.6: a 2-WAR SP is a routinely-kept mid-rotation starter (9 P
+//    slots × 20 teams), and pitcher WAR runs compressed vs hitters'.
+export function keeperBarFor(s: LeagueSettings, isPitcher: boolean, position?: string): number {
+  const base = keeperBar(s);
+  if (isPitcher) return base * 0.8;
+  return position === '1B' || position === 'DH' ? base : base * 1.2;
 }
 
 // Present-value replacement level rises with league depth — more teams means
@@ -483,7 +522,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
     0.7 * sbAgeFactor(inp.age));
 
   // ---- Future (keeper) value ----
-  const bar = keeperBar(s);
+  const bar = keeperBarFor(s, inp.isPitcher, inp.position);
   let fantasy = 0;
   if (inp.isPitcher) {
     if (inp.era20 !== undefined) fantasy = Math.max(0, 4.0 - inp.era20);
@@ -504,10 +543,18 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // crossed the bar), which put a cliff in keeper value — a 1.9- and 2.1-WAR guy
   // graded 10× apart. Smooth it into a ramp across ±0.75 WAR around the bar so a
   // small WAR difference is a small FV difference.
-  const clears = clamp((fWarKeeper - bar + 0.75) / 1.5, 0, 1);
-  const warTerm = Math.max(0, fWarKeeper - bar) * growth;
-  const fantasyTerm = fantasy * (0.15 + 0.85 * clears) * fantasyFade;
-  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperAgeFactor(inp.age, inp.isPitcher) * keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder) * scar;
+  const clearsAt = (w: number) => clamp((w - bar + 0.75) / 1.5, 0, 1);
+  // Per-season netting (see keeperSeasons): decay the GROSS keeper WAR along the
+  // aging curve and re-net against the bar EACH season, floored at 0 — a season
+  // where the decayed ability sits below the bar contributes nothing (you'd just
+  // keep someone else) instead of riding along as decayed surplus. The clears
+  // gate slides season by season the same way, so a bat-first corner's fantasy
+  // credit fades toward the 0.15 floor as his margin over the bar erodes rather
+  // than staying frozen at today's clearance.
+  const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar)) * growth;
+  const fantasyTerm = fantasy * fantasyFade
+    * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)));
+  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
   // The dynamic layer (current-rate × ACTUAL playing time × park) is applied
@@ -625,7 +672,14 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   // weights + speed decay — see fantasyProd) before banking it forward; the
   // present shown to the user keeps the raw market-led counting.
   const healthyPv = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
-  const sustained = sustainTaper * (healthyPv / presentMaturity(inp.age)) * keeperAgeFactor(inp.age, inp.isPitcher);
+  // The floor gets the same per-season netting: healthyPv is already SURPLUS
+  // over the freely-available line, so re-inflate to gross with the per-season
+  // roster-spot value, decay the gross, and re-net each year — a fading vet's
+  // below-the-line seasons stop paying out through the floor too.
+  const FLOOR_REPL = 0.7; // per-season roster-spot value (mirrors the trade calc's PV replacement)
+  const annualPv = healthyPv / presentMaturity(inp.age);
+  const sustained = sustainTaper
+    * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL));
   const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
   const future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
   return { present, future, overall: overallValue(present, future) };
