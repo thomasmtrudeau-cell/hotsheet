@@ -79,13 +79,42 @@ const KEEPER_NORM = 2.76;     // normalize so a prime-age (26) player lands ≈ 
 // sum. seasonVal(ret) maps one season's retention to its value; prime seasons
 // (retention 1) reproduce the legacy math exactly, so young/prime players are
 // untouched — only decline-phase seasons get cut.
-function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (ret: number) => number): number {
+function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (ret: number) => number, surv?: number[]): number {
   if (age === undefined) return seasonVal(1); // legacy: unknown age aggregates at ×1.0
   let sum = 0;
   for (let k = 1; k <= KEEPER_HORIZON; k++) {
-    sum += Math.pow(YEAR_DISCOUNT, k - 1) * seasonVal(ageRetention(age + k, isPitcher));
+    sum += Math.pow(YEAR_DISCOUNT, k - 1) * seasonVal(ageRetention(age + k, isPitcher)) * (surv?.[k - 1] ?? 1);
   }
   return sum / KEEPER_NORM;
+}
+
+// QUALITY-CONDITIONED career survival (Tom, 2026-08-05): expected value must
+// include the odds the player even HAS each future season, and that can't be a
+// blanket age curve — "98% of 36-year-olds won't have an age-39 season", but
+// the HOF-track ones (Freeman/Judge/Trout tier) do, and "outlier" shouldn't be
+// a list of names. The projection already tells us who the outliers are: per-
+// year hazard of the career ending rises with age and falls with the MARGIN of
+// the decayed keeper WAR over the position's bar (teams keep finding jobs for
+// stars; a vet projected at/below the bar is a release away from done). The
+// aging curve says what the seasons look like IF they happen; this is the
+// probability they happen — multiplying them is expected value, not a double
+// count. Calibration anchors: a 36-yo star (margin +0.7 next year) holds P≈0.9
+// / 0.7 / 0.45 for ages 37/38/39; a 36-yo ordinary keeper (margin ≈ −0.8) gets
+// P≈0.6 / 0.3 / 0.11 — and his age-39 value season is already netted to zero,
+// so effectively none of it counts. Young players with positive margins ride
+// the 0.01 floor (≈7% total trim across the full horizon — real flameout risk,
+// negligible reshuffling).
+function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: number, bar: number): number[] | undefined {
+  if (age === undefined) return undefined;
+  const out: number[] = [];
+  let s = 1;
+  for (let k = 1; k <= KEEPER_HORIZON; k++) {
+    const a = age + k;
+    const margin = fWarKeeper * ageRetention(a, isPitcher) - bar;
+    s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin, 0.01, 0.85);
+    out.push(s);
+  }
+  return out;
 }
 
 export function keeperAgeFactor(age?: number, isPitcher = false): number {
@@ -483,7 +512,7 @@ export function overallValue(now: number, keep: number): number {
   return OV_NOW_WEIGHT * now + (1 - OV_NOW_WEIGHT) * keep;
 }
 
-export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number } {
+export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number; surv?: number[] } {
   if (inp.war === undefined) return { present: 0, future: 0 };
   const fmt = FORMAT[s.format];
   const scar = scarcityMult(inp.position, s);
@@ -551,9 +580,13 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // gate slides season by season the same way, so a bat-first corner's fantasy
   // credit fades toward the 0.15 floor as his margin over the bar erodes rather
   // than staying frozen at today's clearance.
-  const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar)) * growth;
+  // Career survival rides on every future season (see survivalCurve) — shared
+  // with the sustained floor in liveValue via the return value so both paths
+  // price the same career-end odds.
+  const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, bar);
+  const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar), surv) * growth;
   const fantasyTerm = fantasy * fantasyFade
-    * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)));
+    * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)), surv);
   const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder) * scar;
 
   // ---- Present (win-now) BASE: WAR + market, park- and playing-time-NEUTRAL.
@@ -582,7 +615,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const present = (wW * warPv + mW * mkt) * scarPresent;
 
   const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  return { present: r(present), future: r(future) };
+  return { present: r(present), future: r(future), surv };
 }
 
 // ---- LIVE value: the trade-grade Now / Keep / Overall. The SINGLE source of
@@ -679,7 +712,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   const FLOOR_REPL = 0.7; // per-season roster-spot value (mirrors the trade calc's PV replacement)
   const annualPv = healthyPv / presentMaturity(inp.age);
   const sustained = sustainTaper
-    * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL));
+    * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL), base.surv);
   const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
   const future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
   return { present, future, overall: overallValue(present, future) };
