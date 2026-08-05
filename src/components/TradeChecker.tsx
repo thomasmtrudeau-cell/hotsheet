@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, futureOutlook, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { liveValue, ValueLayers, presentMaturity, overallValue, ptFragility, earningPtBump, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -36,8 +36,8 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
         <span className={lbl}>value</span>
         <Tooltip text="What he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {pv.toFixed(1)}</span></Tooltip>
         <Tooltip text="What he's worth held as a keeper across future seasons."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
-        {outlook && <Tooltip text="Average per-season value over the NEXT 3 seasons (this one excluded) — Keep sliced along the aging curve, on the same scale as Now."><span className={`${chip} bg-violet-500/25 text-violet-200`}>3yr {outlook.next3.toFixed(1)}</span></Tooltip>}
-        {outlook && <Tooltip text="His best single season AFTER this one — future-upside proxy. Above Now for a pre-peak guy, below it for a declining vet."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Best yr {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
+        {outlook && <Tooltip text="Average per-season value over the NEXT 3 seasons (this one excluded): his current healthy value walked along the aging curve × the odds his career is still going. Same scale as Now. Prospects derive from Keep instead (no meaningful Now yet)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>3yr {outlook.next3.toFixed(1)}</span></Tooltip>}
+        {outlook && <Tooltip text="His best single season AFTER this one — future-upside proxy. Slightly above Now for a pre-peak guy still maturing, below it for a declining vet."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Best yr {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
       </div>
       {/* ability */}
       <div className="flex flex-wrap items-center gap-1">
@@ -653,9 +653,9 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // now computed inside the shared liveValue (fed the fvPtFactor / saves / arm-risk
   // layers above), so the board and trade calc grade Keep identically.
   const fvOf = (p: SearchResult) => valueOf(p).future;
-  // Per-season slices of Keep: avg of the next 3 seasons + best single future
-  // season (upside beyond this year). Hidden when age is unknown.
-  const outlookOf = (p: SearchResult) => futureOutlook(valueOf(p).future, metrics[p.id]?.age, p.primaryPosition === 'P');
+  // Per-season future outlook (computed inside liveValue): avg of the next 3
+  // seasons + best single future season. Hidden when age is unknown.
+  const outlookOf = (p: SearchResult) => valueOf(p).outlook;
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
   // don't fill them off the barren wire — you get to KEEP a player already on your
   // roster, who in a deep league is well above replacement (good players never hit
