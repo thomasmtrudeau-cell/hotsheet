@@ -301,7 +301,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
     const m = metrics[p.id] ?? {};
     return {
       isPitcher: p.primaryPosition === 'P', position: p.primaryPosition,
-      war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
+      war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
       defRuns: m.defRuns, ipg: m.ipg,

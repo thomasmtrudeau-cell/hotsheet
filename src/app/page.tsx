@@ -26,6 +26,7 @@ import RegressionView from '@/components/RegressionView';
 import ScoutingView from '@/components/ScoutingView';
 import TrendsView from '@/components/TrendsView';
 import { TipRotator } from '@/components/Tip';
+import OopsyBadge from '@/components/OopsyBadge';
 
 // Rotating first-run tips — one shows at a time, cycling per visit.
 const TIPS: { id: string; node: React.ReactNode }[] = [
@@ -678,6 +679,7 @@ export default function Home() {
               </>
             )}
           </div>
+          {isPremium && <OopsyBadge />}
           {isPremium ? (
             <button
               onClick={() => setShowPremium((v) => !v)}

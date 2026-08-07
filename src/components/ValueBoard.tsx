@@ -79,7 +79,7 @@ export default function ValueBoard({ settings, isFollowing }: {
         war: r.war, peakWrcPlus: r.peakWrcPlus, era20: r.era20, hr: r.hr, sb: r.sb,
         curWrcPlus: r.curWrcPlus, curEra20: r.curEra20,
         age: r.age, level: r.level, marketBaseline: r.marketBaseline,
-        defRuns: r.defRuns, ipg: r.ipg,
+        defRuns: r.defRuns, ipg: r.ipg, rpWar: r.rpWar,
       };
       const bucket = levelBucket(r.level);
       const rk = rosKey(r.player);

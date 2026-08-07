@@ -136,6 +136,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   if (ageIdx < 0) ageIdx = header.findIndex((h) => h.toLowerCase() === 'age');
   const levelIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
   const ipgIdx = isPitcher ? header.findIndex((h) => h === 'IP/G') : -1;
+  const rpWarIdx = isPitcher ? header.findIndex((h) => h === 'RP WAR') : -1;
   const curWrcIdx = isPitcher ? -1 : header.findIndex((h) => h === 'wRC+ - current year only');
   const curEraIdx = isPitcher ? header.findIndex((h) => h === 'era 20 tbf/g - current year') : -1;
   if (nameIdx < 0) return out;
@@ -186,11 +187,21 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     if (defIdx >= 0) { const dv = parseFloat(cells[defIdx]); if (Number.isFinite(dv)) m.defRuns = dv; }
     if (!isPitcher && idIdx >= 0) { const ap = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()]?.pos; if (ap) m.pos = ap; }
     if (ipgIdx >= 0) { const iv = parseFloat(cells[ipgIdx]); if (Number.isFinite(iv)) m.ipg = iv; }
+    // PURE-RP WAR (Jordan, 2026-08-07): the sheet's 'RP WAR' column prices the
+    // arm at actual reliever usage (no leverage baked in). It's populated for
+    // EVERY pitcher ("his WAR if used in relief" — Skubal has one too), so only
+    // a pure RP (IP/G < 2.01) takes it — his 20-TBFG figure is starter-workload
+    // talent he'll never cash (Morejón read 4.4). rpWar tells the value model
+    // the role conversion is already priced, so it must not dock again.
+    if (isPitcher && rpWarIdx >= 0 && m.ipg !== undefined && m.ipg < 2.01) {
+      const rw = parseFloat(cells[rpWarIdx]);
+      if (Number.isFinite(rw)) { m.war = rw; m.rpWar = true; }
+    }
     // Bake a DEFAULT-settings PV/FV as the payload fallback (position unknown at
     // parse time, so scarcity is neutral here; the client refines it).
     if (m.war !== undefined) {
       const tv = computeValue({
-        isPitcher, war: m.war, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
+        isPitcher, war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
         hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
         age: m.age, level: m.level, marketBaseline: m.marketBaseline,
       }, DEFAULT_SETTINGS);
@@ -426,9 +437,16 @@ export async function fetchPremiumMap(
 // A slim, serializable snapshot of the whole parsed premium sheet — the daily cron
 // writes this to Storage so /api/war can join against it instead of pulling ~7MB of
 // gviz CSV on every cold start. Keyed by normalized name, same as the live maps.
+export interface SnapshotChange {
+  at: string;       // when the sheet's numbers last actually differed
+  warMoved: number; // players whose WAR moved ≥ 0.05 in that capture
+  newPlayers: number;
+  topMovers: { name: string; from?: number; to?: number }[];
+}
 export interface PremiumSnapshot {
   version?: number;
-  capturedAt: string;
+  capturedAt: string; // when this capture was taken (fetch time, not change time)
+  lastChange?: SnapshotChange; // carried forward across no-change captures
   hitters: Record<string, PremiumMetrics>;
   pitchers: Record<string, PremiumMetrics>;
 }
@@ -439,7 +457,9 @@ export interface PremiumSnapshot {
 // v3: 2026-07-26 — snapshots now carry per-metric StS-universe ranks.
 // v4: 2026-07-31 — flushed captures taken through gviz while a basic filter on
 // 'peak hitting raw' hid every established MLB hitter (Kwan 0.0, stale Lee 2.7).
-export const SNAPSHOT_VERSION = 4;
+// v5: 2026-08-07 — pure relievers' WAR now ingested from the sheet's role-priced
+// 'RP WAR' column; flush so starter-workload 20-TBFG reliever WARs don't linger.
+export const SNAPSHOT_VERSION = 5;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
@@ -479,12 +499,45 @@ export async function buildPremiumSnapshot(sheetId: string): Promise<PremiumSnap
 // quality bar. Shared by the daily cron, the /api/war live-fallback self-heal,
 // and the health check's repair path. Returns the stored snapshot, or null
 // when the rebuild didn't qualify (caller keeps whatever it had).
+// Compare two captures' WAR maps — the "did yesterday's stats actually flow
+// through?" signal behind the OOPSY freshness badge. WAR-focused by design;
+// null when nothing moved, so the caller carries the previous stamp forward
+// (the badge reports real change time, not fetch time).
+function diffSnapshots(prev: PremiumSnapshot, next: PremiumSnapshot): SnapshotChange | null {
+  const movers: { name: string; from?: number; to?: number; d: number }[] = [];
+  let warMoved = 0, newPlayers = 0;
+  for (const side of ['hitters', 'pitchers'] as const) {
+    const p = prev[side] ?? {}, n = next[side] ?? {};
+    for (const [k, m] of Object.entries(n)) {
+      const pm = p[k];
+      if (!pm) { newPlayers++; continue; }
+      if (pm.war === undefined && m.war === undefined) continue;
+      const d = Math.abs((pm.war ?? 0) - (m.war ?? 0));
+      if (d >= 0.05) { warMoved++; movers.push({ name: k, from: pm.war, to: m.war, d }); }
+    }
+  }
+  if (!warMoved && !newPlayers) return null;
+  movers.sort((a, b) => b.d - a.d);
+  return { at: next.capturedAt, warMoved, newPlayers, topMovers: movers.slice(0, 5).map(({ name, from, to }) => ({ name, from, to })) };
+}
 export async function repairPremiumSnapshot(
   sheetId: string,
-  storage: { from(bucket: string): { upload(path: string, body: string, opts: { upsert: boolean; contentType: string }): Promise<{ error: { message: string } | null }> } },
+  storage: { from(bucket: string): {
+    upload(path: string, body: string, opts: { upsert: boolean; contentType: string }): Promise<{ error: { message: string } | null }>;
+    download(path: string): Promise<{ data: { text(): Promise<string> } | null }>;
+  } },
 ): Promise<PremiumSnapshot | null> {
   const snap = await buildPremiumSnapshot(sheetId);
   if (snapshotSize(snap) < SNAPSHOT_MIN_ENTRIES || !snapshotHasMlbAnchor(snap)) return null;
+  // Stamp when the numbers last CHANGED (vs the previous capture, any version —
+  // even a flushed-version capture is a valid diff baseline).
+  try {
+    const { data } = await storage.from('war').download('war_premium.json');
+    if (data) {
+      const prev = JSON.parse(await data.text()) as PremiumSnapshot;
+      snap.lastChange = diffSnapshots(prev, snap) ?? prev.lastChange;
+    }
+  } catch { /* first capture or unreadable previous — no change stamp yet */ }
   const { error } = await storage.from('war')
     .upload('war_premium.json', JSON.stringify(snap), { upsert: true, contentType: 'application/json' });
   if (error) {
@@ -684,7 +737,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
       war: round(m.war), peakWrcPlus: m.peakWrcPlus, era20: round(m.era20),
       hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
       age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
-      defRuns: round(m.defRuns), ipg: round(m.ipg), pos: m.pos,
+      defRuns: round(m.defRuns), ipg: round(m.ipg), pos: m.pos, rpWar: m.rpWar,
     });
   }
   boardCache.set(ck, { at: Date.now(), rows });

@@ -32,6 +32,7 @@ export interface ValueInputs {
   isPitcher: boolean;
   position?: string;      // fielding position abbrev, for positional scarcity
   war?: number;           // peak WAR
+  rpWar?: boolean;        // war is the sheet's role-priced 'RP WAR' (pure RP) — skip the RP role docks
   peakWrcPlus?: number;
   era20?: number;
   hr?: number;
@@ -515,7 +516,11 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // quality (Mason Miller problem) — win-now docked hard, keeper value keeps
   // most of the ceiling (an elite RP arm is a rotation-conversion lottery
   // ticket; the trade view's saves premium adds closer value back on top).
-  const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01;
+  // ONLY when his WAR is the 20-TBFG starter-workload talent figure: a pure RP
+  // ingested via the sheet's role-priced 'RP WAR' (inp.rpWar, Jordan 2026-08-07)
+  // is already usage-correct — Jordan's RP WAR runs ≈0.55-0.6× the 20-TBFG
+  // number, i.e. this dock computed upstream, so docking again double-charges.
+  const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01 && !inp.rpWar;
   // Two defense-insurance rates. Present keeps a flat 30% of DEF (playing-time
   // safety this season). Keeper keeps 70% × sbAgeFactor — defense doesn't score,
   // but it's what brings the bat's fantasy skills to life through PLAYING TIME

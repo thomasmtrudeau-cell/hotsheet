@@ -91,6 +91,7 @@ export interface PremiumMetrics {
   pos?: string;            // hitters — first-listed position (from the auction export), for catcher/corner logic
   defRuns?: number;        // hitters — raw sheet DEF (runs incl. positional adj) — fantasy strips it from WAR
   ipg?: number;            // pitchers — sheet IP/G; < 2.01 = reliever role (Jordan's threshold)
+  rpWar?: boolean;         // war came from the role-priced 'RP WAR' column (pure RP) — value model must not dock the role again
   level?: string;          // highest level (for proximity / present-level factor)
   marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
 }
