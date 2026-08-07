@@ -480,13 +480,18 @@ export function fantasyRate(inp: ValueInputs, s: LeagueSettings): number {
 }
 
 // The single, build-agnostic OVERALL value — a player's total dynasty asset worth.
-// Now (this season) + Keep (all future seasons) are different time windows, so a
-// blend is honest, not double-counting. Weighted toward Keep (¼ Now / ¾ Keep)
-// because in a keeper league the years you hold him dwarf the current one; a
-// contender still reads Now directly, a rebuilder reads Keep directly.
-export const OV_NOW_WEIGHT = 0.25;
+// One weighted timeline (Tom, 2026-08-07): this season counts full, each future
+// season fades by YEAR_DISCOUNT, for as long as the model projects relevance
+// (aging + survival zero distant seasons out on their own). Now is the single
+// heaviest-weighted season; the future collectively still outweighs it because
+// Keep is the per-season combination of SEVEN fading seasons:
+//   Overall = (Now + Σₖ D^k·seasonₖ) / Σₖ D^k = (Now + FUT_W·Keep) / (1 + FUT_W).
+// A contender still reads Now directly, a rebuilder reads Keep directly.
+export const OV_FUT_WEIGHT = Array.from(
+  { length: KEEPER_HORIZON }, (_, i) => Math.pow(YEAR_DISCOUNT, i + 1),
+).reduce((a, b) => a + b, 0); // ≈ 2.31 — Now carries ~30% of Overall, next year ~22%, fading from there
 export function overallValue(now: number, keep: number): number {
-  return OV_NOW_WEIGHT * now + (1 - OV_NOW_WEIGHT) * keep;
+  return (now + OV_FUT_WEIGHT * keep) / (1 + OV_FUT_WEIGHT);
 }
 
 export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number; surv?: number[] } {
@@ -655,7 +660,7 @@ function fantasyProd(inp: ValueInputs, L: ValueLayers, floorFmt?: FormatWeights)
   return Math.max(rateProd, countingProd) * (L.ptCredit ?? 1) * mat;
 }
 
-export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}): { present: number; future: number; overall: number; outlook?: { next3: number; peakSeason: number } } {
+export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}): { present: number; future: number; overall: number; outlook?: { next2: number; peakSeason: number } } {
   const base = computeValue(inp, s);
   const ptCredit = L.ptCredit ?? 1;
   // Present: the WAR+market base assumes a full-time role, so MLB hitters take a
@@ -668,45 +673,24 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     * (L.platoonDock ?? 1) * (L.homePark ?? 1);
   const present = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L) + (L.savesPremium ?? 0))
     * injuryMult * pvMults;
-  // Keeper: the durability-tilted ceiling, floored by sustained production.
-  const durable = warDurability(inp.war ?? 0, inp.isPitcher ? undefined : inp.position);
-  const ceiling = base.future * (L.fvPtFactor ?? 1) * durable;
-  const war = inp.war ?? 0;
-  // Sustained-production floor: an established player's future years ≈ his present
-  // production, discounted by how many good years remain (keeperAgeFactor). Un-dock
-  // the age-maturity haircut (keeper banks the peak) and the current-IL hedge
-  // (keeper value is about future healthy seasons). Phased in with a smooth WAR
-  // taper so a genuine scrub keeps little of it and a 1.5-WAR+ regular most.
-  const sustainTaper = clamp((war - 0.4) / 1.4, 0, 1);
-  // The floor re-prices the production layer's counting at FUTURE prices (shape
-  // weights + speed decay — see fantasyProd) before banking it forward; the
-  // present shown to the user keeps the raw market-led counting.
-  const healthyPv = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
-  // The floor gets the same per-season netting: healthyPv is already SURPLUS
-  // over the freely-available line, so re-inflate to gross with the per-season
-  // roster-spot value, decay the gross, and re-net each year — a fading vet's
-  // below-the-line seasons stop paying out through the floor too.
-  const FLOOR_REPL = 0.7; // per-season roster-spot value (mirrors the trade calc's PV replacement)
-  const annualPv = healthyPv / presentMaturity(inp.age);
-  const sustained = sustainTaper
-    * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL), base.surv);
-  const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
-  const future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
-
-  // ---- Future-outlook slices (the "3yr" / "Best yr" chips) ----
-  // For an MLB player the anchor is his CURRENT healthy per-season value (Now
-  // units, injury un-docked): divide out the pre-peak maturity discount to get
-  // his peak-scale annual value, then walk each future season along the aging
-  // curves × the quality-conditioned survival odds. Keep is deliberately NOT
-  // the anchor — it prices a keeper SLOT (ceiling-vs-bar economics), a bigger
-  // unit system, and slicing it made a prime-age everyday bat's next season
-  // read ABOVE his Now (the Ben Rice 8.0-vs-6.1 bug, 2026-08-05). Prospects
-  // have no meaningful Now, so they still derive from Keep via keeperAgeFactor
-  // — the keeper asset value is the only signal there.
-  let outlook: { next3: number; peakSeason: number } | undefined;
+  // ---- The SEASON ENGINE: one projection, every number a view of it ----
+  // (Tom, 2026-08-07): the old Keep priced a keeper SLOT over a 7-year horizon
+  // (ceiling-vs-bar economics, its own unit system) while 3yr/Best yr walked
+  // the player's actual value forward — two unrelated machines that could
+  // disagree about the same player ("next year he's a 5.9" vs "Keep 3.7", the
+  // Trout case). Now ONE per-season projection feeds every chip:
+  //   Now     = this season (present, above — injuries and all);
+  //   2yr     = avg of seasons 1–2, next year matters most;
+  //   Peak    = his best remaining season (pre-peak: the priced peak itself);
+  //   Keep    = ALL future seasons combined — YEAR_DISCOUNT-weighted per-season
+  //             value, so it stays on the Now scale ("he's ~a 5/yr for you");
+  //   Overall = the full weighted timeline, Now the single heaviest season
+  //             (see overallValue).
+  let outlook: { next2: number; peakSeason: number } | undefined;
+  let future: number;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   if (inp.age !== undefined) {
-    // Two lenses, take the better of each field:
+    // Two lenses build the season vector; each season takes the better view:
     //
     // 1) WALK-FORWARD (players with a real Now): his current healthy value
     //    walked RELATIVELY along the aging curve — divide by today's shape,
@@ -716,7 +700,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     //    anchor un-docks an INJURED player's zeroed reps (ptCredit → 1): 0 PA
     //    on the IL is a this-season artifact, not his role — without this a
     //    hurt star's future seasons inherit his empty present.
-    let walkNext3 = 0, walkPeak = 0;
+    let walkSeasons: number[] | undefined;
     if (L.isMLB) {
       const injured = (L.injuryMult ?? 1) < 1;
       const oL = injured ? { ...L, ptCredit: 1 } : L;
@@ -737,10 +721,8 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       const anchorPv = (oBase * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * oPvMults;
       const surv = base.surv ?? [];
       const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
-      const seasons = Array.from({ length: 7 }, (_, i) =>
+      walkSeasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
         annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1));
-      walkNext3 = (seasons[0] + seasons[1] + seasons[2]) / 3;
-      walkPeak = Math.max(...seasons);
     }
     // 2) PEAK-PRICED (anyone whose peak is still AHEAD: prospects and pre-peak
     //    MLB players — a 20-yo rookie on the IL has no meaningful Now to walk
@@ -749,21 +731,44 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     //    prices Now. Market input deliberately dropped (his auction $, if any,
     //    prices the ROS role, not a peak season) — the WAR-led fallback + the
     //    production layer at a full role approximate a preseason auction-calc
-    //    price for that season. Best yr = that CEILING, undiscounted (bust
-    //    risk lives in Keep); 3yr bends it by the maturation ramp and the
-    //    arrival deferral (1.0 once he's in the majors).
-    let peakNext3 = 0, peakBest = 0;
+    //    price for that season. Peak = that CEILING, undiscounted; his season
+    //    vector bends it by the maturation ramp and the arrival deferral (1.0
+    //    once he's in the majors), so bust/wait risk lives in Keep and Overall.
+    let peakSeasons: number[] | undefined;
+    let peakBest = 0;
     if (!L.isMLB || inp.age < 26) {
       const peakNow = liveValue(
         { ...inp, age: 27, level: 'MLB', marketBaseline: undefined, curWrcPlus: undefined, curEra20: undefined },
         s, { isMLB: true, ptCredit: 1 },
       ).present;
       const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
-      const near = [1, 2, 3].map((k) => peakNow * futureSeasonShape(inp.age! + k, inp.isPitcher) * defer);
-      peakNext3 = (near[0] + near[1] + near[2]) / 3;
+      peakSeasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
+        peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer);
       peakBest = peakNow;
     }
-    outlook = { next3: rr(Math.max(walkNext3, peakNext3)), peakSeason: rr(Math.max(walkPeak, peakBest)) };
+    const seasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
+      Math.max(walkSeasons?.[i] ?? 0, peakSeasons?.[i] ?? 0));
+    // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
+    // seasons (this one excluded) — "what he's worth per year going forward,
+    // near years counting most". Same scale as Now by construction.
+    let wSum = 0, vSum = 0, w = 1;
+    for (const sv of seasons) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * sv; }
+    future = Math.max(0, vSum / wSum);
+    outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(Math.max(...seasons, peakBest)) };
+  } else {
+    // LEGACY fallback (age unknown — rare): the old slot-economics keeper value,
+    // the durability-tilted ceiling floored by sustained production. Kept only
+    // because the season engine can't walk an ageless player forward.
+    const durable = warDurability(inp.war ?? 0, inp.isPitcher ? undefined : inp.position);
+    const ceiling = base.future * (L.fvPtFactor ?? 1) * durable;
+    const sustainTaper = clamp(((inp.war ?? 0) - 0.4) / 1.4, 0, 1);
+    const healthyPv = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
+    const FLOOR_REPL = 0.7; // per-season roster-spot value (mirrors the trade calc's PV replacement)
+    const annualPv = healthyPv / presentMaturity(inp.age);
+    const sustained = sustainTaper
+      * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL), base.surv);
+    const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
+    future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
   }
   return { present, future, overall: overallValue(present, future), outlook };
 }

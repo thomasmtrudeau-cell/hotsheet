@@ -20,7 +20,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next3: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number }) {
+function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next2: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   if (pending) {
@@ -35,9 +35,9 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
       <div className="flex flex-wrap items-center gap-1">
         <span className={lbl}>value</span>
         <Tooltip text="What he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {pv.toFixed(1)}</span></Tooltip>
-        <Tooltip text="What he's worth held as a keeper across future seasons."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
-        {outlook && <Tooltip text="Average per-season value over the NEXT 3 seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the peak estimate bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>3yr {outlook.next3.toFixed(1)}</span></Tooltip>}
-        {outlook && <Tooltip text="What his Now value projects to be at PEAK age (wRC+/HR/SB/WAR priced at an everyday MLB role) — or, if he's already at/past peak, his best single season after this one. The ceiling if he develops as projected; bust risk lives in Keep, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Best yr {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
+        <Tooltip text="All his future seasons combined (this one excluded), on the Now scale — what he's worth PER YEAR going forward, with next year counting most and each season after fading. Read it as: keep him and he's about this good for you."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
+        {outlook && <Tooltip text="Average of his NEXT TWO seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the priced peak bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {outlook.next2.toFixed(1)}</span></Tooltip>}
+        {outlook && <Tooltip text="His best FUTURE season's Now value. Already at/past peak: his best remaining year. Pre-peak: wRC+/HR/SB/WAR priced at an everyday MLB role at peak age — the ceiling if he develops as projected; bust/wait risk lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Peak {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
       </div>
       {/* ability */}
       <div className="flex flex-wrap items-center gap-1">
@@ -653,7 +653,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // now computed inside the shared liveValue (fed the fvPtFactor / saves / arm-risk
   // layers above), so the board and trade calc grade Keep identically.
   const fvOf = (p: SearchResult) => valueOf(p).future;
-  // Per-season future outlook (computed inside liveValue): avg of the next 3
+  // Per-season future outlook (computed inside liveValue): avg of the next 2
   // seasons + best single future season. Hidden when age is unknown.
   const outlookOf = (p: SearchResult) => valueOf(p).outlook;
   // CONSOLIDATION KEEP: an unbalanced (e.g. 2-for-1) trade opens roster spots. You
@@ -666,11 +666,13 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // worse guy). Name the actual guy with ＋FA to override the default.
   const depthFactor = Math.sqrt(560 / Math.max(1, settings.teams * settings.keepers)); // 1.0 at Tom's 560; >1 shallower
   // Bare-minimum replacement a rosterable spot is worth (per Tom, deep 20-team):
-  // PV 0.7, FV 1.7 — a freely-available player, not a star. Overall replacement
-  // derives to ¼·0.7 + ¾·1.7 = 1.45. All scale UP in shallower leagues (bigger
-  // depthFactor) where more talent sits on the wire / available to backfill.
+  // PV 0.7 — a freely-available player, not a star. Keep is now per-season on
+  // the Now scale, and the wire regenerates a ~0.7 guy every season, so the
+  // slot's future value matches its present: FV 0.7, and Overall replacement
+  // derives to 0.7 too. All scale UP in shallower leagues (bigger depthFactor)
+  // where more talent sits on the wire / available to backfill.
   const PV_KEEP = 0.7 * depthFactor;
-  const FV_KEEP = 1.7 * depthFactor;
+  const FV_KEEP = 0.7 * depthFactor;
   const fillCount = (side: Side) => Math.max(0, (side === 'A' ? sideB : sideA).length - (side === 'A' ? sideA : sideB).length);
   // Every freed spot backfills at the SAME replacement level (per Tom: 2nd/3rd/4th
   // backfill guys are readily available on the wire / roster back end, so no
@@ -683,8 +685,8 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // his contribution at replacement. This stops a sub-replacement throw-in from
   // padding a side or out-ranking a real player (Peters −$2.4 out-valuing Dubón),
   // and makes "receive a scrub" identical to "free a spot". Applies to prospects
-  // too: a real prospect's big keeper ceiling (FV) keeps his overall above the line,
-  // but a low-FV/useless prospect (overall ≈ ¾ of his FV) falls below it and floors,
+  // too: a real prospect's keeper value (FV) keeps his overall above the line, but
+  // a low-FV/useless prospect (his overall is mostly his FV) falls below and floors,
   // so you can't hack a trade by tossing in throwaway prospects.
   const ovOf = (p: SearchResult) => valueOf(p).overall;
   const ovKeep = overallValue(PV_KEEP, FV_KEEP);
@@ -723,12 +725,13 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   const edge = (d: number, unit: string) =>
     Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
-  // ---- Overall: the single, build-agnostic dynasty asset value = ¼ Now + ¾ Keep.
-  // No build lenses — Now (this season) and Keep (future seasons) ARE the win-now
-  // and rebuild views, so a contender reads Now, a rebuilder reads Keep, and Overall
-  // is the neutral total for everyone else. Different time windows, so blending them
-  // is honest, not double-counting. ----
-  const ovTitle = 'Overall — the dynasty asset value: ¼ this-season value + ¾ keeper value';
+  // ---- Overall: the single, build-agnostic dynasty asset value — the player's
+  // full weighted timeline (this season counts most, each future season fades;
+  // see overallValue). No build lenses — Now (this season) and Keep (future
+  // seasons) ARE the win-now and rebuild views, so a contender reads Now, a
+  // rebuilder reads Keep, and Overall is the neutral total for everyone else.
+  // Different time windows, so blending them is honest, not double-counting. ----
+  const ovTitle = 'Overall — the dynasty asset value: his whole timeline weighted, this season counting most and each future season fading';
   const sumOv = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + ovContrib(p), 0);
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + (theoreticalFill * ovKeep);
@@ -898,7 +901,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
       </div>
       {showSettings && <LeagueSettingsPanel settings={settings} onChange={updateSettings} />}
 
-      {/* One build-agnostic verdict. Overall (¼ Now + ¾ Keep) is the headline;
+      {/* One build-agnostic verdict. Overall (the weighted timeline) is the headline;
           the Now and Keeper lines let a contender or rebuilder read their own slice. */}
       {(sideA.length > 0 || sideB.length > 0) && (() => {
         const bigger = Math.max(ovA, ovB, 0.1);
@@ -949,7 +952,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
         </button>
         {showHow && (
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth held as a keeper across future seasons — so young risers sit above their Now value and aging vets below. <strong className="text-orange-300">Overall</strong> is the dynasty asset value: a blend of the two, ¼ Now + ¾ Keep. Read <strong className="text-blue-300">Now</strong> if you&apos;re contending, <strong className="text-fuchsia-300">Keep</strong> if you&apos;re rebuilding, <strong className="text-orange-300">Overall</strong> for the neutral total. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. Still being calibrated.
+            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth per year across his future seasons, next year counting most — so young risers sit above their Now value and fading vets below. <strong className="text-orange-300">Overall</strong> is the dynasty asset value: his whole timeline weighted, this season counting most and each season after fading. Read <strong className="text-blue-300">Now</strong> if you&apos;re contending, <strong className="text-fuchsia-300">Keep</strong> if you&apos;re rebuilding, <strong className="text-orange-300">Overall</strong> for the neutral total. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. Still being calibrated.
           </p>
         )}
       </div>
