@@ -718,9 +718,23 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     //    hurt star's future seasons inherit his empty present.
     let walkNext3 = 0, walkPeak = 0;
     if (L.isMLB) {
-      const oL = (L.injuryMult ?? 1) < 1 ? { ...L, ptCredit: 1 } : L;
+      const injured = (L.injuryMult ?? 1) < 1;
+      const oL = injured ? { ...L, ptCredit: 1 } : L;
       const oHaircut = !inp.isPitcher ? 0.6 + 0.4 * (oL.ptCredit ?? 1) : 1;
-      const anchorPv = (base.present * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
+      // The market half of the base is injury-poisoned too: an IL'd player's
+      // auction $ prices his depleted ROS reps (a ~34-IP Glasnow), not his
+      // healthy per-season value — the same reason the peak-priced lens drops
+      // marketBaseline. Re-derive the base WAR-led and take the better of the
+      // two, so the un-dock can only lift the anchor, never lower it.
+      const oBase = injured
+        ? Math.max(base.present, computeValue({ ...inp, marketBaseline: undefined }, s).present)
+        : base.present;
+      // Future seasons carry the forward-looking arm fade (armFvMult — real
+      // surgery/recurrence risk), not armPvMult's this-season availability nick.
+      const oPvMults = (injured ? (L.armFvMult ?? 1) : (L.armPvMult ?? 1))
+        * (L.ptDockEff ?? 1) * (L.jobSecurity ?? 1) * (L.earnBump ?? 1)
+        * (L.platoonDock ?? 1) * (L.homePark ?? 1);
+      const anchorPv = (oBase * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * oPvMults;
       const surv = base.surv ?? [];
       const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
       const seasons = Array.from({ length: 7 }, (_, i) =>
