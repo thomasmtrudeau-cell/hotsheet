@@ -689,7 +689,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   // a low-FV/useless prospect (his overall is mostly his FV) falls below and floors,
   // so you can't hack a trade by tossing in throwaway prospects.
   const ovOf = (p: SearchResult) => valueOf(p).overall;
-  const ovKeep = overallValue(PV_KEEP, FV_KEEP);
+  const ovKeep = PV_KEEP; // a replacement guy's Overall = the roster-spot baseline (zero surplus)
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   // A player contributes his REAL value to a trade, floored at 0. We floor at 0
   // (not at replacement) for two reasons: (1) it keeps the totals reconciling with
@@ -725,13 +725,13 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
   const edge = (d: number, unit: string) =>
     Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
 
-  // ---- Overall: the single, build-agnostic dynasty asset value — the player's
-  // full weighted timeline (this season counts most, each future season fades;
-  // see overallValue). No build lenses — Now (this season) and Keep (future
-  // seasons) ARE the win-now and rebuild views, so a contender reads Now, a
-  // rebuilder reads Keep, and Overall is the neutral total for everyone else.
-  // Different time windows, so blending them is honest, not double-counting. ----
-  const ovTitle = 'Overall — the dynasty asset value: his whole timeline weighted, this season counting most and each future season fading';
+  // ---- Overall: the single, build-agnostic dynasty asset value — cumulative
+  // discounted surplus over the waiver line across the player's whole career
+  // (see value-model's OV_* block): quality × quantity, so longevity pays. No
+  // build lenses — Now (this season) and Keep (per-season, near window) ARE
+  // the win-now and rebuild views, so a contender reads Now, a rebuilder reads
+  // Keep, and Overall is the trade-value total for everyone else. ----
+  const ovTitle = 'Overall — trade value: every remaining season above a waiver-wire player, added up (near seasons count most, but a long career keeps paying)';
   const sumOv = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + ovContrib(p), 0);
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + (theoreticalFill * ovKeep);
@@ -952,7 +952,7 @@ export default function TradeChecker({ isPremium, isOwner = false }: TradeChecke
         </button>
         {showHow && (
           <p className="text-[11px] text-zinc-600 mt-2 leading-relaxed">
-            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth per year across his future seasons, next year counting most — so young risers sit above their Now value and fading vets below. <strong className="text-orange-300">Overall</strong> is the dynasty asset value: his whole timeline weighted, this season counting most and each season after fading. Read <strong className="text-blue-300">Now</strong> if you&apos;re contending, <strong className="text-fuchsia-300">Keep</strong> if you&apos;re rebuilding, <strong className="text-orange-300">Overall</strong> for the neutral total. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. Still being calibrated.
+            <strong className="text-blue-300">Now</strong> is what he&apos;s worth to your lineup this season — mostly his projected production and playing time, nudged by park, injuries, and how secure his job is. <strong className="text-fuchsia-300">Keep</strong> is what he&apos;s worth per year across his future seasons, next year counting most — so young risers sit above their Now value and fading vets below. <strong className="text-orange-300">Overall</strong> is trade value: every remaining season above a waiver-wire player, added up — near seasons count most, but a long career keeps paying, so a young star outranks an equal older one. Read <strong className="text-blue-300">Now</strong> if you&apos;re contending, <strong className="text-fuchsia-300">Keep</strong> if you&apos;re rebuilding, <strong className="text-orange-300">Overall</strong> for the neutral total. A lopsided trade (say 2-for-1) frees a roster spot worth a keepable replacement (less for each extra spot — you back-fill with worse players); tap <strong className="text-emerald-300">＋FA</strong> to name the real player you&apos;d add. Still being calibrated.
           </p>
         )}
       </div>

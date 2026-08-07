@@ -111,7 +111,12 @@ function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: 
   for (let k = 1; k <= len; k++) {
     const a = age + k;
     const margin = fWarKeeper * ageRetention(a, isPitcher) - bar;
-    s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin, 0.01, 0.85);
+    // Pitcher arm attrition (Tom, 2026-08-07): an elite projection must not
+    // clamp an ARM's career-end hazard to ~1% — TJ/breakdown risk runs ~5%+/yr
+    // for even the best aging arms (the chart-only survivalTo always knew
+    // this; the keeper curve didn't). Floor a 31+ pitcher's hazard at 5.5%.
+    const floor = isPitcher && a >= 31 ? 0.055 : 0.01;
+    s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin, floor, 0.85);
     out.push(s);
   }
   return out;
@@ -479,19 +484,27 @@ export function fantasyRate(inp: ValueInputs, s: LeagueSettings): number {
   return f;
 }
 
-// The single, build-agnostic OVERALL value — a player's total dynasty asset worth.
-// One weighted timeline (Tom, 2026-08-07): this season counts full, each future
-// season fades by YEAR_DISCOUNT, for as long as the model projects relevance
-// (aging + survival zero distant seasons out on their own). Now is the single
-// heaviest-weighted season; the future collectively still outweighs it because
-// Keep is the per-season combination of SEVEN fading seasons:
-//   Overall = (Now + Σₖ D^k·seasonₖ) / Σₖ D^k = (Now + FUT_W·Keep) / (1 + FUT_W).
-// A contender still reads Now directly, a rebuilder reads Keep directly.
-export const OV_FUT_WEIGHT = Array.from(
-  { length: KEEPER_HORIZON }, (_, i) => Math.pow(YEAR_DISCOUNT, i + 1),
-).reduce((a, b) => a + b, 0); // ≈ 2.31 — Now carries ~30% of Overall, next year ~22%, fading from there
+// The single, build-agnostic OVERALL value — a player's total dynasty asset
+// worth, i.e. TRADE value. CUMULATIVE (Tom, 2026-08-07 #2): the discounted sum
+// of every remaining season's value ABOVE the waiver-wire line, over his whole
+// career — quality × quantity in one number, so longevity finally pays (a
+// 23-yo ace's ages 31-33 count "at least a little bit"; a 33-yo's career
+// simply runs out of seasons to sum). The discount is deliberately gentler
+// than Keep's near-window weighting (0.85 vs 0.72): time preference lives in
+// Now/2yr/Keep; Overall is the asset ledger. Normalized to an 8-season
+// reference card so the scale stays per-season-like: a player with exactly 8
+// flat seasons at value V reads V — more relevant years push him above his
+// per-season value, fewer pull him below. The min(Now, REPL) baseline term (in
+// liveValue) means a rostered scrub is still worth his sub-replacement Now,
+// while a prospect contributes nothing this season and starts from 0.
+export const OV_DISCOUNT = 0.85;
+export const OV_REPL = 0.7; // waiver-wire per-season line (mirrors the trade calc's PV replacement)
+const OV_NORM = Array.from({ length: 8 }, (_, k) => Math.pow(OV_DISCOUNT, k))
+  .reduce((a, b) => a + b, 0); // ≈ 4.85 — the 8-season reference career
+// Legacy blend — ONLY for the age-unknown fallback path, where there is no
+// season vector to sum (old-scale future, so the old weighting is kept).
 export function overallValue(now: number, keep: number): number {
-  return (now + OV_FUT_WEIGHT * keep) / (1 + OV_FUT_WEIGHT);
+  return (now + 2.31 * keep) / 3.31;
 }
 
 export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number; surv?: number[] } {
@@ -565,9 +578,11 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // Career survival rides on every future season (see survivalCurve) — shared
   // with the sustained floor in liveValue via the return value so both paths
   // price the same career-end odds.
-  // Long enough to cover a pre-peak player's slid Keep window (see liveValue).
+  // Long enough to cover the full-career horizon liveValue projects (the
+  // pre-peak Keep shift and the cumulative Overall's run to ~age 43).
   const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, bar,
-    KEEPER_HORIZON + Math.max(0, 26 - ((inp.age ?? 26) + 1)));
+    Math.max(KEEPER_HORIZON + Math.max(0, 26 - ((inp.age ?? 26) + 1)),
+      Math.min(25, 43 - (inp.age ?? 43))));
   const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar), surv) * growth;
   const fantasyTerm = fantasy * fantasyFade
     * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)), surv);
@@ -693,16 +708,19 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   //             a lower Keep purely because his peak sits later (the Lara-vs-
   //             Shaw case), double-charging the wait that the maturity ramp
   //             and keeperDeferral already price. Age 25+ is untouched;
-  //   Overall = the full weighted timeline, Now the single heaviest season
-  //             (see overallValue).
+  //   Overall = TRADE value: cumulative discounted surplus over the waiver
+  //             line across his whole career (see the OV_* block) — quality ×
+  //             quantity, so longevity pays.
   let outlook: { next2: number; peakSeason: number } | undefined;
   let future: number;
+  let overall: number;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   if (inp.age !== undefined) {
-    // Seasons to project: the standard horizon, extended by the pre-peak shift
-    // so the slid Keep window is always fully populated.
+    // Seasons to project: through ~age 43 (the cumulative Overall sums the
+    // whole career; aging + survival zero the tail out on their own), and
+    // never shorter than the pre-peak-shifted Keep window.
     const shift = Math.max(0, 26 - (inp.age + 1));
-    const horizon = KEEPER_HORIZON + shift;
+    const horizon = Math.max(KEEPER_HORIZON + shift, Math.min(25, 43 - inp.age));
     // Two lenses build the season vector; each season takes the better view:
     //
     // 1) WALK-FORWARD (players with a real Now): his current healthy value
@@ -767,9 +785,14 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // pre-peak player the window starts `shift` seasons in (cover-the-peak,
     // see above), so the weights read his prime, not his ramp.
     let wSum = 0, vSum = 0, w = 1;
-    for (let k = shift; k < horizon; k++) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * seasons[k]; }
+    for (let k = shift; k < shift + KEEPER_HORIZON; k++) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * seasons[k]; }
     future = Math.max(0, vSum / wSum);
     outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(Math.max(...seasons, peakBest)) };
+    // Overall: cumulative discounted surplus over the waiver line across the
+    // whole career (see the OV_* block) + the roster-spot baseline.
+    let ovSum = Math.max(0, present - OV_REPL), d = 1;
+    for (const sv of seasons) { d *= OV_DISCOUNT; ovSum += d * Math.max(0, sv - OV_REPL); }
+    overall = Math.min(present, OV_REPL) + ovSum / OV_NORM;
   } else {
     // LEGACY fallback (age unknown — rare): the old slot-economics keeper value,
     // the durability-tilted ceiling floored by sustained production. Kept only
@@ -784,6 +807,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL), base.surv);
     const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
     future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
+    overall = overallValue(present, future);
   }
-  return { present, future, overall: overallValue(present, future), outlook };
+  return { present, future, overall, outlook };
 }

@@ -127,7 +127,7 @@ export default function ValueBoard({ settings, isFollowing }: {
     FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and the build grade disagree, the gap is the playing-time/asset story.',
     PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
     FV: 'Keep — his future seasons combined, per year on the Now scale, near seasons counting most; pre-peak players are judged on their prime window (keep him and he is about this good for you).',
-    OV: 'Overall — the dynasty asset value: his whole timeline weighted, this season counting most and each future season fading. The default ranking.',
+    OV: 'Overall — trade value: every remaining season above a waiver-wire player, added up (near seasons count most, but a long career keeps paying). The default ranking.',
   };
   const cols: { key: SortKey; label: string }[] = [
     { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' }, { key: 'OV', label: 'Overall' },
