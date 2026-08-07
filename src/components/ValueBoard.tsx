@@ -126,7 +126,7 @@ export default function ValueBoard({ settings, isFollowing }: {
     war: 'Peak WAR projection (ScoutTheStatline) — his ceiling season, all-around value.',
     FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and the build grade disagree, the gap is the playing-time/asset story.',
     PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
-    FV: 'Keep — all his future seasons combined, per year on the Now scale, next year counting most (keep him and he is about this good for you).',
+    FV: 'Keep — his future seasons combined, per year on the Now scale, near seasons counting most; pre-peak players are judged on their prime window (keep him and he is about this good for you).',
     OV: 'Overall — the dynasty asset value: his whole timeline weighted, this season counting most and each future season fading. The default ranking.',
   };
   const cols: { key: SortKey; label: string }[] = [

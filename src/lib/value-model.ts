@@ -104,11 +104,11 @@ function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (
 // so effectively none of it counts. Young players with positive margins ride
 // the 0.01 floor (≈7% total trim across the full horizon — real flameout risk,
 // negligible reshuffling).
-function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: number, bar: number): number[] | undefined {
+function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: number, bar: number, len = KEEPER_HORIZON): number[] | undefined {
   if (age === undefined) return undefined;
   const out: number[] = [];
   let s = 1;
-  for (let k = 1; k <= KEEPER_HORIZON; k++) {
+  for (let k = 1; k <= len; k++) {
     const a = age + k;
     const margin = fWarKeeper * ageRetention(a, isPitcher) - bar;
     s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin, 0.01, 0.85);
@@ -565,7 +565,9 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // Career survival rides on every future season (see survivalCurve) — shared
   // with the sustained floor in liveValue via the return value so both paths
   // price the same career-end odds.
-  const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, bar);
+  // Long enough to cover a pre-peak player's slid Keep window (see liveValue).
+  const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, bar,
+    KEEPER_HORIZON + Math.max(0, 26 - ((inp.age ?? 26) + 1)));
   const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar), surv) * growth;
   const fantasyTerm = fantasy * fantasyFade
     * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)), surv);
@@ -682,14 +684,25 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   //   Now     = this season (present, above — injuries and all);
   //   2yr     = avg of seasons 1–2, next year matters most;
   //   Peak    = his best remaining season (pre-peak: the priced peak itself);
-  //   Keep    = ALL future seasons combined — YEAR_DISCOUNT-weighted per-season
-  //             value, so it stays on the Now scale ("he's ~a 5/yr for you");
+  //   Keep    = his future seasons combined — YEAR_DISCOUNT-weighted per-season
+  //             value, so it stays on the Now scale ("he's ~a 5/yr for you").
+  //             COVER-THE-PEAK (Tom, 2026-08-07): a pre-peak player's Keep
+  //             window slides forward to start at his prime (age 26), so the
+  //             heavy near weights land on the seasons that define him as a
+  //             keeper — otherwise a 21-yo with the SAME peak as a 24-yo reads
+  //             a lower Keep purely because his peak sits later (the Lara-vs-
+  //             Shaw case), double-charging the wait that the maturity ramp
+  //             and keeperDeferral already price. Age 25+ is untouched;
   //   Overall = the full weighted timeline, Now the single heaviest season
   //             (see overallValue).
   let outlook: { next2: number; peakSeason: number } | undefined;
   let future: number;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
   if (inp.age !== undefined) {
+    // Seasons to project: the standard horizon, extended by the pre-peak shift
+    // so the slid Keep window is always fully populated.
+    const shift = Math.max(0, 26 - (inp.age + 1));
+    const horizon = KEEPER_HORIZON + shift;
     // Two lenses build the season vector; each season takes the better view:
     //
     // 1) WALK-FORWARD (players with a real Now): his current healthy value
@@ -721,7 +734,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       const anchorPv = (oBase * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * oPvMults;
       const surv = base.surv ?? [];
       const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
-      walkSeasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
+      walkSeasons = Array.from({ length: horizon }, (_, i) =>
         annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1));
     }
     // 2) PEAK-PRICED (anyone whose peak is still AHEAD: prospects and pre-peak
@@ -742,17 +755,19 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         s, { isMLB: true, ptCredit: 1 },
       ).present;
       const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
-      peakSeasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
+      peakSeasons = Array.from({ length: horizon }, (_, i) =>
         peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer);
       peakBest = peakNow;
     }
-    const seasons = Array.from({ length: KEEPER_HORIZON }, (_, i) =>
+    const seasons = Array.from({ length: horizon }, (_, i) =>
       Math.max(walkSeasons?.[i] ?? 0, peakSeasons?.[i] ?? 0));
     // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
     // seasons (this one excluded) — "what he's worth per year going forward,
-    // near years counting most". Same scale as Now by construction.
+    // near years counting most". Same scale as Now by construction. For a
+    // pre-peak player the window starts `shift` seasons in (cover-the-peak,
+    // see above), so the weights read his prime, not his ramp.
     let wSum = 0, vSum = 0, w = 1;
-    for (const sv of seasons) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * sv; }
+    for (let k = shift; k < horizon; k++) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * seasons[k]; }
     future = Math.max(0, vSum / wSum);
     outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(Math.max(...seasons, peakBest)) };
   } else {
