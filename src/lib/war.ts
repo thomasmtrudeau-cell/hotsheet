@@ -713,7 +713,12 @@ export type ValueBoardRow = { player: string; nameKey: string; isPitcher: boolea
 export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'): Promise<{ rows: ValueBoardRow[] }> {
   const ck = `${sheetId}|${side}`;
   const hit = boardCache.get(ck);
-  if (hit && Date.now() - hit.at < 5 * 60_000) return { rows: hit.rows };
+  // 60-min TTL: the sheet's numbers move ~once a day (see the freshness badge),
+  // and this cache fronts a ~7MB CSV fetch + ~9k-row parse per tab. At 5 min it
+  // expired in lockstep with the page's 5-min auto-refresh, so one open board
+  // tab re-parsed the whole sheet twelve times an hour — the single biggest
+  // Fluid Active CPU line on the (free) Vercel team (2026-08-08 limit email).
+  if (hit && Date.now() - hit.at < 60 * 60_000) return { rows: hit.rows };
   const isPitcher = side === 'pit';
   const nameHeader = isPitcher ? 'player' : 'name';
   const csv = await fetchCsvTab(sheetId, isPitcher ? PIT_TAB : HIT_TAB);

@@ -147,7 +147,7 @@ function PremiumBadges({ metrics, isPitcher }: { metrics: PremiumMetrics; isPitc
       {/* Dual-threat only when it isn't already obvious from both tool tags. */}
       {!isPitcher && metrics.dual && !(metrics.speed && metrics.power) && (
         <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold ${metrics.dual === 'double-plus' ? 'bg-amber-500/30 text-amber-100' : 'bg-amber-500/20 text-amber-200'}`} title="Combined power + speed (projected HR + SB)">
-          ⚡💪 {metrics.dual === 'double-plus' ? '40+' : '30+'}
+          ⚡💪 {`${Math.max(30, Math.floor(((metrics.hr ?? 0) + (metrics.sb ?? 0)) / 10) * 10)}+`}
         </span>
       )}
       {!isPitcher && metrics.def && (

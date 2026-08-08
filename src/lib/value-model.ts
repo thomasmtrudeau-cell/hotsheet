@@ -679,7 +679,17 @@ function fantasyProd(inp: ValueInputs, L: ValueLayers, floorFmt?: FormatWeights)
   const countingProd = floorFmt
     ? (floorFmt.hrFan * (inp.hr ?? 0) + floorFmt.sbFan * sbAgeFactor(inp.age) * (inp.sb ?? 0)) / 18
     : ((inp.hr ?? 0) + (inp.sb ?? 0)) / 18;                               // scarce HR+SB — worth more than their WAR share
-  return Math.max(rateProd, countingProd) * (L.ptCredit ?? 1) * mat;
+  // NO MARKET ANCHOR (the peak-priced lens strips it; out-of-export players
+  // never had one): nothing else prices SB scarcity — wRC+ folds power in but
+  // carries ZERO stolen-base value, so max(rate, counting) erases a speedster's
+  // steals whenever his rate is decent (Konnor Griffin: 41 projected SB added
+  // literally nothing to his Peak, 2026-08-08). Credit steals on top of the
+  // rate in that case. Market-anchored paths are untouched — the auction $
+  // already prices the category, and adding here would double-count it.
+  const sbBonus = inp.marketBaseline === undefined
+    ? (floorFmt?.sbFan ?? 1) * sbAgeFactor(inp.age) * (inp.sb ?? 0) / 18
+    : 0;
+  return Math.max(rateProd + sbBonus, countingProd) * (L.ptCredit ?? 1) * mat;
 }
 
 export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}): { present: number; future: number; overall: number; outlook?: { next2: number; peakSeason: number } } {

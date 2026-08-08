@@ -45,7 +45,7 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
         {m?.war !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.war.toFixed(1)} WAR</span>}
         {m && !isPitcher && m.peakWrcPlus !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.peakWrcPlus} wRC+</span>}
         {m && isPitcher && m.era20 !== undefined && <span className={`${chip} bg-amber-500/20 text-amber-300`}>{m.era20.toFixed(2)} ERA/20</span>}
-        {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Projected 30+ (or 40+) combined HR + SB">⚡💪{m.dual === 'double-plus' ? '40+' : '30+'}</span>}
+        {m && !isPitcher && m.dual && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Projected combined HR + SB, bucketed by tens">⚡💪{`${Math.max(30, Math.floor(((m.hr ?? 0) + (m.sb ?? 0)) / 10) * 10)}+`}</span>}
         {m && !isPitcher && !m.dual && m.power && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Power">💪{m.power === 'double-plus' ? '++' : '+'}</span>}
         {m && !isPitcher && !m.dual && m.speed && <span className={`${chip} bg-amber-500/20 text-amber-200`} title="Speed">⚡{m.speed === 'double-plus' ? '++' : '+'}</span>}
         {m && !isPitcher && m.def && <span className={`${chip} ${m.def.includes('plus') ? 'bg-green-500/20 text-green-300' : 'bg-red-500/15 text-red-300'}`} title="Defense — mostly playing-time insurance in fantasy">🧤{m.def === 'double-plus' ? '++' : m.def === 'plus' ? '+' : m.def === 'double-minus' ? '−−' : '−'}</span>}
