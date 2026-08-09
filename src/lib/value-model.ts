@@ -761,14 +761,22 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         : base.present;
       // Future seasons carry the forward-looking arm fade (armFvMult — real
       // surgery/recurrence risk), not armPvMult's this-season availability nick.
+      // homePark is NOT in the anchor: it's applied per-season below, fading.
       const oPvMults = (injured ? (L.armFvMult ?? 1) : (L.armPvMult ?? 1))
         * (L.ptDockEff ?? 1) * (L.jobSecurity ?? 1) * (L.earnBump ?? 1)
-        * (L.platoonDock ?? 1) * (L.homePark ?? 1);
+        * (L.platoonDock ?? 1);
       const anchorPv = (oBase * oHaircut + DYN_W * fantasyProd(inp, oL, FORMAT[s.format]) + (L.savesPremium ?? 0)) * oPvMults;
       const surv = base.surv ?? [];
       const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
+      // Today's park is a good bet for NEXT season and a coin flip five years
+      // out — players change uniforms ~25%/yr (trades, free agency) — so the
+      // park edge/dock fades toward neutral at that rate instead of riding his
+      // whole career (Tom, 2026-08-09). Now keeps the full park (he plays
+      // there this season); the peak-priced lens was always park-neutral.
+      const hp = L.homePark ?? 1;
       walkSeasons = Array.from({ length: horizon }, (_, i) =>
-        annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1));
+        annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1)
+        * (1 + (hp - 1) * Math.pow(0.75, i + 1)));
     }
     // 2) PEAK-PRICED (anyone whose peak is still AHEAD: prospects and pre-peak
     //    MLB players — a 20-yo rookie on the IL has no meaningful Now to walk
