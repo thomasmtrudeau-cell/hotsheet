@@ -27,6 +27,7 @@ import ScoutingView from '@/components/ScoutingView';
 import TrendsView from '@/components/TrendsView';
 import { TipRotator } from '@/components/Tip';
 import OopsyBadge from '@/components/OopsyBadge';
+import { TREND_PENDING_KEY } from '@/components/TrendsView';
 
 // Rotating first-run tips — one shows at a time, cycling per visit.
 const TIPS: { id: string; node: React.ReactNode }[] = [
@@ -461,6 +462,12 @@ export default function Home() {
   const isRegression = activeGroup === REGRESSION_VIEW;
   const isScouting = activeGroup === SCOUTING_VIEW;
   const isTrends = activeGroup === TRENDS_VIEW;
+  // "Click a name anywhere → chart him on Trends": stash the display name for
+  // TrendsView to consume, then switch to the Trends view.
+  const openTrends = useCallback((name: string) => {
+    try { localStorage.setItem(TREND_PENDING_KEY, name); } catch { /* ignore */ }
+    setActiveGroup(TRENDS_VIEW);
+  }, []);
   const isDiscovery = isCallups || isPromotions || isRisers || isProjections || isTrade || isRegression || isScouting || isTrends;
   // Premium metrics only come back populated for premium accounts, so a
   // non-empty map = premium.
@@ -857,6 +864,7 @@ export default function Home() {
           isPremium={isPremium}
           days={moversDays}
           onDays={setMoversDays}
+          onOpenTrends={isPremium ? openTrends : undefined}
         />
       ) : isRisers ? (
         <RisersView
@@ -866,6 +874,7 @@ export default function Home() {
           loading={risersLoading}
           isPremium={isPremium}
           isFollowing={(name) => isFollowingName(name)}
+          onOpenTrends={openTrends}
         />
       ) : isProjections ? (
         <ProjectionsView
@@ -877,7 +886,7 @@ export default function Home() {
           isFollowing={(name) => isFollowingName(name)}
         />
       ) : isTrade ? (
-        <TradeChecker isPremium={isPremium} isOwner={isOwner} />
+        <TradeChecker isPremium={isPremium} isOwner={isOwner} onOpenTrends={openTrends} />
       ) : isRegression ? (
         <RegressionView
           rows={showPremium ? regression : []}

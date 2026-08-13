@@ -28,9 +28,10 @@ function levelBucket(lvl?: string): Level {
 // for bulk review — the SAME shared pipeline (value-model's liveValue) the Trade
 // Checker uses, so a healthy everyday player grades identically in both. Only the
 // per-player live layers (injury, park, observed PT, saves) are trade-view-only.
-export default function ValueBoard({ settings, isFollowing }: {
+export default function ValueBoard({ settings, isFollowing, onOpenTrends }: {
   settings: LeagueSettings;
   isFollowing: (name: string) => boolean;
+  onOpenTrends?: (name: string) => void; // click a name to chart him on Trends
 }) {
   const [rows, setRows] = useState<BoardRow[]>([]);
   const [loading, setLoading] = useState(false);
@@ -195,7 +196,7 @@ export default function ValueBoard({ settings, isFollowing }: {
               <tr key={r.nameKey + (r.isPitcher ? 'p' : 'h')} className="border-t border-zinc-800/60 hover:bg-zinc-800/30">
                 <td className="px-2 py-1 text-zinc-600 font-mono">{i + 1}</td>
                 <td className="px-2 py-1 text-zinc-100 whitespace-nowrap">
-                  {r.player} <span className="text-zinc-600">{r.isPitcher ? (r.ipg !== undefined && r.ipg < 2.01 ? 'RP' : 'P') : (r.pos ?? 'H')}</span>
+                  <button onClick={() => onOpenTrends?.(r.player)} disabled={!onOpenTrends} className="disabled:cursor-default cursor-pointer enabled:hover:underline decoration-zinc-500 underline-offset-2" title={onOpenTrends ? 'Chart him on Trends' : undefined}>{r.player}</button> <span className="text-zinc-600">{r.isPitcher ? (r.ipg !== undefined && r.ipg < 2.01 ? 'RP' : 'P') : (r.pos ?? 'H')}</span>
                   {isFollowing(r.player) && <span className="text-blue-300" title="In your list"> ★</span>}
                 </td>
                 <td className="px-2 py-1 text-amber-400/80">{r.bucket}</td>

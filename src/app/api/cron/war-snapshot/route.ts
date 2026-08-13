@@ -47,7 +47,7 @@ export async function GET(request: NextRequest) {
 
     // getWarRows already dedupes per (name_key, is_pitcher) preferring the
     // correct (non-"sa") row; this guard just protects the upsert's PK.
-    const byKey = new Map<string, { captured_at: string; name_key: string; display_name: string; is_pitcher: boolean; level: string | null; war: number }>();
+    const byKey = new Map<string, { captured_at: string; name_key: string; display_name: string; is_pitcher: boolean; level: string | null; war: number; wrc: number | null; era20: number | null }>();
     for (const r of rows) {
       const k = `${r.nameKey}|${r.isPitcher}`;
       if (!byKey.has(k)) {
@@ -58,18 +58,30 @@ export async function GET(request: NextRequest) {
           is_pitcher: r.isPitcher,
           level: r.level ?? null,
           war: r.war,
+          wrc: r.wrc ?? null,
+          era20: r.era20 ?? null,
         });
       }
     }
     const records = Array.from(byKey.values());
 
     const sb = createServiceClient();
+    // wrc/era20 columns land via a pending migration — until it's applied,
+    // retry each batch without them so the capture never breaks (see
+    // docs/SECRETS.md-adjacent runbook note in the commit).
+    let rateColsMissing = false;
     for (let i = 0; i < records.length; i += 500) {
-      const { error } = await sb
-        .from('war_snapshots')
-        .upsert(records.slice(i, i + 500), { onConflict: 'captured_at,name_key,is_pitcher' });
+      const batch = records.slice(i, i + 500);
+      let { error } = rateColsMissing
+        ? await sb.from('war_snapshots').upsert(batch.map(({ wrc: _w, era20: _e, ...rest }) => rest), { onConflict: 'captured_at,name_key,is_pitcher' })
+        : await sb.from('war_snapshots').upsert(batch, { onConflict: 'captured_at,name_key,is_pitcher' });
+      if (error && !rateColsMissing && /wrc|era20|column/i.test(error.message)) {
+        rateColsMissing = true;
+        ({ error } = await sb.from('war_snapshots').upsert(batch.map(({ wrc: _w, era20: _e, ...rest }) => rest), { onConflict: 'captured_at,name_key,is_pitcher' }));
+      }
       if (error) throw error;
     }
+    if (rateColsMissing) console.warn('war_snapshots: wrc/era20 columns missing — apply the migration to start rate-trend history');
 
     // Retention: the WAR Trends tab charts long-run movement, so keep ~2 seasons
     // (was 35 days when risers was the only consumer). To bound growth, captures

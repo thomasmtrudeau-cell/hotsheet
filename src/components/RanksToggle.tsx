@@ -11,12 +11,15 @@ import { ProspectRanks, MetricRank } from '@/lib/types';
 // nothing without them. Used on player cards, Trade Checker chips, and
 // Scouting rows; the expanded line is `basis-full`, so inside any flex-wrap
 // row it drops onto its own line instead of stretching the chip row.
-export default function RanksToggle({ ranks, isPitcher, compact = false }: { ranks?: ProspectRanks; isPitcher: boolean; compact?: boolean }) {
+export default function RanksToggle({ ranks, isPitcher, compact = false, hr, sb }: { ranks?: ProspectRanks; isPitcher: boolean; compact?: boolean; hr?: number; sb?: number }) {
   const [open, setOpen] = useState(false);
   if (!ranks) return null;
-  const entries: Array<[string, MetricRank | undefined]> = isPitcher
+  // HR/600 and SB/600 broken out beside the combined line (Tom, 2026-08-13) —
+  // the projection value leads, the universe rank follows.
+  const fmtV = (v?: number) => (v === undefined ? '' : `${Math.round(v)} · `);
+  const entries: Array<[string, MetricRank | undefined, string?]> = isPitcher
     ? [['WAR', ranks.war], ['ERA/20', ranks.era]]
-    : [['WAR', ranks.war], ['wRC+', ranks.wrc], ['HR+SB', ranks.hrSb]];
+    : [['WAR', ranks.war], ['wRC+', ranks.wrc], ['HR+SB', ranks.hrSb], ['HR/600', ranks.hr, fmtV(hr)], ['SB/600', ranks.sb, fmtV(sb)]];
   if (!entries.some(([, r]) => r)) return null;
   return (
     <>
@@ -31,9 +34,10 @@ export default function RanksToggle({ ranks, isPitcher, compact = false }: { ran
       </button>
       {open && (
         <span className={`basis-full flex flex-wrap items-center gap-x-3 gap-y-0.5 ${compact ? 'text-[10px]' : 'text-[11px]'} mt-0.5`}>
-          {entries.map(([label, r]) => r && (
+          {entries.map(([label, r, val]) => r && (
             <span key={label} className="whitespace-nowrap">
               <span className="text-zinc-500">{label}</span>{' '}
+              {val ? <span className="font-mono font-semibold text-zinc-200">{val}</span> : null}
               <span className="font-mono font-semibold text-amber-200">#{r.r.toLocaleString()}</span>
               <span className="text-zinc-600">/{r.of.toLocaleString()}</span>
             </span>

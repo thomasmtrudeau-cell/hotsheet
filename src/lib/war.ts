@@ -243,11 +243,15 @@ function assignProspectRanks(hitters: Map<string, PremiumMetrics>, pitchers: Map
   const hWar = rankBy(hs, (m) => m.war);
   const hWrc = rankBy(hs, (m) => m.peakWrcPlus);
   const hHrSb = rankBy(hs, (m) => (m.hr !== undefined && m.sb !== undefined ? m.hr + m.sb : undefined));
+  const hHr = rankBy(hs, (m) => m.hr);
+  const hSb = rankBy(hs, (m) => m.sb);
   for (const m of hs) {
     const ranks: ProspectRanks = {};
     const w = hWar.get(m); if (w) ranks.war = w;
     const c = hWrc.get(m); if (c) ranks.wrc = c;
     const d = hHrSb.get(m); if (d) ranks.hrSb = d;
+    const h = hHr.get(m); if (h) ranks.hr = h;
+    const b = hSb.get(m); if (b) ranks.sb = b;
     if (ranks.war || ranks.wrc || ranks.hrSb) m.ranks = ranks;
   }
   const pWar = rankBy(ps, (m) => m.war);
@@ -377,6 +381,8 @@ export interface WarRow {
   isPitcher: boolean;
   level?: string;
   war: number;
+  wrc?: number;    // hitters — peak wRC+ (trend history)
+  era20?: number;  // pitchers — peak ERA/20 (trend history)
 }
 
 // Parse one tab into snapshot rows (name + WAR + highest level), deduped by name
@@ -392,6 +398,9 @@ function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[
   const idIdx = header.findIndex((h) => h.toLowerCase() === 'id');
   const warCol = warCols(header, isPitcher);
   const lvlIdx = header.findIndex((h) => h.toLowerCase() === 'highest level');
+  const rateIdx = isPitcher
+    ? header.findIndex((h) => h === 'era 20 tbf/g')
+    : header.findIndex((h) => h === 'wRC+');
   if (nameIdx < 0 || warCol.primary < 0) return [];
   for (let r = 1; r < rows.length; r++) {
     const cells = rows[r];
@@ -401,7 +410,12 @@ function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[
     const key = normalizeName(name);
     const stale = idIdx >= 0 ? isStaleId(cells[idIdx] ?? '') : false;
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
-    byKey.set(key, { nameKey: key, displayName: name, isPitcher, level: lvlIdx >= 0 ? cells[lvlIdx] : undefined, war });
+    const rate = rateIdx >= 0 ? parseFloat(cells[rateIdx]) : NaN;
+    byKey.set(key, {
+      nameKey: key, displayName: name, isPitcher, level: lvlIdx >= 0 ? cells[lvlIdx] : undefined, war,
+      wrc: !isPitcher && Number.isFinite(rate) ? Math.round(rate) : undefined,
+      era20: isPitcher && Number.isFinite(rate) ? Math.round(rate * 100) / 100 : undefined,
+    });
     keptStale.set(key, stale);
   }
   return [...byKey.values()];
@@ -459,7 +473,8 @@ export interface PremiumSnapshot {
 // 'peak hitting raw' hid every established MLB hitter (Kwan 0.0, stale Lee 2.7).
 // v5: 2026-08-07 — pure relievers' WAR now ingested from the sheet's role-priced
 // 'RP WAR' column; flush so starter-workload 20-TBFG reliever WARs don't linger.
-export const SNAPSHOT_VERSION = 5;
+// v6: 2026-08-13 — per-metric HR/600 and SB/600 ranks added to ProspectRanks.
+export const SNAPSHOT_VERSION = 6;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything

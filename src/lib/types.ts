@@ -67,6 +67,8 @@ export interface ProspectRanks {
   war?: MetricRank;
   wrc?: MetricRank;   // hitters — peak wRC+
   hrSb?: MetricRank;  // hitters — combined projected HR + SB
+  hr?: MetricRank;    // hitters — projected HR/600 alone
+  sb?: MetricRank;    // hitters — projected SB/600 alone
   era?: MetricRank;   // pitchers — ERA/20, ranked ascending (1 = lowest)
 }
 
@@ -352,7 +354,7 @@ export interface TrendIndexRow {
   level?: string;
   war: number; // latest
 }
-export interface TrendPoint { at: string; war: number }
+export interface TrendPoint { at: string; war: number; wrc?: number; era20?: number }
 export interface TrendSeries {
   nameKey: string;
   player: string;

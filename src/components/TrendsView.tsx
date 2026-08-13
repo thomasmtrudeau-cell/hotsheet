@@ -119,6 +119,8 @@ function TrendChart({ series }: { series: TrendSeries[] }) {
   );
 }
 
+export const TREND_PENDING_KEY = 'hotsheet_trends_pending'; // display name handed off by "click a name anywhere"
+
 export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) {
   const [index, setIndex] = useState<TrendIndexRow[]>([]);
   const [indexLoading, setIndexLoading] = useState(false);
@@ -126,6 +128,7 @@ export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) 
   const [series, setSeries] = useState<TrendSeries[]>([]);
   const [q, setQ] = useState('');
   const [open, setOpen] = useState(false);
+  const [metric, setMetric] = useState<'war' | 'wrc' | 'era20'>('war');
   const boxRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -154,6 +157,24 @@ export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) 
     try { localStorage.setItem(PICKS_KEY, JSON.stringify(picks)); } catch { /* ignore */ }
     return () => { active = false; };
   }, [picks, isPremium]);
+
+  // A name clicked on the board / call-ups / movers lands here: match it in
+  // the index and add it to the chart, once, then clear the handoff.
+  useEffect(() => {
+    if (!index.length) return;
+    try {
+      const pending = localStorage.getItem(TREND_PENDING_KEY);
+      if (!pending) return;
+      localStorage.removeItem(TREND_PENDING_KEY);
+      const f = pending.trim().toLowerCase();
+      const hit = index.find((r) => r.player.toLowerCase() === f) ?? index.find((r) => r.player.toLowerCase().includes(f));
+      if (hit) {
+        const k = keyOf(hit);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setPicks((prev) => (prev.includes(k) ? prev : [...prev.slice(-(8 - 1)), k]));
+      }
+    } catch { /* ignore */ }
+  }, [index]);
 
   const matches = useMemo(() => {
     const f = q.trim().toLowerCase();
@@ -219,18 +240,48 @@ export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) 
         </div>
       )}
 
+      {/* Metric toggle: WAR (everyone) / wRC+ (hitter picks) / ERA-20 (pitcher picks) */}
+      {picks.length > 0 && (
+        <div className="flex items-center gap-1 mb-3 text-[11px]">
+          {([['war', 'WAR'], ['wrc', 'wRC+'], ['era20', 'ERA/20']] as const).map(([m, label]) => (
+            <button key={m} onClick={() => setMetric(m)}
+              className={`px-2.5 py-1 rounded-full border cursor-pointer transition-colors ${metric === m ? 'border-amber-500/50 text-amber-300 bg-amber-500/10' : 'border-zinc-700 text-zinc-500 hover:text-zinc-300'}`}>
+              {label}
+            </button>
+          ))}
+          {metric !== 'war' && <span className="text-zinc-600 ml-1">{metric === 'wrc' ? 'hitters only' : 'pitchers only'} · history starts Aug 13</span>}
+        </div>
+      )}
+
       {picks.length === 0 ? (
         <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-10 text-center text-sm text-zinc-500">
           Search a player above to chart his projection over time — compare up to 8.
         </div>
       ) : series.length === 0 ? (
         <div className="flex justify-center py-12"><div className="w-6 h-6 border-2 border-zinc-700 border-t-amber-500 rounded-full animate-spin" /></div>
-      ) : (
-        <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <TrendChart series={picks.map((k) => series.find((s) => keyOf(s) === k)).filter(Boolean) as TrendSeries[]} />
-          <p className="text-[10px] text-zinc-600 mt-1">One point per day (latest capture). Peak-WAR projection from ScoutTheStatline — movement means the projection itself changed.</p>
-        </div>
-      )}
+      ) : (() => {
+        // Map the picked metric into the chart's y-value; non-applicable picks
+        // (wRC+ for a pitcher) and captures predating the rate columns drop out.
+        const shown = picks
+          .map((k) => series.find((x) => keyOf(x) === k))
+          .filter((x): x is TrendSeries => Boolean(x))
+          .filter((x) => metric === 'war' || (metric === 'wrc' ? !x.isPitcher : x.isPitcher))
+          .map((x) => metric === 'war' ? x : ({
+            ...x,
+            points: x.points
+              .filter((pt) => (metric === 'wrc' ? pt.wrc !== undefined : pt.era20 !== undefined))
+              .map((pt) => ({ ...pt, war: (metric === 'wrc' ? pt.wrc! : pt.era20!) })),
+          }))
+          .filter((x) => x.points.length > 0);
+        return (
+          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            {shown.length === 0
+              ? <div className="px-4 py-8 text-center text-sm text-zinc-500">No {metric === 'wrc' ? 'hitter' : 'pitcher'} history yet for this metric — rate history starts accruing Aug 13.</div>
+              : <TrendChart series={shown} />}
+            <p className="text-[10px] text-zinc-600 mt-1">One point per day (latest capture). Peak {metric === 'war' ? 'WAR' : metric === 'wrc' ? 'wRC+' : 'ERA/20'} projection from ScoutTheStatline — movement means the projection itself changed.</p>
+          </div>
+        );
+      })()}
     </div>
   );
 }

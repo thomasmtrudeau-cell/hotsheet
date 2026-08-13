@@ -14,7 +14,8 @@ interface MoversListProps {
   showWar?: boolean; // honor the premium metrics toggle (default true)
   isPremium?: boolean; // premium sees real numbers; everyone else a locked chip
   days?: number;              // active date window (1–14)
-  onDays?: (d: number) => void; // change the window
+  onDays?: (d: number) => void;
+  onOpenTrends?: (name: string) => void; // premium: click a name to chart him on Trends // change the window
 }
 
 function fmtDate(d: string): string {
@@ -36,7 +37,7 @@ function levelBadgeClass(sportId: number): string {
   return 'bg-zinc-500/20 text-zinc-300';
 }
 
-export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true, isPremium = false, days, onDays }: MoversListProps) {
+export default function MoversList({ items, onFollow, isFollowing, loading, caption, emptyText, verb, showWar = true, isPremium = false, days, onDays, onOpenTrends }: MoversListProps) {
   if (loading && items.length === 0) {
     return (
       <div className="flex justify-center py-16">
@@ -98,7 +99,7 @@ export default function MoversList({ items, onFollow, isFollowing, loading, capt
                 {isFresh(c.calledUpDate) && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-500/25 text-red-300 animate-pulse">NEW</span>
                 )}
-                <span className="text-sm font-medium text-zinc-100 truncate">{c.fullName}</span>
+                <button onClick={() => onOpenTrends?.(c.fullName)} disabled={!onOpenTrends} className="text-sm font-medium text-zinc-100 truncate text-left disabled:cursor-default cursor-pointer enabled:hover:underline decoration-zinc-500 underline-offset-2" title={onOpenTrends ? "Chart him on Trends" : undefined}>{c.fullName}</button>
                 <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${levelBadgeClass(c.sportId)}`}>{c.level}</span>
                 {following && (
                   <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300" title="Already in your list">★ In your list</span>

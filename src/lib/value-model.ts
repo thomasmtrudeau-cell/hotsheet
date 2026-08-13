@@ -585,7 +585,13 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // price the same career-end odds.
   // Long enough to cover the full-career horizon liveValue projects (the
   // pre-peak Keep shift and the cumulative Overall's run to ~age 43).
-  const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, bar,
+  // CAREER survival is a real-baseball fact, so its quality margin is pinned
+  // to the 20-team/28-keeper baseline bar — using the LEAGUE bar made stars
+  // "die" young in shallow leagues (a 10-team keeper bar is so high that
+  // 34-yo Trout's margin went negative → ~40%/yr hazard → Keep 1.6). The
+  // league's own bar still prices keeper ECONOMICS via netting elsewhere.
+  const survBar = keeperBarFor({ ...s, teams: 20, keepers: 28 }, inp.isPitcher, inp.position);
+  const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, survBar,
     Math.max(KEEPER_HORIZON + Math.max(0, 26 - ((inp.age ?? 26) + 1)),
       Math.min(25, 43 - (inp.age ?? 43))));
   const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar), surv) * growth;
@@ -654,6 +660,7 @@ export interface ValueLayers {
   earnBump?: number;      // prime-age high-WAR buy-low reps nudge; default 1
   platoonDock?: number;   // platoon-role dock; default 1
   homePark?: number;      // home-park run environment; default 1
+  talentLens?: boolean;   // INTERNAL: this call prices the full-opportunity talent season — skip the season engine (it's what's being priced; also prevents recursion)
 }
 
 // Fantasy PRODUCTION rate scaled by playing time — the non-WAR, usage-responsive
@@ -692,7 +699,19 @@ function fantasyProd(inp: ValueInputs, L: ValueLayers, floorFmt?: FormatWeights)
   return Math.max(rateProd + sbBonus, countingProd) * (L.ptCredit ?? 1) * mat;
 }
 
-export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}): { present: number; future: number; overall: number; outlook?: { next2: number; peakSeason: number } } {
+// Structured "why is he priced this way" trace — computed only on demand (the
+// trade card's why-panel). Numbers mirror exactly what the engine used.
+export interface ValueExplain {
+  now: { base: number; marketLed: boolean; fantasy: number; saves: number; ptHaircut: number; injuryMult: number; pvMults: number };
+  engine?: {
+    oppW: number;          // opportunity confidence: 1 = full talent deference (≈5+ WAR bats / 4+ arms, or pre-peak)
+    talentNow: number;     // his skills priced at a FULL everyday role (market/role docks stripped)
+    shift: number;         // cover-the-peak window shift (pre-peak players)
+    seasons: { age: number; observed: number; talent: number; used: number; surv: number }[];
+    overall: { repl: number; baseline: number; surplus: number };
+  };
+}
+export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = {}, withExplain = false): { present: number; future: number; overall: number; outlook?: { next2: number; peakSeason: number }; explain?: ValueExplain } {
   const base = computeValue(inp, s);
   const ptCredit = L.ptCredit ?? 1;
   // Present: the WAR+market base assumes a full-time role, so MLB hitters take a
@@ -729,8 +748,9 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   let outlook: { next2: number; peakSeason: number } | undefined;
   let future: number;
   let overall: number;
+  let explain: ValueExplain | undefined;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  if (inp.age !== undefined) {
+  if (inp.age !== undefined && !L.talentLens) {
     // Seasons to project: through ~age 43 (the cumulative Overall sums the
     // whole career; aging + survival zero the tail out on their own), and
     // never shorter than the pre-peak-shifted Keep window.
@@ -778,30 +798,45 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1)
         * (1 + (hp - 1) * Math.pow(0.75, i + 1)));
     }
-    // 2) PEAK-PRICED (anyone whose peak is still AHEAD: prospects and pre-peak
-    //    MLB players — a 20-yo rookie on the IL has no meaningful Now to walk
-    //    from, the Konnor Griffin case): price his peak WAR / wRC+ / HR / SB
-    //    as an everyday MLB player at peak age through the same machinery that
-    //    prices Now. Market input deliberately dropped (his auction $, if any,
-    //    prices the ROS role, not a peak season) — the WAR-led fallback + the
-    //    production layer at a full role approximate a preseason auction-calc
-    //    price for that season. Peak = that CEILING, undiscounted; his season
-    //    vector bends it by the maturation ramp and the arrival deferral (1.0
-    //    once he's in the majors), so bust/wait risk lives in Keep and Overall.
+    // 2) FULL-OPPORTUNITY (talent) lens — for EVERYONE (Tom, 2026-08-13):
+    //    price his peak WAR / wRC+ / HR / SB / ERA-20 as an everyday MLB
+    //    player through the same machinery that prices Now — market, playing
+    //    time and role docks all stripped. His auction $ and observed role
+    //    describe his CIRCUMSTANCES, not his talent (Emmet Sheehan demoted
+    //    behind the Dodgers' rotation depth is a fact about the Dodgers).
+    //    Pre-peak players price at peak age with the ramp + arrival deferral
+    //    bending the season vector (bust/wait risk lives in Keep/Overall, so
+    //    their Upside stays the undiscounted ceiling); established players
+    //    age their peak metrics along the curve × survival from today.
     let peakSeasons: number[] | undefined;
     let peakBest = 0;
-    if (!L.isMLB || inp.age < 26) {
+    let talentNow = 0;
+    {
       const peakNow = liveValue(
         { ...inp, age: 27, level: 'MLB', marketBaseline: undefined, curWrcPlus: undefined, curEra20: undefined },
-        s, { isMLB: true, ptCredit: 1 },
+        s, { isMLB: true, ptCredit: 1, talentLens: true },
       ).present;
       const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
+      const survT = L.isMLB ? (base.surv ?? []) : []; // prospects: defer already carries the risk
       peakSeasons = Array.from({ length: horizon }, (_, i) =>
-        peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer);
-      peakBest = peakNow;
+        peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1));
+      peakBest = inp.age < 26 ? peakNow : 0;
+      talentNow = peakNow;
     }
-    const seasons = Array.from({ length: horizon }, (_, i) =>
-      Math.max(walkSeasons?.[i] ?? 0, peakSeasons?.[i] ?? 0));
+    // OPPORTUNITY CONFIDENCE (Tom, 2026-08-13): past ~5 WAR (hitters) / ~4
+    // (pitchers — pitcher talent maps more directly onto WAR) an in-prime
+    // player essentially cannot lose his job, so future seasons defer fully
+    // to the fantasy skills; below that, blend from his OBSERVED walk-forward
+    // seasons toward the full-opportunity talent seasons in proportion to the
+    // confidence. Pre-peak/prospects stay fully talent-priced (arrival
+    // deferral already hedges them). The blend can only lift a season — a
+    // player whose observed value exceeds his talent price keeps it.
+    const oppW = !L.isMLB || inp.age < 26 ? 1
+      : clamp(inp.isPitcher ? ((inp.war ?? 0) - 1.5) / 2.5 : ((inp.war ?? 0) - 2) / 3, 0, 1);
+    const seasons = Array.from({ length: horizon }, (_, i) => {
+      const wk = walkSeasons?.[i] ?? 0;
+      return wk + oppW * Math.max(0, (peakSeasons?.[i] ?? 0) - wk);
+    });
     // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
     // seasons (this one excluded) — "what he's worth per year going forward,
     // near years counting most". Same scale as Now by construction. For a
@@ -810,12 +845,42 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     let wSum = 0, vSum = 0, w = 1;
     for (let k = shift; k < shift + KEEPER_HORIZON; k++) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * seasons[k]; }
     future = Math.max(0, vSum / wSum);
-    outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(Math.max(...seasons, peakBest)) };
+    // Upside chip: his best remaining season AT FULL OPPORTUNITY — the
+    // unblended talent lens (plus the walk lens where the market rates him
+    // above it). Keep/Overall use the opportunity-BLENDED seasons above.
+    const upside = Math.max(...(peakSeasons ?? [0]), ...(walkSeasons ?? [0]), peakBest);
+    outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(upside) };
     // Overall: cumulative discounted surplus over the waiver line across the
-    // whole career (see the OV_* block) + the roster-spot baseline.
-    let ovSum = Math.max(0, present - OV_REPL), d = 1;
-    for (const sv of seasons) { d *= OV_DISCOUNT; ovSum += d * Math.max(0, sv - OV_REPL); }
-    overall = Math.min(present, OV_REPL) + ovSum / OV_NORM;
+    // whole career (see the OV_* block) + the roster-spot baseline. The
+    // waiver line scales with league depth (mirrors the trade calc's
+    // depthFactor): in a 10-team league the freely-available player is ~2×
+    // better, so fringe MLB guys stop banking phantom career surplus (Akil
+    // Baddoo out-ranked Trea Turner, 2026-08-13).
+    const ovRepl = OV_REPL * Math.sqrt(560 / Math.max(1, s.teams * s.keepers));
+    let ovSum = Math.max(0, present - ovRepl), d = 1;
+    for (const sv of seasons) { d *= OV_DISCOUNT; ovSum += d * Math.max(0, sv - ovRepl); }
+    overall = Math.min(present, ovRepl) + ovSum / OV_NORM;
+    if (withExplain) {
+      const survAll = base.surv ?? [];
+      explain = {
+        now: {
+          base: base.present, marketLed: inp.marketBaseline !== undefined,
+          fantasy: DYN_W * fantasyProd(inp, L), saves: L.savesPremium ?? 0,
+          ptHaircut, injuryMult, pvMults,
+        },
+        engine: {
+          oppW, talentNow, shift,
+          seasons: seasons.slice(0, 8).map((used, i) => ({
+            age: inp.age! + i + 1,
+            observed: walkSeasons?.[i] ?? 0,
+            talent: peakSeasons?.[i] ?? 0,
+            used,
+            surv: survAll[i] ?? 1,
+          })),
+          overall: { repl: ovRepl, baseline: Math.min(present, ovRepl), surplus: ovSum / OV_NORM },
+        },
+      };
+    }
   } else {
     // LEGACY fallback (age unknown — rare): the old slot-economics keeper value,
     // the durability-tilted ceiling floored by sustained production. Kept only
@@ -832,5 +897,5 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
     overall = overallValue(present, future);
   }
-  return { present, future, overall, outlook };
+  return { present, future, overall, outlook, explain };
 }

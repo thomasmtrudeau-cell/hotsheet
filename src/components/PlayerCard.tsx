@@ -492,7 +492,7 @@ function DailyCard({ stats, onUnfollow, groupControl, premium, oopsy }: { stats:
                 </span>
               )}
               {premium && <PremiumBadges metrics={premium} isPitcher={stats.position === 'P'} />}
-              {premium && <RanksToggle ranks={premium.ranks} isPitcher={stats.position === 'P'} />}
+              {premium && <RanksToggle ranks={premium.ranks} isPitcher={stats.position === 'P'} hr={premium.hr} sb={premium.sb} />}
             </div>
           );
         })()}
@@ -631,7 +631,7 @@ function SeasonCard({ stats, onUnfollow, leagueAvg, groupControl, premium }: { s
         {premium && (
           <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
             <PremiumBadges metrics={premium} isPitcher={stats.isPitcher} />
-            <RanksToggle ranks={premium.ranks} isPitcher={stats.isPitcher} />
+            <RanksToggle ranks={premium.ranks} isPitcher={stats.isPitcher} hr={premium.hr} sb={premium.sb} />
           </div>
         )}
         <div className="text-xs text-zinc-500 mt-1">

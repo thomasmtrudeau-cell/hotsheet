@@ -10,7 +10,8 @@ interface RisersViewProps {
   onWindow: (w: number) => void;
   loading: boolean;
   isPremium: boolean;                         // non-premium sees the teaser instead
-  isFollowing: (name: string) => boolean;     // "in your list" indicator (name match)
+  isFollowing: (name: string) => boolean;
+  onOpenTrends?: (name: string) => void; // click a name to chart him on Trends     // "in your list" indicator (name match)
 }
 
 const WINDOWS = [7, 14, 30];
@@ -20,7 +21,7 @@ const WAR_FLOORS = [
   { label: '2+ WAR', val: 2 },
 ];
 
-export default function RisersView({ risers, window, onWindow, loading, isPremium, isFollowing }: RisersViewProps) {
+export default function RisersView({ risers, window, onWindow, loading, isPremium, isFollowing, onOpenTrends }: RisersViewProps) {
   // Default to 2+ WAR — climbers below that are rarely worth acting on.
   const [minWar, setMinWar] = useState(2);
   // Regular users get the premium preview, not the (empty) board.
@@ -40,7 +41,7 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
         <span className="text-zinc-600 text-xs w-5 shrink-0 text-right">{i + 1}</span>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="text-sm font-medium text-zinc-100 truncate">{r.display_name}</span>
+            <button onClick={() => onOpenTrends?.(r.display_name)} disabled={!onOpenTrends} className="text-sm font-medium text-zinc-100 truncate text-left disabled:cursor-default cursor-pointer enabled:hover:underline decoration-zinc-500 underline-offset-2" title={onOpenTrends ? "Chart him on Trends" : undefined}>{r.display_name}</button>
             {r.level && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400">{r.level}</span>}
             <span className="text-[10px] text-zinc-500">{r.is_pitcher ? 'P' : 'H'}</span>
             {isFollowing(r.display_name) && (

@@ -49,12 +49,25 @@ export async function GET(request: NextRequest) {
     }).filter((w) => w.key);
     if (wanted.length === 0) return NextResponse.json({ series: [] });
 
-    const { data, error } = await sb.from('war_snapshots')
-      .select('name_key, display_name, is_pitcher, captured_at, war')
+    // wrc/era20 are new columns — fall back to the WAR-only select until the
+    // migration lands, so trends never break.
+    let data: Array<{ name_key: string; display_name: string; is_pitcher: boolean; captured_at: string; war: number; wrc?: number | null; era20?: number | null }> | null = null;
+    const withRates = await sb.from('war_snapshots')
+      .select('name_key, display_name, is_pitcher, captured_at, war, wrc, era20')
       .in('name_key', wanted.map((w) => w.key))
       .order('captured_at', { ascending: true })
       .limit(20000);
-    if (error) throw error;
+    if (withRates.error) {
+      const warOnly = await sb.from('war_snapshots')
+        .select('name_key, display_name, is_pitcher, captured_at, war')
+        .in('name_key', wanted.map((w) => w.key))
+        .order('captured_at', { ascending: true })
+        .limit(20000);
+      if (warOnly.error) throw warOnly.error;
+      data = warOnly.data;
+    } else {
+      data = withRates.data;
+    }
 
     const series = wanted.map((w) => {
       const rows = (data ?? []).filter((r) => r.name_key === w.key && r.is_pitcher === w.pitcher);
@@ -62,7 +75,11 @@ export async function GET(request: NextRequest) {
         nameKey: w.key,
         player: rows[rows.length - 1]?.display_name ?? w.key,
         isPitcher: w.pitcher,
-        points: rows.map((r) => ({ at: r.captured_at, war: Number(r.war) })),
+        points: rows.map((r) => ({
+          at: r.captured_at, war: Number(r.war),
+          wrc: r.wrc == null ? undefined : Number(r.wrc),
+          era20: r.era20 == null ? undefined : Number(r.era20),
+        })),
       };
     }).filter((s) => s.points.length > 0);
     return NextResponse.json({ series });
