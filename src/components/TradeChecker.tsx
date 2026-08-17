@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, ValueExplain, presentMaturity, overallValue, ptFragility, earningPtBump, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { liveValue, ValueLayers, ValueExplain, presentMaturity, overallValue, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -31,16 +31,21 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
   const multiElig = Boolean(elig && elig.includes('/'));
   const partTimeC = cShare !== undefined && cShare < 0.8; // catcher haircut eased/removed by his real position mix
   const repsRow = pt !== undefined || ip !== undefined || (role && role.factor < 1 && !injured) || injured || repsAtRisk || belowRepl || multiElig || partTimeC;
+  // Auction-$ display (Tom, 2026-08-17): the value-model scale is a per-season
+  // reference (Overall is normalized specifically so it stays comparable), so
+  // the same $ = FA_LINE + value×DIV translation applies to every chip here.
+  const isRp = isPitcher && m?.ipg !== undefined && m.ipg < 2.01 && !m.rpWar;
+  const usd = (v: number) => `$${Math.round(toAuctionDollars(v, isPitcher, isRp))}`;
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
       <div className="flex flex-wrap items-center gap-1">
         <span className={lbl}>value</span>
-        <Tooltip text="What he's worth to your lineup THIS season."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {pv.toFixed(1)}</span></Tooltip>
-        <Tooltip text="His future seasons combined (this one excluded), on the Now scale — what he's worth PER YEAR going forward, near seasons counting most. For a pre-peak player the window starts at his prime, so he's judged on his peak years (arrival risk is already priced in). Read it as: keep him and he's about this good for you."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {fv.toFixed(1)}</span></Tooltip>
-        {outlook && <Tooltip text="Average of his NEXT TWO seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the priced peak bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {outlook.next2.toFixed(1)}</span></Tooltip>}
+        <Tooltip text="What he's worth to your lineup THIS season, in auction-$ terms."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {usd(pv)}</span></Tooltip>
+        <Tooltip text="His future seasons combined (this one excluded), on the Now scale — what he's worth PER YEAR going forward, near seasons counting most. For a pre-peak player the window starts at his prime, so he's judged on his peak years (arrival risk is already priced in). Read it as: keep him and he's about this good for you."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}</span></Tooltip>
+        {outlook && <Tooltip text="Average of his NEXT TWO seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the priced peak bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
         {getExplain && <button onClick={() => setWhy((w) => w === undefined ? (getExplain() ?? null) : undefined)} className={`${chip} cursor-pointer ${why !== undefined ? 'bg-zinc-600/60 text-zinc-200' : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200'}`} title="Why these numbers? Full season-by-season breakdown">why{why !== undefined ? '▴' : '▾'}</button>}
-        {outlook && <Tooltip text="UPSIDE — his best remaining season at FULL opportunity: wRC+/HR/SB/WAR (pitchers: ERA/20) priced at an everyday MLB role, with his auction $, playing-time and role docks all stripped (they describe his circumstances, not his talent). Keep/Overall blend toward this in proportion to job security — ~5+ WAR bats / ~4+ WAR arms in their prime get full credit; bust/arrival risk for prospects lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {outlook.peakSeason.toFixed(1)}</span></Tooltip>}
+        {outlook && <Tooltip text="UPSIDE — his best remaining season at FULL opportunity: wRC+/HR/SB/WAR (pitchers: ERA/20) priced at an everyday MLB role, with his auction $, playing-time and role docks all stripped (they describe his circumstances, not his talent). Keep/Overall blend toward this in proportion to job security — ~5+ WAR bats / ~4+ WAR arms in their prime get full credit; bust/arrival risk for prospects lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
       </div>
       {why !== undefined && (
         <div className="rounded-lg border border-zinc-700/70 bg-zinc-900/80 p-2 text-[10px] text-zinc-300 space-y-1">
@@ -59,6 +64,7 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
                     <span className="text-zinc-500">Talent at a full role:</span> {why.engine.talentNow.toFixed(1)}
                     {' · '}<span className="text-zinc-500">job-security confidence:</span> {(why.engine.oppW * 100).toFixed(0)}%
                     {why.engine.shift > 0 ? <span className="text-zinc-500"> · Keep window slides {why.engine.shift}yr to his prime</span> : null}
+                    {why.engine.closerBonus > 0 ? <span className="text-zinc-500"> · closer-trajectory proxy +{why.engine.closerBonus.toFixed(1)}</span> : null}
                   </div>
                   <table className="w-full text-right font-mono text-[10px]">
                     <thead><tr className="text-zinc-500"><th className="text-left font-normal">age</th><th className="font-normal">observed</th><th className="font-normal">talent</th><th className="font-normal">used</th><th className="font-normal">surv</th></tr></thead>
@@ -728,6 +734,12 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   // a low-FV/useless prospect (his overall is mostly his FV) falls below and floors,
   // so you can't hack a trade by tossing in throwaway prospects.
   const ovOf = (p: SearchResult) => valueOf(p).overall;
+  const ovUsd = (p: SearchResult) => {
+    const isP = p.primaryPosition === 'P';
+    const mm = metrics[p.id];
+    const isRp = isP && mm?.ipg !== undefined && mm.ipg < 2.01 && !mm.rpWar;
+    return `$${Math.round(toAuctionDollars(ovOf(p), isP, isRp))}`;
+  };
   const ovKeep = PV_KEEP; // a replacement guy's Overall = the roster-spot baseline (zero surplus)
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   // A player contributes his REAL value to a trade, floored at 0. We floor at 0
@@ -801,7 +813,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
           {players.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovUsd(p)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
@@ -811,7 +823,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
           {showFa && usedFAs.map((p) => (
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
-                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovOf(p).toFixed(1)}</span></div>
+                <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovUsd(p)}</span></div>
                 <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
@@ -823,9 +835,9 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
               <div className="min-w-0">
                 <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} roster spot{theoreticalFill === 1 ? '' : 's'} freed <span className="not-italic text-[11px] text-zinc-500">— keep {theoreticalFill === 1 ? 'a player' : 'players'} you&apos;d have cut</span></div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now {pvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep {fvFill(theoreticalFill).toFixed(1)}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall {(theoreticalFill * ovKeep).toFixed(1)}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now ${Math.round(toAuctionDollars(pvFill(theoreticalFill), false, false))}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep ${Math.round(toAuctionDollars(fvFill(theoreticalFill), false, false))}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall ${Math.round(toAuctionDollars(theoreticalFill * ovKeep, false, false))}</span>
                 </div>
               </div>
             </div>

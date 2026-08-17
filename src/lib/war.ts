@@ -1,6 +1,6 @@
 import { FollowedPlayer, PremiumMetrics, ProspectRanks, MetricRank, RegressionRow, HitterRegressionRow, ScoutingRow, ToolGrade, DefGrade } from './types';
-import { AUCTION_VALUES, AuctionRole } from './auction-values';
-import { computeValue, DEFAULT_SETTINGS } from './value-model';
+import { AUCTION_VALUES } from './auction-values';
+import { computeValue, DEFAULT_SETTINGS, FA_LINE, AUCTION_DIV } from './value-model';
 import { getNamePositionPairs } from './player-index';
 
 // Peak WAR pulled live from a published Google Sheet (two tabs). Premium-only;
@@ -84,8 +84,6 @@ function isStaleId(id: string): boolean {
 // Hitter replacement line is $3 (not $5): the $4–5 auction bats are typically guys
 // we don't trust to actually get the playing time, so the real "freely available"
 // line sits lower — anyone above $3 carries some market value.
-const FA_LINE: Record<AuctionRole, number> = { SP: 1, RP: 3, HIT: 3 };
-const AUCTION_DIV = 5; // $ above the FA line per 1.0 of present value
 function marketBaselineFor(auctionId?: string): number | undefined {
   if (!auctionId) return undefined;
   const a = AUCTION_VALUES[auctionId.trim()];
@@ -185,7 +183,11 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     const mkt = marketBaselineFor(idIdx >= 0 ? cells[idIdx] : undefined);
     if (mkt !== undefined) m.marketBaseline = mkt;
     if (defIdx >= 0) { const dv = parseFloat(cells[defIdx]); if (Number.isFinite(dv)) m.defRuns = dv; }
-    if (!isPitcher && idIdx >= 0) { const ap = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()]?.pos; if (ap) m.pos = ap; }
+    if (idIdx >= 0) {
+      const av = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()];
+      if (!isPitcher) { if (av?.pos) m.pos = av.pos; if (av?.pa !== undefined) m.pa = av.pa; }
+      else if (av?.ip !== undefined) m.ip = av.ip;
+    }
     if (ipgIdx >= 0) { const iv = parseFloat(cells[ipgIdx]); if (Number.isFinite(iv)) m.ipg = iv; }
     // PURE-RP WAR (Jordan, 2026-08-07): the sheet's 'RP WAR' column prices the
     // arm at actual reliever usage (no leverage baked in). It's populated for
@@ -758,6 +760,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
       hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
       age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
       defRuns: round(m.defRuns), ipg: round(m.ipg), pos: m.pos, rpWar: m.rpWar,
+      pa: m.pa, ip: m.ip,
     });
   }
   boardCache.set(ck, { at: Date.now(), rows });

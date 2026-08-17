@@ -50,6 +50,15 @@ export interface ValueInputs {
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
 
+// How much an MLB player's projected talent (WAR) alone earns him the benefit
+// of the doubt over his circumstances — 0 unproven, 1 essentially can't lose
+// his job (~5+ WAR bats / ~4+ WAR arms). Shared by the season engine's
+// opportunity-confidence blend (oppW) and fantasyProd's PT-credit floor below,
+// so "how talented is he" means the same thing in both places.
+function talentConfidence(war: number | undefined, isPitcher: boolean): number {
+  return clamp(isPitcher ? ((war ?? 0) - 1.5) / 2.5 : ((war ?? 0) - 2) / 3, 0, 1);
+}
+
 // Keeper value is a DISCOUNTED SUM over the next several seasons, weighting NEXT
 // year far more than distant ones (2027 >> 2030). Each future season is scaled
 // by a gentle aging curve. Because the near years dominate the sum, an aging
@@ -59,6 +68,51 @@ const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n
 // washed, since a low-WAR vet has little annual value to carry forward anyway.
 const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year
 const KEEPER_HORIZON = 7;     // seasons of keeper value considered
+
+// Pure reliever (IP/G < 2.01), UNLESS his WAR already came in role-priced via
+// the sheet's 'RP WAR' column (inp.rpWar) — that figure is usage-correct
+// already, so treating him as a "pure RP" again would double-dock him.
+function isPureReliever(inp: ValueInputs): boolean {
+  return Boolean(inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01 && !inp.rpWar);
+}
+
+// CLOSER TRAJECTORY (Tom, 2026-08-17): elite non-closer relievers (Morejon/
+// Cade-Smith/Muñoz-before-them types) convert to closer at a far higher rate
+// than middle relief, but the model had ZERO forward credit for that — saves
+// value only ever arrives via the LIVE savesPremium layer, which needs an
+// actual observed saves pace, so a shutdown 8th-inning arm with 0 saves reads
+// on ERA/20 alone, same as a mop-up specialist with an identical rate line.
+// This is a SKILL-ONLY PROXY: there's no bullpen depth-chart data (who's the
+// incumbent closer, is there a vacancy) to actually know his odds, so it can't
+// tell "next man up" from "buried behind a 3-year incumbent" — sized to nudge
+// Keep/Upside, not to approximate a real closer's saves credit. Never touches
+// Now (he hasn't gotten the job yet). Zeroed once he already has real saves
+// value (currentSavesPremium) so he isn't credited twice for the same thing.
+const CLOSER_ERA20_ELITE = 3.0;  // full proxy credit at/below this skill level
+const CLOSER_ERA20_BAR = 4.2;    // credit fades to 0 above this (shaky/replacement arm)
+const CLOSER_PROXY_CAP = 1.8;    // well under a real closer's ~5.0 savesPremium ceiling
+function closerTrajectoryBonus(inp: ValueInputs, isRp: boolean, currentSavesPremium: number): number {
+  if (!isRp || currentSavesPremium > 0.5) return 0;
+  const era = inp.era20 ?? inp.curEra20;
+  if (era === undefined) return 0;
+  const conf = clamp((CLOSER_ERA20_BAR - era) / (CLOSER_ERA20_BAR - CLOSER_ERA20_ELITE), 0, 1);
+  return conf * CLOSER_PROXY_CAP;
+}
+
+// Auction-$ display scale — the inverse of war.ts's marketBaselineFor
+// ((auction$ − role FA line) / DIV): turns a value-model number back into its
+// auction-dollar equivalent for the UI. Safe across every chip (Now/Keep/2yr/
+// Upside/Overall) because Overall is deliberately normalized to a per-season
+// reference card specifically so every chip shares this one scale (see the
+// OV_* block below). Exported so war.ts's real marketBaselineFor and this
+// display-only inverse can't drift apart.
+export type AuctionRoleForDisplay = 'SP' | 'RP' | 'HIT';
+export const FA_LINE: Record<AuctionRoleForDisplay, number> = { SP: 1, RP: 3, HIT: 3 };
+export const AUCTION_DIV = 5; // $ above the FA line per 1.0 of value-model scale
+export function toAuctionDollars(value: number, isPitcher: boolean, isRp: boolean): number {
+  const role: AuctionRoleForDisplay = isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
+  return FA_LINE[role] + value * AUCTION_DIV;
+}
 // Pitchers age more gracefully than hitters for keeper purposes — a good 31-yo arm
 // is usually still good at 32 — so their retention plateaus a year longer and
 // declines at −5%/yr instead of −6%. Hitters: flat ≤30, then −6%/yr.
@@ -520,7 +574,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // ingested via the sheet's role-priced 'RP WAR' (inp.rpWar, Jordan 2026-08-07)
   // is already usage-correct — Jordan's RP WAR runs ≈0.55-0.6× the 20-TBFG
   // number, i.e. this dock computed upstream, so docking again double-charges.
-  const isRp = inp.isPitcher && inp.ipg !== undefined && inp.ipg < 2.01 && !inp.rpWar;
+  const isRp = isPureReliever(inp);
   // Two defense-insurance rates. Present keeps a flat 30% of DEF (playing-time
   // safety this season). Keeper keeps 70% × sbAgeFactor — defense doesn't score,
   // but it's what brings the bat's fantasy skills to life through PLAYING TIME
@@ -696,7 +750,17 @@ function fantasyProd(inp: ValueInputs, L: ValueLayers, floorFmt?: FormatWeights)
   const sbBonus = inp.marketBaseline === undefined
     ? (floorFmt?.sbFan ?? 1) * sbAgeFactor(inp.age) * (inp.sb ?? 0) / 18
     : 0;
-  return Math.max(rateProd + sbBonus, countingProd) * (L.ptCredit ?? 1) * mat;
+  // TALENT FLOOR (Tom, 2026-08-13): a proven bat's rate skills don't evaporate
+  // when his workload dips — an established stud whose PT is docked to, say,
+  // 0.5 shouldn't score below a replacement-level regular playing every day at
+  // the same auction $. Floor the credit toward how proven he is (talentConfidence,
+  // the same signal that governs the Keep/Overall opportunity blend), scaled down
+  // so it can meaningfully lift a real-but-partial role without rescuing a truly
+  // NEAR-ZERO one (season-ending IL, buried in the minors) — those describe a guy
+  // who isn't playing at all, which no amount of talent changes THIS season.
+  const rawPt = L.ptCredit ?? 1;
+  const ptCred = rawPt > 0.15 ? Math.max(rawPt, 0.55 * talentConfidence(inp.war, false)) : rawPt;
+  return Math.max(rateProd + sbBonus, countingProd) * ptCred * mat;
 }
 
 // Structured "why is he priced this way" trace — computed only on demand (the
@@ -707,6 +771,7 @@ export interface ValueExplain {
     oppW: number;          // opportunity confidence: 1 = full talent deference (≈5+ WAR bats / 4+ arms, or pre-peak)
     talentNow: number;     // his skills priced at a FULL everyday role (market/role docks stripped)
     shift: number;         // cover-the-peak window shift (pre-peak players)
+    closerBonus: number;   // closer-trajectory proxy credit baked into the seasons below (Keep/Upside only, 0 for non-RPs and active closers)
     seasons: { age: number; observed: number; talent: number; used: number; surv: number }[];
     overall: { repl: number; baseline: number; surplus: number };
   };
@@ -811,6 +876,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     let peakSeasons: number[] | undefined;
     let peakBest = 0;
     let talentNow = 0;
+    let closerBonus = 0;
     {
       const peakNow = liveValue(
         { ...inp, age: 27, level: 'MLB', marketBaseline: undefined, curWrcPlus: undefined, curEra20: undefined },
@@ -818,8 +884,10 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       ).present;
       const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
       const survT = L.isMLB ? (base.surv ?? []) : []; // prospects: defer already carries the risk
+      closerBonus = closerTrajectoryBonus(inp, isPureReliever(inp), L.savesPremium ?? 0);
       peakSeasons = Array.from({ length: horizon }, (_, i) =>
-        peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1));
+        peakNow * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1)
+        + closerBonus * (survT[i] ?? 1));
       peakBest = inp.age < 26 ? peakNow : 0;
       talentNow = peakNow;
     }
@@ -831,8 +899,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // confidence. Pre-peak/prospects stay fully talent-priced (arrival
     // deferral already hedges them). The blend can only lift a season — a
     // player whose observed value exceeds his talent price keeps it.
-    const oppW = !L.isMLB || inp.age < 26 ? 1
-      : clamp(inp.isPitcher ? ((inp.war ?? 0) - 1.5) / 2.5 : ((inp.war ?? 0) - 2) / 3, 0, 1);
+    const oppW = !L.isMLB || inp.age < 26 ? 1 : talentConfidence(inp.war, inp.isPitcher);
     const seasons = Array.from({ length: horizon }, (_, i) => {
       const wk = walkSeasons?.[i] ?? 0;
       return wk + oppW * Math.max(0, (peakSeasons?.[i] ?? 0) - wk);
@@ -869,7 +936,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
           ptHaircut, injuryMult, pvMults,
         },
         engine: {
-          oppW, talentNow, shift,
+          oppW, talentNow, shift, closerBonus,
           seasons: seasons.slice(0, 8).map((used, i) => ({
             age: inp.age! + i + 1,
             observed: walkSeasons?.[i] ?? 0,
