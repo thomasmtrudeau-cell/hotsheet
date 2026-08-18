@@ -96,6 +96,8 @@ export interface PremiumMetrics {
   rpWar?: boolean;         // war came from the role-priced 'RP WAR' column (pure RP) — value model must not dock the role again
   level?: string;          // highest level (for proximity / present-level factor)
   marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
+  pa?: number;             // hitters — auction export's rest-of-season PA (Value Board's only PT signal; no live game log there)
+  ip?: number;             // pitchers — auction export's rest-of-season IP (same)
 }
 
 // A starting pitcher's matchup today: the opposing lineup's offense + park, from
