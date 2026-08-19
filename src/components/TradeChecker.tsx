@@ -45,15 +45,25 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
         <Tooltip text="His future seasons combined (this one excluded), on the Now scale — what he's worth PER YEAR going forward, near seasons counting most. For a pre-peak player the window starts at his prime, so he's judged on his peak years (arrival risk is already priced in). Read it as: keep him and he's about this good for you."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}</span></Tooltip>
         {outlook && <Tooltip text="Average of his NEXT TWO seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the priced peak bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
         {getExplain && <button onClick={() => setWhy((w) => w === undefined ? (getExplain() ?? null) : undefined)} className={`${chip} cursor-pointer ${why !== undefined ? 'bg-zinc-600/60 text-zinc-200' : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200'}`} title="Why these numbers? Full season-by-season breakdown">why{why !== undefined ? '▴' : '▾'}</button>}
-        {outlook && <Tooltip text="UPSIDE — his best remaining season at FULL opportunity: wRC+/HR/SB/WAR (pitchers: ERA/20) priced at an everyday MLB role, with his auction $, playing-time and role docks all stripped (they describe his circumstances, not his talent). Keep/Overall blend toward this in proportion to job security — ~5+ WAR bats / ~4+ WAR arms in their prime get full credit; bust/arrival risk for prospects lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
+        {outlook && <Tooltip text="UPSIDE — his full-PT dollar ceiling from CATEGORY PRODUCTION ALONE: wRC+/HR/SB (pitchers: ERA/20), no WAR, no park, no market $ — his circumstances stripped out entirely, just the bat/arm. Keep/Overall blend toward this in proportion to job security — ~5+ WAR bats / ~4+ WAR arms in their prime get full credit; bust/arrival risk for prospects lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
       </div>
       {why !== undefined && (
         <div className="rounded-lg border border-zinc-700/70 bg-zinc-900/80 p-2 text-[10px] text-zinc-300 space-y-1">
           {!why ? <div>No breakdown available (age unknown — legacy path).</div> : (
             <>
               <div>
-                <span className="text-zinc-500">Now:</span> {why.now.marketLed ? 'market-led' : 'WAR-led (not in auction export)'} base {why.now.base.toFixed(1)}
-                {' + '}production {why.now.fantasy.toFixed(1)}{why.now.saves > 0 ? ` + saves ${why.now.saves.toFixed(1)}` : ''}
+                {why.now.rateMode ? (
+                  <>
+                    <span className="text-zinc-500">Now:</span> ${why.now.ratePerPA?.toFixed(2)}/PA × {((why.now.paFrac ?? 0) * 100).toFixed(0)}% of full-time
+                    {' · '}job-security confidence {(why.now.conf * 100).toFixed(0)}%
+                  </>
+                ) : (
+                  <>
+                    <span className="text-zinc-500">Now:</span> {why.now.marketLed ? 'market-led' : 'WAR-led (not in auction export)'} base {why.now.base.toFixed(1)}
+                    {' × '}confidence {(why.now.conf * 100).toFixed(0)}%
+                    {why.now.fantasy > 0 ? ` + production ${why.now.fantasy.toFixed(1)}` : ''}{why.now.saves > 0 ? ` + saves ${why.now.saves.toFixed(1)}` : ''}
+                  </>
+                )}
                 {why.now.ptHaircut < 1 ? ` × PT ${why.now.ptHaircut.toFixed(2)}` : ''}
                 {why.now.injuryMult < 1 ? ` × injury ${why.now.injuryMult.toFixed(2)}` : ''}
                 {Math.abs(why.now.pvMults - 1) > 0.01 ? ` × role/park ${why.now.pvMults.toFixed(2)}` : ''}
@@ -76,7 +86,7 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
                   </table>
                   <div className="text-zinc-500">
                     Keep = per-season avg of the “used” column over 7 seasons, next season weighted most (0.72/yr).
-                    Overall = {why.engine.overall.baseline.toFixed(1)} roster baseline + {why.engine.overall.surplus.toFixed(1)} career surplus over the {why.engine.overall.repl.toFixed(1)} waiver line (0.85/yr, whole career). Upside = best talent season.
+                    Overall = {why.engine.overall.baseline.toFixed(1)} roster baseline + {why.engine.overall.surplus.toFixed(1)} career surplus over the {why.engine.overall.repl.toFixed(1)} waiver line (front-loaded: this season + next weighted most, 0.85/yr after that). Upside = category-only ceiling (wRC+/HR/SB, no WAR/park/market).
                   </div>
                 </>
               )}
@@ -349,7 +359,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
       war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
-      defRuns: m.defRuns, ipg: m.ipg,
+      defRuns: m.defRuns, ipg: m.ipg, pa: m.pa, auctionRaw: m.auctionRaw,
       catcherShare: catcherShares[p.id],
     };
   };

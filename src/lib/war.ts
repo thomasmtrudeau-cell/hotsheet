@@ -185,6 +185,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     if (defIdx >= 0) { const dv = parseFloat(cells[defIdx]); if (Number.isFinite(dv)) m.defRuns = dv; }
     if (idIdx >= 0) {
       const av = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()];
+      if (av) m.auctionRaw = av.d;
       if (!isPitcher) { if (av?.pos) m.pos = av.pos; if (av?.pa !== undefined) m.pa = av.pa; }
       else if (av?.ip !== undefined) m.ip = av.ip;
     }
@@ -206,6 +207,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         isPitcher, war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
         hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
         age: m.age, level: m.level, marketBaseline: m.marketBaseline,
+        pa: m.pa, auctionRaw: m.auctionRaw,
       }, DEFAULT_SETTINGS);
       m.presentValue = tv.present; m.futureValue = tv.future;
     }
@@ -760,7 +762,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
       hr: round(m.hr), sb: round(m.sb), curWrcPlus: m.curWrcPlus, curEra20: round(m.curEra20),
       age: m.age, level: m.level, marketBaseline: round(m.marketBaseline),
       defRuns: round(m.defRuns), ipg: round(m.ipg), pos: m.pos, rpWar: m.rpWar,
-      pa: m.pa, ip: m.ip,
+      pa: m.pa, ip: m.ip, auctionRaw: round(m.auctionRaw),
     });
   }
   boardCache.set(ck, { at: Date.now(), rows });

@@ -98,6 +98,7 @@ export interface PremiumMetrics {
   marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
   pa?: number;             // hitters — auction export's rest-of-season PA (Value Board's only PT signal; no live game log there)
   ip?: number;             // pitchers — auction export's rest-of-season IP (same)
+  auctionRaw?: number;     // the auction $ itself, UNFLOORED (can be negative) — Now decomposes this into a per-PA rate; marketBaseline has already floored the below-replacement signal away
 }
 
 // A starting pitcher's matchup today: the opposing lineup's offense + park, from
