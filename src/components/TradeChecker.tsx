@@ -744,12 +744,17 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   // a low-FV/useless prospect (his overall is mostly his FV) falls below and floors,
   // so you can't hack a trade by tossing in throwaway prospects.
   const ovOf = (p: SearchResult) => valueOf(p).overall;
-  const ovUsd = (p: SearchResult) => {
+  // Shared role-aware $ conversion for a player's raw value-model number —
+  // used for both the per-player chips and the side-total/verdict lines below,
+  // so a mixed hitter/pitcher roster sums correctly (each player's own FA_LINE
+  // floor applies to HIS contribution, not once to the total).
+  const usdOf = (p: SearchResult, raw: number) => {
     const isP = p.primaryPosition === 'P';
     const mm = metrics[p.id];
     const isRp = isP && mm?.ipg !== undefined && mm.ipg < 2.01 && !mm.rpWar;
-    return `$${Math.round(toAuctionDollars(ovOf(p), isP, isRp, settings))}`;
+    return toAuctionDollars(raw, isP, isRp, settings);
   };
+  const ovUsd = (p: SearchResult) => `$${Math.round(usdOf(p, ovOf(p)))}`;
   const ovKeep = PV_KEEP; // a replacement guy's Overall = the roster-spot baseline (zero surplus)
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   // A player contributes his REAL value to a trade, floored at 0. We floor at 0
@@ -781,10 +786,34 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + fvContrib(p), 0) + fvFill(theoreticalFill);
     return t;
   };
+  // $ display totals (Tom, 2026-08-19) — each player's OWN raw contribution is
+  // converted to $ before summing (his role sets his FA_LINE floor), not the
+  // other way around: a mixed hitter/pitcher side can't just have its raw-scale
+  // total scaled by one flat conversion. The fairness MATH below (pvDiff/
+  // fvDiff/ovDiff, the 0.05 "even" threshold, replacement floors) stays on the
+  // raw scale, untouched — only the on-screen numbers are dollarized.
+  const sumPvUsd = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + usdOf(p, pvContrib(p)), 0);
+    if (side === openedSide) {
+      t += usedFAs.reduce((acc, p) => acc + usdOf(p, pvContrib(p)), 0);
+      t += toAuctionDollars(pvFill(theoreticalFill), false, false, settings);
+    }
+    return t;
+  };
+  const sumFvUsd = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + usdOf(p, fvContrib(p)), 0);
+    if (side === openedSide) {
+      t += usedFAs.reduce((acc, p) => acc + usdOf(p, fvContrib(p)), 0);
+      t += toAuctionDollars(fvFill(theoreticalFill), false, false, settings);
+    }
+    return t;
+  };
   const pvDiff = sumPv(sideA, 'A') - sumPv(sideB, 'B');
   const fvDiff = sumFv(sideA, 'A') - sumFv(sideB, 'B');
-  const edge = (d: number, unit: string) =>
-    Math.abs(d) < 0.05 ? `${unit}: even` : `${unit}: ${d > 0 ? 'you get' : 'you give'} +${Math.abs(d).toFixed(1)}`;
+  const pvDiffUsd = sumPvUsd(sideA, 'A') - sumPvUsd(sideB, 'B');
+  const fvDiffUsd = sumFvUsd(sideA, 'A') - sumFvUsd(sideB, 'B');
+  const edge = (dRaw: number, dUsd: number, unit: string) =>
+    Math.abs(dRaw) < 0.05 ? `${unit}: even` : `${unit}: ${dRaw > 0 ? 'you get' : 'you give'} +$${Math.round(Math.abs(dUsd))}`;
 
   // ---- Overall: the single, build-agnostic dynasty asset value — cumulative
   // discounted surplus over the waiver line across the player's whole career
@@ -798,9 +827,20 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + (theoreticalFill * ovKeep);
     return t;
   };
+  const sumOvUsd = (s: SearchResult[], side: Side) => {
+    let t = s.reduce((acc, p) => acc + usdOf(p, ovContrib(p)), 0);
+    if (side === openedSide) {
+      t += usedFAs.reduce((acc, p) => acc + usdOf(p, ovContrib(p)), 0);
+      t += toAuctionDollars(theoreticalFill * ovKeep, false, false, settings);
+    }
+    return t;
+  };
   const ovA = sumOv(sideA, 'A');
   const ovB = sumOv(sideB, 'B');
+  const ovAUsd = sumOvUsd(sideA, 'A');
+  const ovBUsd = sumOvUsd(sideB, 'B');
   const ovDiff = ovA - ovB;
+  const ovDiffUsd = ovAUsd - ovBUsd;
 
   const renderColumn = (side: Side, players: SearchResult[]) => {
     const isOpened = side === openedSide;
@@ -811,9 +851,9 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
       <div className="flex items-center justify-between mb-2">
         <span className="text-xs font-semibold text-zinc-300">You {side === 'A' ? 'get' : 'give'}</span>
         <span className="text-[11px] font-bold inline-flex gap-1">
-          <Tooltip text="Total this-season value on this side."><span className="text-blue-200">Now {sumPv(players, side).toFixed(1)}</span></Tooltip> ·
-          <Tooltip text="Total keeper value on this side."><span className="text-fuchsia-200">Keep {sumFv(players, side).toFixed(1)}</span></Tooltip> ·
-          <Tooltip text={ovTitle}><span className="text-orange-300">Overall {sumOv(players, side).toFixed(1)}</span></Tooltip>
+          <Tooltip text="Total this-season value on this side."><span className="text-blue-200">Now ${Math.round(sumPvUsd(players, side))}</span></Tooltip> ·
+          <Tooltip text="Total keeper value on this side."><span className="text-fuchsia-200">Keep ${Math.round(sumFvUsd(players, side))}</span></Tooltip> ·
+          <Tooltip text={ovTitle}><span className="text-orange-300">Overall ${Math.round(sumOvUsd(players, side))}</span></Tooltip>
         </span>
       </div>
       {players.length === 0 && !showFa && !showTheoretical ? (
@@ -968,17 +1008,17 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
         const bigger = Math.max(ovA, ovB, 0.1);
         const fair = Math.abs(ovDiff) < 0.08 * bigger || Math.abs(ovDiff) < 0.5;
         const verdictColor = fair ? 'text-zinc-200' : ovDiff > 0 ? 'text-emerald-300' : 'text-rose-300';
-        const verdict = fair ? 'Fair trade' : ovDiff > 0 ? `Favors you +${ovDiff.toFixed(1)}` : `Favors them +${(-ovDiff).toFixed(1)}`;
+        const verdict = fair ? 'Fair trade' : ovDiff > 0 ? `Favors you +$${Math.round(Math.abs(ovDiffUsd))}` : `Favors them +$${Math.round(Math.abs(ovDiffUsd))}`;
         return (
           <div className="text-center mb-4">
             <div className={`text-2xl font-bold ${verdictColor}`}>{verdict}</div>
             <div className="text-base font-semibold text-zinc-300 mt-0.5">
-              <Tooltip text={ovTitle}><span>Overall <span className="text-orange-300">{ovA.toFixed(1)}</span> <span className="text-zinc-500">vs</span> <span className="text-orange-200/80">{ovB.toFixed(1)}</span></span></Tooltip>
+              <Tooltip text={ovTitle}><span>Overall <span className="text-orange-300">${Math.round(ovAUsd)}</span> <span className="text-zinc-500">vs</span> <span className="text-orange-200/80">${Math.round(ovBUsd)}</span></span></Tooltip>
             </div>
             {/* Read the line that fits your team: contending → Now, rebuilding → Keeper. */}
             <div className="text-[12px] mt-1.5 flex flex-wrap justify-center gap-x-4">
-              <Tooltip text="Win-now value — read this if you're contending."><span className="text-blue-200/80">{edge(pvDiff, 'Now')}</span></Tooltip>
-              <Tooltip text="Keeper value — read this if you're rebuilding."><span className="text-fuchsia-200/80">{edge(fvDiff, 'Keeper')}</span></Tooltip>
+              <Tooltip text="Win-now value — read this if you're contending."><span className="text-blue-200/80">{edge(pvDiff, pvDiffUsd, 'Now')}</span></Tooltip>
+              <Tooltip text="Keeper value — read this if you're rebuilding."><span className="text-fuchsia-200/80">{edge(fvDiff, fvDiffUsd, 'Keeper')}</span></Tooltip>
             </div>
           </div>
         );

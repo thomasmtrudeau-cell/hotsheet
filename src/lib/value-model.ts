@@ -1067,9 +1067,8 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       } else {
         // Pitchers, and any hitter without a real auction-$ sample: legacy
         // walk-forward anchor (WAR/market blend), now consistently carrying
-        // the job-security confidence multiplier `conf` computed above, and
-        // skipping the production layer when in-export (same double-count fix
-        // as Now — an in-export pitcher's $ already prices his rate).
+        // the job-security confidence multiplier `conf` computed above (via
+        // base.present), with no separate production layer — see below.
         const injured = (L.injuryMult ?? 1) < 1;
         const oL = injured ? { ...L, ptCredit: 1 } : L;
         const oHaircut = !inp.isPitcher ? 0.6 + 0.4 * (oL.ptCredit ?? 1) : 1;
@@ -1087,8 +1086,18 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         const oPvMults = (injured ? (L.armFvMult ?? 1) : (L.armPvMult ?? 1))
           * (L.ptDockEff ?? 1) * (L.jobSecurity ?? 1) * (L.earnBump ?? 1)
           * (L.platoonDock ?? 1);
-        const oProdTerm = inExport ? 0 : DYN_W * fantasyProd(inp, oL, FORMAT[s.format]);
-        const anchorPv = (oBase * oHaircut + oProdTerm + (L.savesPremium ?? 0)) * oPvMults;
+        // No production top-up here regardless of export status (Tom, 2026-08-19):
+        // adding it back for the NOT-in-export case reintroduced the exact double-
+        // count this pass was fixing — a young player absent from the export with
+        // big current SB/HR numbers but a low current-maturity shape got that
+        // production credit divided by his small today's-shape and re-inflated
+        // across future seasons, blowing PAST his own category-only ceiling
+        // (Lara's walk-forward read ~5.7 vs an Upside ceiling of ~3.3 — Keep
+        // exceeded Upside, which should be structurally impossible). The peak/
+        // talent lens below already prices his category production cleanly
+        // (it's the same number Upside uses); walkSeasons only needs to answer
+        // "how good is his WAR/market read," not re-litigate his category stats.
+        const anchorPv = (oBase * oHaircut + (L.savesPremium ?? 0)) * oPvMults;
         const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
         // Today's park is a good bet for NEXT season and a coin flip five years
         // out — players change uniforms ~25%/yr (trades, free agency) — so the
@@ -1138,9 +1147,15 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // current standing, not a Lara-style peak-WAR overcredit; pitchers still
     // use peak WAR directly (skill translates close to mature value fast).
     const oppW = !L.isMLB || inp.age < 26 ? 1 : talentConfidence(currentWarProxy(inp, L.rosWrc), inp.isPitcher);
+    // Capped at the ceiling lens (Tom, 2026-08-19): peakSeasons IS the full-
+    // opportunity ceiling for that season — no blend should be able to exceed
+    // it, walk-forward included. Mostly a belt-and-suspenders invariant now
+    // that the anchor fix above addresses the actual cause, but a real one:
+    // "used" exceeding "talent" should be structurally impossible.
     const seasons = Array.from({ length: horizon }, (_, i) => {
       const wk = walkSeasons?.[i] ?? 0;
-      return wk + oppW * Math.max(0, (peakSeasons?.[i] ?? 0) - wk);
+      const peak = peakSeasons?.[i] ?? 0;
+      return Math.min(peak, wk + oppW * Math.max(0, peak - wk));
     });
     // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
     // seasons (this one excluded) — "what he's worth per year going forward,
