@@ -478,7 +478,10 @@ export interface PremiumSnapshot {
 // v5: 2026-08-07 — pure relievers' WAR now ingested from the sheet's role-priced
 // 'RP WAR' column; flush so starter-workload 20-TBFG reliever WARs don't linger.
 // v6: 2026-08-13 — per-metric HR/600 and SB/600 ranks added to ProspectRanks.
-export const SNAPSHOT_VERSION = 6;
+// v7: 2026-08-19 — auctionRaw added (Now's rate×PA decomposition needs it);
+// flush so cached snapshots without it don't silently fall back to the old
+// market/WAR blend forever (Rafaela read $21 instead of $17 on a v6 snapshot).
+export const SNAPSHOT_VERSION = 7;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
