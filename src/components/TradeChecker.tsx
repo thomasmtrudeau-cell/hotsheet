@@ -21,7 +21,7 @@ interface TradeCheckerProps {
 
 type Side = 'A' | 'B';
 
-function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare, getExplain }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next2: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number; getExplain?: () => ValueExplain | undefined }) {
+function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare, getExplain, settings }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next2: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number; getExplain?: () => ValueExplain | undefined; settings: LeagueSettings }) {
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   const [why, setWhy] = useState<ValueExplain | null | undefined>(undefined); // undefined = closed
@@ -35,7 +35,7 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
   // reference (Overall is normalized specifically so it stays comparable), so
   // the same $ = FA_LINE + value×DIV translation applies to every chip here.
   const isRp = isPitcher && m?.ipg !== undefined && m.ipg < 2.01 && !m.rpWar;
-  const usd = (v: number) => `$${Math.round(toAuctionDollars(v, isPitcher, isRp))}`;
+  const usd = (v: number) => `$${Math.round(toAuctionDollars(v, isPitcher, isRp, settings))}`;
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
@@ -748,7 +748,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     const isP = p.primaryPosition === 'P';
     const mm = metrics[p.id];
     const isRp = isP && mm?.ipg !== undefined && mm.ipg < 2.01 && !mm.rpWar;
-    return `$${Math.round(toAuctionDollars(ovOf(p), isP, isRp))}`;
+    return `$${Math.round(toAuctionDollars(ovOf(p), isP, isRp, settings))}`;
   };
   const ovKeep = PV_KEEP; // a replacement guy's Overall = the roster-spot baseline (zero surplus)
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
@@ -824,7 +824,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
             <div key={p.id} className="flex items-start justify-between gap-2">
               <div className="min-w-0">
                 <div className="text-sm text-zinc-100 truncate">{p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''}</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovUsd(p)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} settings={settings} />
               </div>
               <button onClick={() => remove(p.id, side)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove">✕</button>
             </div>
@@ -834,7 +834,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
             <div key={p.id} className="flex items-start justify-between gap-2 border-t border-dashed border-zinc-800 pt-2">
               <div className="min-w-0">
                 <div className="text-sm text-emerald-200/90 truncate">＋ {p.fullName} <span className="text-[11px] text-zinc-500">{p.primaryPosition}{metrics[p.id]?.age !== undefined ? ` · ${Math.round(metrics[p.id]!.age!)}` : ''}{p.parentOrgAbbrev ? ` · ${p.parentOrgAbbrev}` : p.sportId === 1 ? ' · MLB' : ''} · FA add</span> <span className="text-[13px] font-bold text-orange-300">Overall {ovUsd(p)}</span></div>
-                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} />
+                <Chips m={metrics[p.id]} isPitcher={p.primaryPosition === 'P'} pv={pvOf(p)} fv={fvOf(p)} outlook={outlookOf(p)} pending={!loadedIds.has(p.id)} saves={savesPace[p.id]} pt={estRosPA(p)?.pa} ip={estRosIP(p)} ptBlended={estRosPA(p)?.blended} injured={Boolean(injuries[p.id])} longTermIL={seasonEnding(p)} armRisk={armRiskOf(p) !== 1} belowRepl={belowRepl(p)} elig={metrics[p.id]?.pos} repsAtRisk={repsRiskOf(p).atRisk} riskText={repsRiskOf(p).text} role={establishedRegular(p) ? undefined : roles[p.id]} cShare={catcherShares[p.id]} getExplain={() => liveValue(inputsOf(p), settings, layersOf(p), true).explain} settings={settings} />
               </div>
               <button onClick={() => removeFa(p.id)} className="shrink-0 text-zinc-600 hover:text-red-400 cursor-pointer text-sm" title="Remove FA add">✕</button>
             </div>
@@ -845,9 +845,9 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
               <div className="min-w-0">
                 <div className="text-sm text-zinc-400 italic truncate">+{theoreticalFill} roster spot{theoreticalFill === 1 ? '' : 's'} freed <span className="not-italic text-[11px] text-zinc-500">— keep {theoreticalFill === 1 ? 'a player' : 'players'} you&apos;d have cut</span></div>
                 <div className="flex flex-wrap gap-1 mt-0.5">
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now ${Math.round(toAuctionDollars(pvFill(theoreticalFill), false, false))}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep ${Math.round(toAuctionDollars(fvFill(theoreticalFill), false, false))}</span>
-                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall ${Math.round(toAuctionDollars(theoreticalFill * ovKeep, false, false))}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-blue-500/15 text-blue-300/80">Now ${Math.round(toAuctionDollars(pvFill(theoreticalFill), false, false, settings))}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-fuchsia-500/15 text-fuchsia-300/80">Keep ${Math.round(toAuctionDollars(fvFill(theoreticalFill), false, false, settings))}</span>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-orange-500/15 text-orange-300/80" title={ovTitle}>Overall ${Math.round(toAuctionDollars(theoreticalFill * ovKeep, false, false, settings))}</span>
                 </div>
               </div>
             </div>

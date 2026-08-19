@@ -113,9 +113,21 @@ function closerTrajectoryBonus(inp: ValueInputs, isRp: boolean, currentSavesPrem
 export type AuctionRoleForDisplay = 'SP' | 'RP' | 'HIT';
 export const FA_LINE: Record<AuctionRoleForDisplay, number> = { SP: 1, RP: 3, HIT: 3 };
 export const AUCTION_DIV = 5; // $ above the FA line per 1.0 of value-model scale
-export function toAuctionDollars(value: number, isPitcher: boolean, isRp: boolean): number {
+// How much shallower/deeper than the 560-slot (20-team × 28-keeper) reference
+// league this one is — >1 in a shallower league (fewer roster spots means a
+// stronger player sits on the wire). Already the established convention for
+// shifting a REPLACEMENT-LEVEL bar with league depth (keeperBarFor,
+// replacementWar, Overall's waiver line all use it). Tom, 2026-08-19: a fixed
+// per-team auction budget means dollars-per-roster-slot stays roughly constant
+// regardless of team count (total $ and total slots both scale with team
+// count) — so this factor belongs on the REPLACEMENT FLOOR (FA_LINE), not on
+// the $-per-unit conversion above it (AUCTION_DIV stays fixed).
+export function depthFactor(s: LeagueSettings): number {
+  return Math.sqrt(560 / Math.max(1, s.teams * s.keepers));
+}
+export function toAuctionDollars(value: number, isPitcher: boolean, isRp: boolean, s: LeagueSettings = DEFAULT_SETTINGS): number {
   const role: AuctionRoleForDisplay = isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
-  return FA_LINE[role] + value * AUCTION_DIV;
+  return FA_LINE[role] * depthFactor(s) + value * AUCTION_DIV;
 }
 
 // ---- NOW (Tom, 2026-08-18): rate × confidence-adjusted playing time ----
@@ -210,9 +222,9 @@ function hitterRatePerPA(inp: ValueInputs): number | undefined {
 // past what the sheet's own PA implies) or produce a negative surplus (a
 // below-replacement rate scaled up by real playing time is a real negative
 // signal, e.g. Lara) — floored at 0 like every other present-value path.
-function presentFromRateAndPa(rateDollarPerPA: number, paFrac: number, isPitcher: boolean, isRp: boolean): number {
+function presentFromRateAndPa(rateDollarPerPA: number, paFrac: number, isPitcher: boolean, isRp: boolean, s: LeagueSettings): number {
   const role: AuctionRoleForDisplay = isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
-  const fullPtSurplus = rateDollarPerPA * PA_CEILING - FA_LINE[role]; // can be negative
+  const fullPtSurplus = rateDollarPerPA * PA_CEILING - FA_LINE[role] * depthFactor(s); // can be negative
   return Math.max(0, fullPtSurplus * clamp(paFrac, 0, 1.15)) / AUCTION_DIV;
 }
 
@@ -792,7 +804,16 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // age (a 21-yo's win-now value ≠ his age-27 projection). FV keeps the full
   // ceiling; this only touches what he's worth NOW.
   const warPv = Math.max(0, fWar - replacementWar(s)) * 1.8 * lvl * presentMaturity(inp.age) * (isRp ? 0.55 : 1);
-  const mkt = inp.marketBaseline ?? 0;
+  // Recomputed fresh from the RAW $ at the league's live depth-scaled FA_LINE
+  // (Tom, 2026-08-19) rather than trusting the pre-baked marketBaseline (baked
+  // server-side against DEFAULT_SETTINGS) — this is the path EVERY pitcher
+  // uses, so without this a shallow-league pitcher would silently price off
+  // the 20-team replacement floor. Falls back to the pre-baked value only when
+  // auctionRaw isn't available (legacy cached payloads).
+  const mktRole: AuctionRoleForDisplay = inp.isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
+  const mkt = inp.auctionRaw !== undefined
+    ? Math.max(0, inp.auctionRaw - FA_LINE[mktRole] * depthFactor(s)) / AUCTION_DIV
+    : (inp.marketBaseline ?? 0);
   const warProxy = currentWarProxy(inp);
   // A hitter with a real (≥15 PA) auction-export sample gets priced by
   // DECOMPOSING that $ into a per-PA rate and re-applying it at his (confidence-
@@ -807,7 +828,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   if (hitterRate !== undefined) {
     const paFrac = inp.pa !== undefined ? inp.pa / PA_CEILING : 1;
     const conf = jobSecurityConfidence(warProxy, false, paFrac);
-    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false);
+    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false, s);
   } else {
     const conf = jobSecurityConfidence(warProxy, inp.isPitcher);
     // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
@@ -969,7 +990,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // now-narrower, PA-gated confidence keeps the "he'll be fine" nudge modest.
     paFrac = L.ptCredit !== undefined ? L.ptCredit : (inp.pa !== undefined ? inp.pa / PA_CEILING : 1);
     conf = jobSecurityConfidence(warProxy, false, paFrac);
-    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false) * injuryMult * pvMults;
+    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false, s) * injuryMult * pvMults;
   } else {
     conf = jobSecurityConfidence(warProxy, inp.isPitcher);
     // No real auction-$ sample to decompose (a not-yet-priced hitter, or any
@@ -1040,7 +1061,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         walkSeasons = Array.from({ length: horizon }, (_, i) => {
           const shapeFuture = futureSeasonShape(inp.age! + i + 1, inp.isPitcher);
           const rateAtI = hitterRate * (shapeFuture / shapeToday);
-          return presentFromRateAndPa(rateAtI, 1, false, false) * (surv[i] ?? 1)
+          return presentFromRateAndPa(rateAtI, 1, false, false, s) * (surv[i] ?? 1)
             * (1 + (hp - 1) * Math.pow(0.75, i + 1));
         });
       } else {
