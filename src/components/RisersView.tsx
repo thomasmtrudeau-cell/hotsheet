@@ -43,11 +43,23 @@ export default function RisersView({ risers, window, onWindow, loading, isPremiu
           <div className="flex items-center gap-1.5">
             <button onClick={() => onOpenTrends?.(r.display_name)} disabled={!onOpenTrends} className="text-sm font-medium text-zinc-100 truncate text-left disabled:cursor-default cursor-pointer enabled:hover:underline decoration-zinc-500 underline-offset-2" title={onOpenTrends ? "Chart him on Trends" : undefined}>{r.display_name}</button>
             {r.level && <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-amber-500/20 text-amber-400">{r.level}</span>}
-            <span className="text-[10px] text-zinc-500">{r.is_pitcher ? 'P' : 'H'}</span>
+            <span className="text-[10px] text-zinc-500">{r.is_pitcher ? 'P' : (r.pos ?? 'H')}</span>
             {isFollowing(r.display_name) && (
               <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-blue-500/20 text-blue-300" title="Already in your list">★ In your list</span>
             )}
           </div>
+          {/* Current peak-projection rates (joined from the premium snapshot). */}
+          {(r.wrc !== undefined || r.hr600 !== undefined || r.sb600 !== undefined || r.era20 !== undefined) && (
+            <div className="text-[10px] text-zinc-500 mt-0.5 truncate">
+              {r.is_pitcher
+                ? `${r.era20!.toFixed(2)} ERA/20`
+                : [
+                    r.wrc !== undefined ? `${Math.round(r.wrc)} wRC+` : null,
+                    r.hr600 !== undefined ? `${Math.round(r.hr600)} HR/600` : null,
+                    r.sb600 !== undefined ? `${Math.round(r.sb600)} SB/600` : null,
+                  ].filter(Boolean).join(' · ')}
+            </div>
+          )}
         </div>
       </div>
       <div className="flex items-center gap-3 text-xs whitespace-nowrap">

@@ -451,6 +451,13 @@ export interface Riser {
   level: string | null;
   war: number;
   delta: number;
+  // Enrichment joined server-side from the premium snapshot + roster index
+  // (best-effort — rows render without them).
+  pos?: string;   // hitters — primary position bucket (C/1B/2B/3B/SS/OF/DH)
+  wrc?: number;   // hitters — peak wRC+
+  hr600?: number; // hitters — peak HR/600
+  sb600?: number; // hitters — peak SB/600
+  era20?: number; // pitchers — peak ERA/20 TBF
 }
 
 export type ViewTab = 'today' | 'yesterday' | 'last15' | 'last30' | 'season';

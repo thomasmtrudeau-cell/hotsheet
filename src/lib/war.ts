@@ -836,7 +836,7 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
 // Fold the MLB API's position abbreviations into the filterable buckets the
 // scouting UI offers. Unknown/unmatched players keep pos undefined and only
 // appear under "All".
-function bucketPos(abbrev: string): string | undefined {
+export function bucketPos(abbrev: string): string | undefined {
   if (['C', '1B', '2B', '3B', 'SS', 'DH'].includes(abbrev)) return abbrev;
   if (['LF', 'CF', 'RF', 'OF'].includes(abbrev)) return 'OF';
   if (abbrev === 'TWP') return 'DH'; // two-way player's hitting row
