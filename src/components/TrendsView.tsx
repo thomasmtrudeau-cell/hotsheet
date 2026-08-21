@@ -249,7 +249,7 @@ export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) 
               {label}
             </button>
           ))}
-          {metric !== 'war' && <span className="text-zinc-600 ml-1">{metric === 'wrc' ? 'hitters only' : 'pitchers only'} · history starts Aug 13</span>}
+          {metric !== 'war' && <span className="text-zinc-600 ml-1">{metric === 'wrc' ? 'hitters only' : 'pitchers only'} · history starts Aug 21</span>}
         </div>
       )}
 
@@ -276,7 +276,7 @@ export default function TrendsView({ isPremium, isFollowing }: TrendsViewProps) 
         return (
           <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
             {shown.length === 0
-              ? <div className="px-4 py-8 text-center text-sm text-zinc-500">No {metric === 'wrc' ? 'hitter' : 'pitcher'} history yet for this metric — rate history starts accruing Aug 13.</div>
+              ? <div className="px-4 py-8 text-center text-sm text-zinc-500">No {metric === 'wrc' ? 'hitter' : 'pitcher'} history yet for this metric — rate history starts accruing Aug 21.</div>
               : <TrendChart series={shown} />}
             <p className="text-[10px] text-zinc-600 mt-1">One point per day (latest capture). Peak {metric === 'war' ? 'WAR' : metric === 'wrc' ? 'wRC+' : 'ERA/20'} projection from ScoutTheStatline — movement means the projection itself changed.</p>
           </div>

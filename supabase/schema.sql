@@ -172,6 +172,8 @@ create table if not exists public.war_snapshots (
   is_pitcher    boolean not null default false,
   level         text,
   war           numeric not null,
+  wrc           numeric,                -- hitters: peak wRC+ projection (2026-08-21 migration)
+  era20         numeric,                -- pitchers: ERA-20 projection (2026-08-21 migration)
   primary key (captured_at, name_key, is_pitcher)
 );
 
