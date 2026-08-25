@@ -82,7 +82,6 @@ export interface PremiumMetrics {
   dual?: ToolGrade;     // hitters — combined power+speed profile (⚡💪)
   def?: DefGrade;       // hitters — projected defensive value (🧤)
   presentValue?: number;   // win-now value (WAR-driven, discounted downstream) — DEFAULT-settings baseline
-  futureValue?: number;    // keeper value (peak ceiling × age × proximity) — DEFAULT-settings baseline
   age?: number;            // projection age (peak age for hitters, current for pitchers)
   // Raw value-model inputs, so the client can recompute PV/FV live against the
   // user's league settings. Premium-only — stripped from non-premium payloads.
@@ -98,6 +97,7 @@ export interface PremiumMetrics {
   marketBaseline?: number; // (auction $ − role FA line) / DIV, role-correct
   pa?: number;             // hitters — auction export's rest-of-season PA (Value Board's only PT signal; no live game log there)
   ip?: number;             // pitchers — auction export's rest-of-season IP (same)
+  pts?: number;            // hitters — auction export's PTS (marginal category dollars), the input to the per-PA rate decomposition
   auctionRaw?: number;     // the auction $ itself, UNFLOORED (can be negative) — Now decomposes this into a per-PA rate; marketBaseline has already floored the below-replacement signal away
 }
 
