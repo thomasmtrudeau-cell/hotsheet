@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, ValueExplain, presentMaturity, overallValue, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS } from '@/lib/value-model';
+import { liveValue, ValueLayers, ValueExplain, presentMaturity, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS, PA_PER_GAME, remainingGames as remainingGamesAt, fullTimeRosPa } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -35,21 +35,25 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
   // reference (Overall is normalized specifically so it stays comparable), so
   // the same $ = FA_LINE + value×DIV translation applies to every chip here.
   const isRp = isPitcher && m?.ipg !== undefined && m.ipg < 2.01 && !m.rpWar;
-  const usd = (v: number) => `$${Math.round(toAuctionDollars(v, isPitcher, isRp, settings))}`;
+  // Now can be negative, so format the sign outside the dollar sign: -$19, not $-19.
+  const usd = (v: number) => {
+    const d = Math.round(toAuctionDollars(v, isPitcher, isRp, settings));
+    return d < 0 ? `-$${Math.abs(d)}` : `$${d}`;
+  };
   return (
     <div className="mt-1 space-y-1">
       {/* value */}
       <div className="flex flex-wrap items-center gap-1">
         <span className={lbl}>value</span>
-        <Tooltip text="What he's worth to your lineup THIS season, in auction-$ terms."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {usd(pv)}</span></Tooltip>
-        <Tooltip text="His future seasons combined (this one excluded), on the Now scale — what he's worth PER YEAR going forward, near seasons counting most. For a pre-peak player the window starts at his prime, so he's judged on his peak years (arrival risk is already priced in). Read it as: keep him and he's about this good for you."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}</span></Tooltip>
-        {outlook && <Tooltip text="Average of his NEXT TWO seasons (this one excluded), on the Now scale — current form walked along the aging curve × career-survival odds, or for pre-peak players the priced peak bent by the maturation ramp and arrival risk. An injury this season doesn't drag it down (that's priced in Now, not here)."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
+        <Tooltip text="Projected lineup value for the REMAINDER of this season, in auction dollars, from his current performance and expected playing time. Can go negative: that is a player who costs you value by being in the lineup."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {usd(pv)}</span></Tooltip>
+        <Tooltip text="Projected annual keeper value over a multi-year window, weighting near-term seasons most heavily and shifting the window forward to capture peak years for young players. Same scale as Now, so read it as: keep him and he is about this good for you every year."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}</span></Tooltip>
+        {outlook && <Tooltip text="Projected average annual value per season across the next two years. An injury this season does not drag it down: that is priced in Now, not here."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
         {getExplain && <button onClick={() => setWhy((w) => w === undefined ? (getExplain() ?? null) : undefined)} className={`${chip} cursor-pointer ${why !== undefined ? 'bg-zinc-600/60 text-zinc-200' : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200'}`} title="Why these numbers? Full season-by-season breakdown">why{why !== undefined ? '▴' : '▾'}</button>}
-        {outlook && <Tooltip text="UPSIDE — his full-PT dollar ceiling from CATEGORY PRODUCTION ALONE: wRC+/HR/SB (pitchers: ERA/20), no WAR, no park, no market $ — his circumstances stripped out entirely, just the bat/arm. Keep/Overall blend toward this in proportion to job security — ~5+ WAR bats / ~4+ WAR arms in their prime get full credit; bust/arrival risk for prospects lives in Keep and Overall, not here."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
+        {outlook && <Tooltip text="Projected peak single-season ceiling in a full-time everyday role if performance maxes out, ignoring playing-time limits, team context and injury risk. Built from category production alone (wRC+, HR, SB, or ERA for arms), so a catcher's ceiling carries his real volume but nobody else's circumstances count."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
       </div>
       {why !== undefined && (
         <div className="rounded-lg border border-zinc-700/70 bg-zinc-900/80 p-2 text-[10px] text-zinc-300 space-y-1">
-          {!why ? <div>No breakdown available (age unknown — legacy path).</div> : (
+          {!why ? <div>No breakdown available.</div> : (
             <>
               <div>
                 {why.now.rateMode ? (
@@ -327,6 +331,9 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     // security keys on wRC+ for them, not the WAR tier.
     if (p.primaryPosition === '1B' || p.primaryPosition === 'DH') {
       const wrc = metrics[p.id]?.peakWrcPlus ?? 0;
+      // Handedness-blind here on purpose: a left-handed corner bat's extra platoon
+      // exposure is charged in lhbCornerPlatoonMult below, which resolves against
+      // the observed platoonDock so the same risk isn't billed twice.
       const batSecure = wrc >= 105 ? 1.0 : wrc >= 95 ? 0.95 : wrc >= 85 ? 0.85 : 0.75;
       f = Math.max(f, batSecure);
     }
@@ -359,8 +366,12 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
       war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
       hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
       age: m.age, level: m.level, marketBaseline: m.marketBaseline,
-      defRuns: m.defRuns, ipg: m.ipg, pa: m.pa, auctionRaw: m.auctionRaw,
+      defRuns: m.defRuns, ipg: m.ipg, pa: m.pa, auctionRaw: m.auctionRaw, pts: m.pts,
       catcherShare: catcherShares[p.id],
+      // Pitcher durability (Tom, 2026-08-25): the export's ROS innings become a
+      // pro-rated season workload inside the model, and a real ARM injury raises
+      // his career-end hazard for good rather than only docking this season.
+      rosIp: m.ip, armInjured: p.primaryPosition === 'P' && armRiskOf(p) !== 1,
     };
   };
   // Actual playing-time rate (fraction of team games he's appeared in), from the
@@ -407,13 +418,10 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   // FanGraphs Depth-Chart PA from a fresh auction export — equal weight when
   // fresh, decaying to all-algorithm over ~4 weeks, and the stale snapshot is
   // rescaled to today's remaining games (it projected from more games left). ----
-  const seasonFrac = (iso?: string) => {
-    const start = Date.parse('2026-03-26');
-    const now = iso ? Date.parse(iso) : Date.now();
-    return Math.min(1, Math.max(0, (now - start) / (183 * 86_400_000)));
-  };
-  const remainingGames = Math.round(162 * (1 - seasonFrac()));
-  const PA_PER_GAME = 4.15;
+  // Season / playing-time reference comes from the value model itself (Tom,
+  // 2026-08-25) so the trade card, the board and the engine all divide by the same
+  // definition of a full-time slate of remaining reps.
+  const remainingGames = remainingGamesAt();
   // Projected ROS role fraction straight from the projection export (PA rescaled
   // to today's remaining games), 0–1.1. This is the GROUND-TRUTH playing-time
   // signal — a near-zero value means the projections don't think he's in an MLB
@@ -424,10 +432,13 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     if (p.sportId !== 1 || p.primaryPosition === 'P' || injuries[p.id]) return undefined;
     const aPa = AUCTION_VALUES[String(p.id)]?.pa;
     if (aPa === undefined || !AUCTION_AS_OF) return undefined;
-    const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
+    const exportRemain = remainingGamesAt(AUCTION_AS_OF);
     const scaled = aPa * (remainingGames / exportRemain);
-    return Math.max(0, Math.min(1.1, scaled / (remainingGames * PA_PER_GAME)));
+    return Math.max(0, Math.min(1.1, scaled / fullTimeRosPa()));
   };
+  // The export's remaining-PA figure rescaled to TODAY's remaining games (it was
+  // projected from more of them).
+  const scaledAuctionPa = (aPa: number, exportRemain: number) => aPa * (remainingGames / exportRemain);
   const estRosPA = (p: SearchResult): { pa: number; blended: boolean } | undefined => {
     if (p.sportId !== 1 || p.primaryPosition === 'P') return undefined;
     if (seasonEnding(p)) return { pa: 0, blended: false }; // 60-day/full-season IL or post-surgery — done for the year
@@ -436,22 +447,45 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     if (wrc !== undefined) prob = Math.max(0.3, Math.min(1, prob + (wrc - 100) / 300)); // form slack
     const algoPA = remainingGames * prob * PA_PER_GAME;
     const aPa = AUCTION_VALUES[String(p.id)]?.pa;
-    // An injured player's auction PA is depressed by missed time, not a part-time
-    // role — blending it would misprice him as a platoon guy. Value his everyday
-    // role (algo, full reps); the "currently out" hit is applied separately by
-    // injuryMultOf. As he nears return the projection recovers on its own.
-    if (aPa === undefined || !AUCTION_AS_OF || injuries[p.id]) return { pa: Math.round(algoPA), blended: false };
-    const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
-    const scaledAuction = aPa * (remainingGames / exportRemain);       // rescale stale magnitude
+    if (aPa === undefined || !AUCTION_AS_OF) return { pa: Math.round(algoPA), blended: false };
+    const exportRemain = remainingGamesAt(AUCTION_AS_OF);
+    // AN INJURED PLAYER'S PROJECTED REPS ARE THE POINT, NOT A PROBLEM (Tom,
+    // 2026-08-25 #3). This used to throw the auction PA away for anyone on the IL
+    // and substitute a FULL everyday slate, on the grounds that a depressed PA
+    // would otherwise misprice him as a platoon guy. That was true when the engine
+    // read his rate as dollars-divided-by-PA, because a short PA then dragged the
+    // rate down with it. It is no longer true: the rate is now PA-invariant, so a
+    // short PA correctly means "fewer reps at his own elite rate" and nothing else.
+    //
+    // Meanwhile the substitution was inflating exactly the players it was meant to
+    // protect. Riley Greene, on the IL, projected 95 reps and $15.90 of remaining
+    // value, was priced over a 125-rep slate: 30 phantom reps at $0.37 each, about
+    // $11 of production he cannot deliver, against a flat 10% severity dock that
+    // clawed back barely $2 of it. He read $20.
+    //
+    // So trust the projection. It is the only source here that actually knows how
+    // long he is expected to be out, and the same "trust the projection" reasoning
+    // already decides whether a 60-day IL stint is season-ending. The staleness
+    // caveat is the ordinary one: an injury newer than the export is not priced
+    // until the next refresh, which is what the four-week blend below is for.
+    if (injuries[p.id]) return { pa: Math.round(scaledAuctionPa(aPa, exportRemain)), blended: true };
+    const scaledAuction = scaledAuctionPa(aPa, exportRemain);          // rescale stale magnitude
     // A near-zero ROS PA projection is a definitive "not in an MLB lineup" signal
     // (optioned, quad-A, buried) — NOT a stale full-season number to rescale. Trust
     // it directly; otherwise the everyday algo (which assumes a full role for any
     // 40-man player via establishedRegular) inflates a 3-PA guy back up to ~90
     // (Patrick Wisdom: 34, stuck in AAA, projected 3 PA yet read ~92).
-    if (scaledAuction < 0.15 * remainingGames * PA_PER_GAME) return { pa: Math.round(scaledAuction), blended: false };
+    if (scaledAuction < 0.15 * fullTimeRosPa()) return { pa: Math.round(scaledAuction), blended: false };
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
-    const wA = 0.66 * Math.max(0, 1 - ageDays / 28);                   // 66% DC when fresh -> 0 by ~4wk (they know Story/Semien play every day)
-    return { pa: Math.round(wA * scaledAuction + (1 - wA) * algoPA), blended: wA > 0 };
+    // Full trust in a SAME-DAY export, decaying to none by four weeks (Tom,
+    // 2026-08-25 #4). This was capped at 66% even for a fresh export, so a third of
+    // a game-log estimate always leaked in — and since that estimate assumes an
+    // everyday player gets a full slate, it could only ever push a real regular's
+    // reps ABOVE what the projection gave him. The game log's job is to catch role
+    // changes the export is too old to know about; on the day it was pulled there
+    // are none.
+    const wA = Math.max(0, 1 - ageDays / 28);
+    return { pa: Math.round(wA * scaledAuction + (1 - wA) * algoPA), blended: wA > 0 && wA < 1 };
   };
   const estRosIP = (p: SearchResult): number | undefined => {
     if (p.sportId !== 1 || p.primaryPosition !== 'P') return undefined;
@@ -464,7 +498,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     // up a rotation turn), so a short-term injured pitcher's auction IP — which
     // already reflects the missed time — is the better estimate than a full workload.
     if (aIp === undefined || !AUCTION_AS_OF) return Math.round(algoIP);
-    const exportRemain = Math.round(162 * (1 - seasonFrac(AUCTION_AS_OF))) || 1;
+    const exportRemain = remainingGamesAt(AUCTION_AS_OF);
     const scaled = aIp * (remainingGames / exportRemain);
     const ageDays = (Date.now() - Date.parse(AUCTION_AS_OF)) / 86_400_000;
     const wA = 0.66 * Math.max(0, 1 - ageDays / 28);
@@ -473,7 +507,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   const ptCredit = (p: SearchResult) => {
     const est = estRosPA(p);
     if (!est) return ptRateOf(p); // pitchers / minors — keep live-usage rate
-    const frac = est.pa / (remainingGames * PA_PER_GAME);
+    const frac = est.pa / fullTimeRosPa();
     // Normally floor at 0.3 — a rostered player gets SOME reps, and we don't zero a
     // deep part-timer. But a genuine near-zero projection (optioned/buried) is
     // allowed to fall through: he's not an MLB contributor this season, so his
@@ -502,6 +536,28 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     const base = batSides[p.id] === 'L' ? 0.83 : 0.87;
     return base + (1 - base) * escape;
   };
+  // LEFT-HANDED CORNER BATS GET PLATOONED FASTER (Tom, 2026-08-25). A left-handed
+  // 1B/DH whose bat projects modestly is the easiest player in baseball to sit:
+  // there is always a right-handed bench bat for the lefty starter, so the
+  // timeshare begins long before the game log shows it. This is the ANTICIPATED
+  // charge, sized so that combined with the handedness-blind job-security floor it
+  // reproduces the intended 0.90 / 0.76 / 0.64 by wRC+ tier. It stops entirely at
+  // 105+ wRC+, where handedness no longer decides whether he plays, and switch
+  // hitters are exempt (no platoon disadvantage to anticipate).
+  const lhbCornerPlatoonMult = (p: SearchResult) => {
+    if (p.sportId !== 1) return 1;
+    if (p.primaryPosition !== '1B' && p.primaryPosition !== 'DH') return 1;
+    if (batSides[p.id] !== 'L') return 1;
+    const wrc = metrics[p.id]?.peakWrcPlus ?? 0;
+    return wrc >= 105 ? 1 : wrc >= 95 ? 0.95 : wrc >= 85 ? 0.89 : 0.85;
+  };
+  // ONE platoon charge, not two (Tom, 2026-08-25 #2). platoonDock prices the
+  // platoon we can already SEE in his game log; lhbCornerPlatoonMult prices the one
+  // his profile says is coming. They are the same risk seen at two different
+  // moments, so multiplying them charged a left-handed 1B twice for it. Take the
+  // more severe and apply it once.
+  const platoonDockEff = (p: SearchResult) => Math.min(lhbCornerPlatoonMult(p), platoonDock(p));
+
   // A returning/pushing teammate takes reps from the WEAKEST guy in the logjam,
   // not a star — so the PT-threat dock is neutralized by the followed player's own
   // WAR. Ceddanne Rafaela (3.6 WAR, elite glove) keeps his job when Roman Anthony
@@ -646,9 +702,12 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
       armPvMult: arm === 1 ? 1 : 0.93,
       armFvMult: arm,
       ptDockEff: ptDockEff(p),
+      // Missed calendar, not a diminished role — and only while he is expected
+      // back. A season-ending case keeps the ordinary severity dock instead.
+      ilStint: Boolean(injuries[p.id]) && !seasonEnding(p),
       jobSecurity: jobSecurity(p),
       earnBump: earnBump(p),
-      platoonDock: platoonDock(p),
+      platoonDock: platoonDockEff(p),
       homePark: homeParkMultiplier(p.currentTeam.name, p.primaryPosition === 'P'),
     };
   };
@@ -754,7 +813,10 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
     const isRp = isP && mm?.ipg !== undefined && mm.ipg < 2.01 && !mm.rpWar;
     return toAuctionDollars(raw, isP, isRp, settings);
   };
-  const ovUsd = (p: SearchResult) => `$${Math.round(usdOf(p, ovOf(p)))}`;
+  const ovUsd = (p: SearchResult) => {
+    const d = Math.round(usdOf(p, ovOf(p)));
+    return d < 0 ? `-$${Math.abs(d)}` : `$${d}`;
+  };
   const ovKeep = PV_KEEP; // a replacement guy's Overall = the roster-spot baseline (zero surplus)
   const belowRepl = (p: SearchResult) => metrics[p.id] !== undefined && ovOf(p) < ovKeep;
   // A player contributes his REAL value to a trade, floored at 0. We floor at 0
@@ -821,7 +883,7 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   // build lenses — Now (this season) and Keep (per-season, near window) ARE
   // the win-now and rebuild views, so a contender reads Now, a rebuilder reads
   // Keep, and Overall is the trade-value total for everyone else. ----
-  const ovTitle = 'Overall — trade value: every remaining season above a waiver-wire player, added up (near seasons count most, but a long career keeps paying)';
+  const ovTitle = 'Overall: total long-term dynasty trade value across his remaining career, combining peak talent, expected longevity, and surplus value above replacement level. Near seasons count most, but a long career keeps paying.';
   const sumOv = (s: SearchResult[], side: Side) => {
     let t = s.reduce((acc, p) => acc + ovContrib(p), 0);
     if (side === openedSide) t += usedFAs.reduce((acc, p) => acc + ovContrib(p), 0) + (theoreticalFill * ovKeep);
