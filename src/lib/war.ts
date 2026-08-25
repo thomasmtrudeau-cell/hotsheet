@@ -186,7 +186,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
     if (idIdx >= 0) {
       const av = AUCTION_VALUES[String(cells[idIdx] ?? '').trim()];
       if (av) m.auctionRaw = av.d;
-      if (!isPitcher) { if (av?.pos) m.pos = av.pos; if (av?.pa !== undefined) m.pa = av.pa; }
+      if (!isPitcher) { if (av?.pos) m.pos = av.pos; if (av?.pa !== undefined) m.pa = av.pa; if (av?.pts !== undefined) m.pts = av.pts; }
       else if (av?.ip !== undefined) m.ip = av.ip;
     }
     if (ipgIdx >= 0) { const iv = parseFloat(cells[ipgIdx]); if (Number.isFinite(iv)) m.ipg = iv; }
@@ -207,9 +207,12 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
         isPitcher, war: m.war, rpWar: m.rpWar, peakWrcPlus: m.peakWrcPlus, era20: m.era20,
         hr: m.hr, sb: m.sb, curWrcPlus: m.curWrcPlus, curEra20: m.curEra20,
         age: m.age, level: m.level, marketBaseline: m.marketBaseline,
-        pa: m.pa, auctionRaw: m.auctionRaw,
+        pa: m.pa, auctionRaw: m.auctionRaw, pts: m.pts,
       }, DEFAULT_SETTINGS);
-      m.presentValue = tv.present; m.futureValue = tv.future;
+      // Only the present value is baked now: the keeper number the UI shows comes
+      // from liveValue's season engine, and computeValue no longer maintains a
+      // second (slot-economics) keeper figure that could disagree with it.
+      m.presentValue = tv.present;
     }
     if (m.war === undefined && m.era20 === undefined && m.peakWrcPlus === undefined) continue;
     const key = normalizeName(name);
@@ -481,7 +484,17 @@ export interface PremiumSnapshot {
 // v7: 2026-08-19 — auctionRaw added (Now's rate×PA decomposition needs it);
 // flush so cached snapshots without it don't silently fall back to the old
 // market/WAR blend forever (Rafaela read $21 instead of $17 on a v6 snapshot).
-export const SNAPSHOT_VERSION = 7;
+// v8: 2026-08-24 — AUCTION_VALUES re-keyed by the WAR sheet's own id (70 newly
+// promoted bats joined nothing, so their marketBaseline/auctionRaw were baked
+// EMPTY into the snapshot and Now ran WAR-led: Lara $22 on a −$9.30 market).
+// The join happens at parse time, so a v7 capture keeps the empty fields.
+// v9: 2026-08-25 — the baked futureValue is gone: computeValue no longer keeps a
+// second (slot-economics) keeper number alongside the season engine's, so the
+// field would linger in stored captures with no producer.
+// v10: 2026-08-25 — metrics now carry the export's PTS, which Now's per-PA rate
+// decomposition needs; a v9 capture has no producer for it, so every hitter on a
+// stale snapshot would silently fall back to the WAR/market path.
+export const SNAPSHOT_VERSION = 10;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything

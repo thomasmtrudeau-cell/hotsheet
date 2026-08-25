@@ -179,6 +179,14 @@ function makeValue(c, h, isPitch) {
     // ROS "counting" value = dollarized power + speed contribution (mHR + mSB).
     const hr = num(col('mHR')) ?? 0, sb = num(col('mSB')) ?? 0;
     v.cnt = Math.round((hr + sb) * 10) / 10;
+    // PTS = the sum of the marginal CATEGORY dollars (mRBI + mR + mSB + mHR +
+    // mOBP), i.e. Dollars stripped of the positional/replacement adjustment
+    // (Dollars = PTS + aPOS + $1). The value model needs it to recover a real
+    // per-PA rate: the category dollars are linear in PA around a common
+    // zero-PA intercept, so (PTS - intercept) / PA is PA-invariant while
+    // Dollars / PA is not. See PTS_AT_ZERO_PA in value-model.ts.
+    const pts = num(col('PTS'));
+    if (pts !== undefined) v.pts = Math.round(pts * 10) / 10;
   }
   return v;
 }
@@ -208,8 +216,25 @@ async function loadPublished(out) {
   console.log(`tabs: "${batsTab.name}" (hitters), "${armsTab.name}" (pitchers)`);
 
   const { byRaw, byKey } = buildCrosswalk();
-  let warIndex = null; // fetched lazily — only if something needs the fallback
-  const stats = { matched: 0, warFallback: 0, skipped: [] };
+  // The WAR-sheet index is NOT a fallback-only source (Tom, 2026-08-24): the app
+  // joins AUCTION_VALUES against the WAR sheet's OWN `id` column, so a row keyed
+  // only by the crosswalk's FanGraphs/MLBAM pair silently fails to join whenever
+  // the sheet carries a different id for that player. That's exactly what happens
+  // to a promoted prospect — the crosswalk knows him by his MINOR-league FG id
+  // ("sa3018514") while the WAR sheet has already switched to his major-league id
+  // (30675), so Luis Lara's −$9.30 market read never reached the model and his Now
+  // floated up to $22 on the WAR-led fallback path. 70 recently-promoted bats were
+  // mispriced this way. So: always index the WAR sheet and key every row by the
+  // UNION of the ids it's known under.
+  const warIndex = await buildWarNameIndex();
+  const stats = { matched: 0, warOnly: 0, warAlso: 0, noWarId: 0, skipped: [] };
+  // A unique WAR-sheet id for this name; on a dup name prefer a lone non-stale
+  // id (an "sa" id is the pre-promotion row the app itself skips).
+  const warIdFor = (side, name) => {
+    const ids = warIndex[side].get(nameKey(name));
+    const live = ids && [...ids].filter((id) => !/^sa/i.test(id));
+    return ids?.size === 1 ? [...ids][0] : live?.length === 1 ? live[0] : undefined;
+  };
 
   for (const [tab, isPitch] of [[armsTab, true], [batsTab, false]]) {
     const rows = parseCsv(await fetchText(`${PUB_BASE}/pub?gid=${tab.gid}&single=true&output=csv`));
@@ -226,17 +251,25 @@ async function loadPublished(out) {
       const team = (rows[r][ti] || '').trim();
       const cands = byRaw.get(rawKey(name)) ?? byKey.get(nameKey(name));
       const hit = cands && resolve(cands, side, team);
-      if (hit) { emit(out, [hit[0], hit[1].mlbam], v); stats.matched++; continue; }
-      warIndex ??= await buildWarNameIndex();
-      const ids = warIndex[side].get(nameKey(name));
-      // Accept a unique WAR-sheet id; on a dup name prefer a lone non-stale id.
-      const live = ids && [...ids].filter((id) => !/^sa/i.test(id));
-      const pick = ids?.size === 1 ? [...ids][0] : live?.length === 1 ? live[0] : undefined;
-      if (pick) { emit(out, [pick], v); stats.warFallback++; }
+      const warId = warIdFor(side, name);
+      if (hit) {
+        emit(out, [hit[0], hit[1].mlbam, warId], v);
+        stats.matched++;
+        if (warId && warId !== hit[0] && warId !== hit[1].mlbam) stats.warAlso++;
+        // A row with NO WAR-sheet id can never join in the app (the WAR sheet is
+        // the only id space it looks players up in) — the silent failure this
+        // pass fixed. Most of these are simply players the WAR sheet doesn't
+        // carry, so it's a report, not an error; a JUMP in the count means the
+        // name matching drifted.
+        else if (!warId) stats.noWarId++;
+        continue;
+      }
+      if (warId) { emit(out, [warId], v); stats.warOnly++; }
       else stats.skipped.push(`${name} (${team || '?'}, ${side})`);
     }
   }
-  console.log(`crosswalk-matched ${stats.matched}, WAR-sheet fallback ${stats.warFallback}, skipped ${stats.skipped.length}`);
+  console.log(`crosswalk-matched ${stats.matched} (${stats.warAlso} also keyed by a DIFFERENT WAR-sheet id), WAR-sheet-only ${stats.warOnly}, skipped ${stats.skipped.length}`);
+  console.log(`${stats.noWarId} matched rows carry no WAR-sheet id (unjoinable in the app — expected for players the WAR sheet doesn't carry)`);
   if (stats.skipped.length) console.log(`skipped: ${stats.skipped.join('; ')}`);
   if (stats.matched < 800) throw new Error('fewer than 800 matched rows — source sheet or crosswalk looks broken, refusing to write');
 }
@@ -250,13 +283,18 @@ if (pitchCsv && hitCsv) {
   await loadPublished(out);
 }
 
-const asOf = new Date().toISOString().slice(0, 10);
+// AUCTION_AS_OF drives the app's playing-time blend (how stale the export's own
+// PA/IP read is), so it must be the date the SHEET was pulled, not the date this
+// script ran. Defaults to today; pass AUCTION_AS_OF=YYYY-MM-DD to re-key an
+// existing export without back-dating or forward-dating it.
+const asOf = process.env.AUCTION_AS_OF || new Date().toISOString().slice(0, 10);
 const entry = (v) => {
   const parts = [`d: ${v.d}`, `r: '${v.r}'`];
   if (v.pos) parts.push(`pos: '${v.pos}'`);
   if (v.pa !== undefined) parts.push(`pa: ${v.pa}`);
   if (v.ip !== undefined) parts.push(`ip: ${v.ip}`);
   if (v.cnt !== undefined) parts.push(`cnt: ${v.cnt}`);
+  if (v.pts !== undefined) parts.push(`pts: ${v.pts}`);
   return `{ ${parts.join(', ')} }`;
 };
 
@@ -271,7 +309,7 @@ const lines = [
   '// Regenerate with scripts/build-auction-values.mjs when Tom updates the sheet.',
   "export type AuctionRole = 'SP' | 'RP' | 'HIT';",
   `export const AUCTION_AS_OF: string | null = '${asOf}';`,
-  'export const AUCTION_VALUES: Record<string, { d: number; r: AuctionRole; pos?: string; pa?: number; ip?: number; cnt?: number }> = {',
+  'export const AUCTION_VALUES: Record<string, { d: number; r: AuctionRole; pos?: string; pa?: number; ip?: number; cnt?: number; pts?: number }> = {',
   ...Object.keys(out).sort().map((k) => `  '${k}': ${entry(out[k])},`),
   '};',
   '',
