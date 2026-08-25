@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { liveValue, LeagueSettings } from '@/lib/value-model';
+import { liveValue, LeagueSettings, remainingGames as remainingGamesAt, fullTimeRosPa } from '@/lib/value-model';
+import { AUCTION_AS_OF } from '@/lib/auction-values';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
 
@@ -12,6 +13,29 @@ const LEVELS = ['MLB', 'AAA', 'AA', 'A+', 'A', 'Rk'] as const;
 type Level = (typeof LEVELS)[number];
 // Same normalization the Trade Checker uses to key ROS rates by player name.
 const rosKey = (name: string) => name.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().replace(/['’`.]/g, '').replace(/\s+(jr|sr|ii|iii|iv|v)\b/g, '').replace(/[^a-z0-9]+/g, ' ').trim();
+
+// Board-only playing-time credit: the Trade Checker derives ptCredit live (game
+// log + injury feed); the board has none of that, so it defaulted to 1 (full-time)
+// for EVERY hitter, which let an injured/part-time bat's uncapped production bonus
+// outrank a cheaper-by-$ but healthier one on Now (Riley Greene over Blake Snell
+// despite a lower auction $, 2026-08-13). The auction export's own ROS PA is the
+// one PT signal the board does have — not live, but it already reflects a real
+// injury the day the sheet was pulled. Pitchers untouched: fantasyProd doesn't
+// apply ptCredit to arms (ERA is already a rate stat), so there's nothing to fix.
+function hitterPtCredit(pa: number | undefined): number {
+  if (pa === undefined) return 1;
+  // Shared with the trade card and with the value model itself (Tom, 2026-08-25):
+  // one definition of a full-time slate of remaining reps, so "share of full time"
+  // means the same thing everywhere it is computed.
+  const games = remainingGamesAt();
+  const exportRemain = remainingGamesAt(AUCTION_AS_OF);
+  const scaled = pa * (games / exportRemain);
+  const frac = scaled / fullTimeRosPa();
+  // Same near-zero cutoff as the Trade Checker's estRosPA: a genuine ~0 ROS
+  // projection means he's not an MLB contributor this season, not a floored
+  // part-timer — don't prop him up to 30%.
+  return frac < 0.15 ? Math.max(0.03, frac) : Math.max(0.3, Math.min(1.05, frac));
+}
 
 function levelBucket(lvl?: string): Level {
   const l = (lvl ?? '').toUpperCase();
@@ -85,16 +109,20 @@ export default function ValueBoard({ settings, isFollowing, onOpenTrends }: {
       const bucket = levelBucket(r.level);
       const rk = rosKey(r.player);
       // SAME shared pipeline as the Trade Checker (value-model's liveValue), fed the
-      // BULK-available live layers: whether he's in the majors and his rest-of-season
-      // current-form rate. Per-player live layers (observed playing time, injury,
-      // park, saves, PT threats) can't be fetched for a whole board, so they stay
-      // neutral here. Net effect: a healthy, everyday, neutral-park player grades
-      // IDENTICALLY to his trade card; an injured / benched / closer reads his
-      // clean base value here (the trade view is where those adjustments apply).
+      // BULK-available live layers: whether he's in the majors, his rest-of-season
+      // current-form rate, and (hitters) a PT credit from the auction export's own
+      // ROS PA — the one bulk-available playing-time signal, not live but still
+      // reflecting a real injury as of the sheet pull. Per-player live layers (the
+      // actual game log, a named injury, park, saves, PT threats) can't be fetched
+      // for a whole board, so those stay neutral here. Net effect: a healthy,
+      // everyday, neutral-park player grades IDENTICALLY to his trade card; a
+      // benched/platooned/closer reads his clean base value here (the trade view is
+      // where those specific adjustments apply).
       const v = liveValue(inputs, settings, {
         isMLB: bucket === 'MLB',
         rosWrc: !r.isPitcher ? ros.hitters[rk]?.wrc : undefined,
         rosEra: r.isPitcher ? ros.pitchers[rk]?.era : undefined,
+        ptCredit: !r.isPitcher && bucket === 'MLB' ? hitterPtCredit(r.pa) : undefined,
       });
       const grades: Record<string, number> = { PV: v.present, FV: v.future, OV: v.overall };
       return { ...r, bucket, grades };
@@ -126,9 +154,9 @@ export default function ValueBoard({ settings, isFollowing, onOpenTrends }: {
   const COL_HELP: Record<string, string> = {
     war: 'Peak WAR projection (ScoutTheStatline) — his ceiling season, all-around value.',
     FAN: 'Pure fantasy production rate — park-neutral bat (wRC+/HR/SB, weighted for your format) or arm (ERA/20) alone. No playing time, market, WAR or age. When FAN and the build grade disagree, the gap is the playing-time/asset story.',
-    PV: 'Now — what he is worth to your lineup THIS season (mostly production × playing time, a light WAR tilt).',
-    FV: 'Keep — his future seasons combined, per year on the Now scale, near seasons counting most; pre-peak players are judged on their prime window (keep him and he is about this good for you).',
-    OV: 'Overall — trade value: every remaining season above a waiver-wire player, added up (near seasons count most, but a long career keeps paying). The default ranking.',
+    PV: 'Now: projected lineup value for the REMAINDER of this season, from his current performance and expected playing time. Can go negative for a genuinely below-replacement player.',
+    FV: 'Keep: projected annual keeper value over a multi-year window, weighting near-term seasons most heavily and shifting the window forward to capture peak years for young players. Same scale as Now.',
+    OV: 'Overall: total long-term dynasty trade value across his remaining career, combining peak talent, expected longevity, and surplus value above replacement level. Near seasons count most, but a long career keeps paying. The default ranking.',
   };
   const cols: { key: SortKey; label: string }[] = [
     { key: 'PV', label: 'Now' }, { key: 'FV', label: 'Keep' }, { key: 'OV', label: 'Overall' },

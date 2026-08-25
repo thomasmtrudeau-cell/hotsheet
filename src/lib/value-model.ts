@@ -3,7 +3,7 @@
 // live as the user changes their league settings). All the league-specific
 // levers live here so the two stay in lockstep.
 
-import { AUCTION_VALUES } from './auction-values';
+import { AUCTION_VALUES, AUCTION_AS_OF } from './auction-values';
 
 export type ScoringFormat = 'obp' | 'avg' | 'points';
 
@@ -48,8 +48,11 @@ export interface ValueInputs {
   catcherShare?: number;   // 0–1 fraction of his played games actually spent BEHIND THE PLATE (from the game log); scales the catcher haircuts
   defRuns?: number;      // hitters — raw sheet DEF runs (strip from WAR for fantasy)
   ipg?: number;          // pitchers — sheet IP/G (< 2.01 = reliever role)
+  rosIp?: number;        // pitchers — auction export's ROS innings (pro-rated into a season workload for the durability hazard)
+  armInjured?: boolean;  // pitchers — a live ARM injury, echoed forward into career survival (not the generic injury dock)
   pa?: number;           // hitters — auction export's own ROS PA read (his sheet-level playing-time signal, pre-live-layer)
-  auctionRaw?: number;   // the auction $ itself, UNFLOORED (can be negative) — Now decomposes this into a per-PA rate; marketBaseline has already floored the below-replacement signal away
+  auctionRaw?: number;   // the auction $ itself, UNFLOORED (can be negative) — marketBaseline has already floored the below-replacement signal away
+  pts?: number;          // the export's PTS: its marginal CATEGORY dollars (mRBI+mR+mSB+mHR+mOBP), i.e. auctionRaw stripped of the positional adjustment and the $1 floor. This is what makes a real per-PA rate recoverable — see PTS_AT_ZERO_PA
 }
 
 const clamp = (n: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, n));
@@ -70,8 +73,23 @@ function talentConfidence(war: number | undefined, isPitcher: boolean): number {
 // being zeroed out — while youth compounds across many productive seasons. The
 // aging curve is deliberately gentle: WAR already separates elite-aging from
 // washed, since a low-WAR vet has little annual value to carry forward anyway.
-const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year
+const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year, at 28 keepers
 const KEEPER_HORIZON = 7;     // seasons of keeper value considered
+
+// HOW LONG YOU CAN AFFORD TO WAIT depends on how many keeper slots you have
+// (Tom, 2026-08-25). At 28 keepers per team you can carry a season of development;
+// at 8 you cannot, because every slot has to produce now, so distant seasons are
+// worth less to you and the near ones dominate harder. Steeper (lower) discount in
+// a shallow league, gentler in a deep one, around the 0.72 baseline.
+export function yearDiscount(s: LeagueSettings): number {
+  return clamp(YEAR_DISCOUNT * Math.pow(Math.max(1, s.keepers) / 28, 0.15), 0.55, 0.80);
+}
+// The same idea applied to PROSPECT deferral: in a shallow league a player who is
+// years away is competing for a slot you need this season, so both halves of
+// keeperDeferral (time to peak, distance to the majors) bite harder.
+export function deferralSeverity(s: LeagueSettings): number {
+  return clamp(Math.pow(28 / Math.max(1, s.keepers), 0.3), 0.85, 1.6);
+}
 
 // Pure reliever (IP/G < 2.01), UNLESS his WAR already came in role-priced via
 // the sheet's 'RP WAR' column (inp.rpWar) — that figure is usage-correct
@@ -140,14 +158,127 @@ export function toAuctionDollars(value: number, isPitcher: boolean, isRp: boolea
 // in the export — Caminero territory) instead of adding a second production
 // term on top.
 //
-// The highest ROS PA among hitters in the current export — a live "what does
-// full-time look like RIGHT NOW" reference (shrinks as the season empties out).
-export const PA_CEILING = Math.max(
-  60,
-  ...Object.values(AUCTION_VALUES)
+// ---- ONE definition of "a full-time slate of remaining reps" (Tom, 2026-08-25) ----
+// This used to be the single highest ROS PA in the export, while the trade card
+// separately derived its own playing-time fraction from remaining games x 4.15 PA.
+// Both meant "share of full time", but they disagreed about what full time IS: the
+// export's max PA is one extreme leadoff hitter (p100), so a genuinely everyday
+// bat read about 0.89 on the sheet path and 1.00 on the trade-card path for the
+// same role. Now both divide by this function, at their own as-of date.
+//
+// PA_PER_GAME is calibrated, not assumed: among hitters projected for 100+ ROS PA
+// in the current export, p90 is 149 PA against 34 remaining games = 4.38 PA/game.
+// The old 4.15 described a p75 part-timer, which is why every playing-time credit
+// derived from it ran a few percent high.
+export const SEASON_START = Date.parse('2026-03-26');
+export const SEASON_DAYS = 183;
+export const SEASON_GAMES = 162;
+export function seasonFrac(asOf?: string | null): number {
+  const now = asOf ? Date.parse(asOf) : Date.now();
+  return clamp((now - SEASON_START) / (SEASON_DAYS * 86_400_000), 0, 1);
+}
+export function remainingGames(asOf?: string | null): number {
+  return Math.max(1, Math.round(SEASON_GAMES * (1 - seasonFrac(asOf))));
+}
+
+// What a full-time remaining slate actually IS, read off the export rather than
+// assumed (Tom, 2026-08-25 #2). A hardcoded PA-per-game had to absorb the error in
+// the 183-day season model as well as the real rate: calibrated against one export
+// it implied 4.38, against the next 4.67. So take the empirical figure instead —
+// the 90th percentile among hitters projected for at least half the top PA in the
+// export, i.e. "a regular, not the one leadoff hitter who never rests". Nothing
+// here depends on the season-length model except the ratio between two nearby
+// dates, where its error very nearly cancels.
+function percentile(sorted: number[], p: number): number {
+  if (!sorted.length) return 0;
+  const i = (sorted.length - 1) * p;
+  const lo = Math.floor(i), hi = Math.ceil(i);
+  return lo === hi ? sorted[lo] : sorted[lo] + (sorted[hi] - sorted[lo]) * (i - lo);
+}
+function regularPaPercentile(p: number, fallback: number): number {
+  const all = Object.values(AUCTION_VALUES)
     .filter((v) => v.r === 'HIT' && v.pa !== undefined)
-    .map((v) => v.pa as number),
-);
+    .map((v) => v.pa as number);
+  if (!all.length) return fallback;
+  const max = Math.max(...all);
+  const regulars = all.filter((x) => x >= max / 2).sort((a, b) => a - b);
+  return Math.max(40, percentile(regulars, p));
+}
+export const PA_FULLTIME_EXPORT = regularPaPercentile(0.9, 120);   // the reference slate
+export const PA_TYPICAL_EXPORT = regularPaPercentile(0.5, 110);    // what an ordinary regular gets
+// TWO per-game rates, because they answer different questions (Tom, 2026-08-25 #4).
+// PA_FULLTIME_EXPORT is the p90 — the reference SLATE, the denominator that "share
+// of full time" is measured against. But the trade card also builds a playing-time
+// projection from a game log, and for that it needs what a TYPICAL regular gets,
+// not what the busiest one does. Using the p90 there meant a game-log estimate of
+// "he plays every day" produced a 90th-percentile workload, so blending it against
+// a median projection inflated everyone with a real role: Mike Trout, projected for
+// 109 reps and $24.40, came out at a 114-to-125 rep share and read up to $32 —
+// above his own full-time ceiling, which is arithmetically impossible.
+export const PA_PER_GAME = PA_TYPICAL_EXPORT / remainingGames(AUCTION_AS_OF);
+// A full-time regular's remaining plate appearances as of any date.
+export function fullTimeRosPa(asOf?: string | null): number {
+  return Math.max(20, PA_FULLTIME_EXPORT * remainingGames(asOf) / remainingGames(AUCTION_AS_OF));
+}
+// The reference the EXPORT's own PA figures are measured against — its as-of date,
+// not today's, because that is when those projections were made. Also the pool the
+// per-PA rate is re-applied over, so "rate x full time" and "share of full time"
+// are always the same number.
+export const PA_CEILING = PA_FULLTIME_EXPORT;
+
+// ---- THE CATEGORY-DOLLAR DECOMPOSITION (Tom, 2026-08-25 #2) ----
+// Now used to read a player's rate as auctionRaw / pa, and that is not a rate. The
+// auction calculator scores counting stats in ABSOLUTE terms: a player's mHR is
+// (his projected home runs - a replacement's) times a price, so a part-timer
+// carries a fixed "he isn't accumulating" deficit that does NOT shrink with his
+// playing time. Divide the bottom line by 25 PA and a perfectly ordinary hitter
+// reads at -$4 per PA, which extrapolated over a full season is nonsense. It is
+// why a 25-PA read could wipe out a real keeper, and why the pre-peak talent
+// immunity was load-bearing without anyone knowing it.
+//
+// The structure is exactly linear, and verified so against the export:
+//     Dollars = PTS + aPOS + $1.00        (sd 0.05 across 603 hitters, pure rounding)
+//     PTS     = B + rate x PA             (R2 = 0.991 fitting B plus per-PA terms
+//                                          in wRC+, HR/600 and SB/600)
+// B is a league-wide constant — the category value of a player who accumulates
+// nothing — so his TRUE per-PA rate is (PTS - B) / PA, and everything that does
+// not scale with playing time (B, his positional adjustment, the $1 floor) is the
+// PA-invariant remainder auctionRaw - rate x PA.
+//
+// Value at any playing-time share is then simply:  fixed + rate x fullTime x share
+// which returns exactly his auction dollars at his own projected share, and prices
+// extra or missing reps at what his bat is actually worth per rep. The old
+// multiplicative form had the deficit folded into the rate, so scaling by share
+// scaled the deficit too, in one direction for part-timers and the other for
+// anyone credited above his current role.
+//
+// B is re-fitted from the export on load rather than hardcoded: it shrinks as the
+// season empties (a replacement accumulates less), so a constant would silently
+// drift. Fitted on the low-PA half, where the talent-to-playing-time correlation
+// that biases a naive fit is weakest — that recovers -33.34 against a true -33.00
+// on the current export.
+export const PTS_AT_ZERO_PA = (() => {
+  const seen = new Set<string>();
+  const rows: { pa: number; pts: number }[] = [];
+  for (const v of Object.values(AUCTION_VALUES)) {
+    if (v.r !== 'HIT' || v.pa === undefined || v.pts === undefined) continue;
+    const k = `${v.d}|${v.pos}|${v.pa}|${v.pts}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    rows.push({ pa: v.pa, pts: v.pts });
+  }
+  const lowPa = rows.filter((r) => r.pa <= PA_FULLTIME_EXPORT / 3);
+  if (lowPa.length < 20) return -33;                       // fallback: the fitted value today
+  const n = lowPa.length;
+  const sx = lowPa.reduce((a, r) => a + r.pa, 0);
+  const sy = lowPa.reduce((a, r) => a + r.pts, 0);
+  const sxx = lowPa.reduce((a, r) => a + r.pa * r.pa, 0);
+  const sxy = lowPa.reduce((a, r) => a + r.pa * r.pts, 0);
+  const denom = n * sxx - sx * sx;
+  if (denom === 0) return -33;
+  const intercept = (sy * sxx - sx * sxy) / denom;
+  return clamp(intercept, -80, -5);                        // a sane band; the shape is very stable
+})();
 
 // WAR-vs-role interaction (Tom, 2026-08-18): a player's CURRENT talent level
 // relative to what a full-time role requires tells you how safe his playing
@@ -157,7 +288,14 @@ export const PA_CEILING = Math.max(
 // low/no PA (a hot callup, a shutdown arm not yet trusted with saves) → the PA
 // read is too conservative, so boost it instead.
 const ROLE_WAR_BAR: Record<'hitter' | 'pitcher', number> = { hitter: 2.0, pitcher: 1.3 };
-function jobSecurityConfidence(warProxy: number, isPitcher: boolean, paFrac?: number): number {
+// `allowBuyback` (Tom, 2026-08-25 #3): the BOOST side of this reads a suppressed
+// rep count as "the market is being too conservative about his role, and talent
+// this good tends to force its way into the lineup". That reasoning holds for a
+// benching, a platoon or a crowded depth chart. It does not hold for the IL:
+// talent cannot recover games that have already gone by on the calendar. So when
+// the shortfall is missed TIME rather than a diminished role, the confidence tick
+// is capped at neutral and only the dock side can apply.
+function jobSecurityConfidence(warProxy: number, isPitcher: boolean, paFrac?: number, allowBuyback = true): number {
   const bar = ROLE_WAR_BAR[isPitcher ? 'pitcher' : 'hitter'];
   // A "tick", not a re-rating — the sheet's own $ is already the strongest
   // signal (Tom, 2026-08-18: Burger should read only SLIGHTLY below his $15,
@@ -172,11 +310,21 @@ function jobSecurityConfidence(warProxy: number, isPitcher: boolean, paFrac?: nu
   // Shrinks toward neutral as paFrac approaches the ceiling. The DISCOUNT
   // side isn't gated — a real job-security risk exists whether he's playing
   // a lot or a little right now (Burger).
+  if (raw > 1 && !allowBuyback) return 1;
   if (raw > 1 && paFrac !== undefined) {
     const room = clamp(1 - paFrac, 0, 1);
     return 1 + (raw - 1) * room;
   }
   return clamp(raw, 0.8, 1.2);
+}
+
+// A starter's share of a full rotation workload, or a reliever's of a full bullpen
+// role — the pitcher equivalent of a hitter's share of a full slate, so the
+// confidence boost can be gated on the same "is there actually room" test.
+function pitcherRepsShare(inp: ValueInputs): number | undefined {
+  const ip = projectedSeasonIp(inp);
+  if (ip === undefined) return undefined;
+  return clamp(ip / (isPureReliever(inp) ? 60 : SP_WORKLOAD_BAR), 0, 1);
 }
 
 // Which WAR figure should DRIVE that confidence read. Pitchers: peak WAR
@@ -187,6 +335,23 @@ function jobSecurityConfidence(warProxy: number, isPitcher: boolean, paFrac?: nu
 // earning his playing time RIGHT NOW. Scale peak WAR down by how much of his
 // peak RATE he's actually showing (floored at 0 — a current rate below
 // replacement earns no current-talent credit at all, regardless of ceiling).
+// A COUNTING PROFILE IS JOB SECURITY TOO (Tom, 2026-08-25 #4). This read keyed on
+// WAR alone, so a slap-hitting speedster with a modest rate was docked as a
+// playing-time risk even though the steals are exactly why he is in the lineup
+// (Chandler Simpson: 60 projected steals, 96 wRC+, docked ~8% off a $9.70 market).
+// The trade card's own jobSecurity layer has had a counting-stat escape for this
+// case for months; the model's internal confidence read did not, so the two
+// disagreed about the same player. Scarce combined power and speed floors the proxy
+// at the everyday bar, which is what "no fringe dock" means.
+const COUNTING_SECURE_HRSB = 45;   // combined HR+SB per 600 that makes him a lineup fixture
+const COUNTING_NOTABLE_HRSB = 35;
+function countingFloor(inp: ValueInputs): number {
+  if (inp.isPitcher) return 0;
+  const hrsb = (inp.hr ?? 0) + (inp.sb ?? 0);
+  if (hrsb >= COUNTING_SECURE_HRSB) return ROLE_WAR_BAR.hitter;          // full escape
+  if (hrsb >= COUNTING_NOTABLE_HRSB) return ROLE_WAR_BAR.hitter * 0.9;   // most of it
+  return 0;
+}
 function currentWarProxy(inp: ValueInputs, curWrcOverride?: number): number {
   const peakWar = inp.war ?? 0;
   if (inp.isPitcher) return peakWar;
@@ -199,22 +364,32 @@ function currentWarProxy(inp: ValueInputs, curWrcOverride?: number): number {
   // Default every pre-peak hitter to the age-based ramp (the same curve his Now
   // rate/warPv already uses elsewhere); only override it with the sharper
   // current-vs-peak-rate read when we actually have both numbers.
-  if (cur === undefined || peak === undefined || peak <= 90) return peakWar * presentMaturity(inp.age);
+  if (cur === undefined || peak === undefined || peak <= 90) return Math.max(countingFloor(inp), peakWar * presentMaturity(inp.age));
   const ratio = clamp((cur - 90) / (peak - 90), 0, 1.3);
-  return peakWar * ratio;
+  return Math.max(countingFloor(inp), peakWar * ratio);
 }
 
-// His true $-per-PA productivity, read straight off the sheet (needs a real
-// sample — under ~15 PA the export's own total is too noisy to divide out).
+// His true $-per-PA productivity: category dollars above the zero-PA constant,
+// per plate appearance. See the decomposition note above.
+//
+// The minimum sample is now 10 PA rather than 15, and it is there for PRECISION,
+// not for the old extrapolation artifact: PTS is published rounded to $0.10, so at
+// 10 PA the rate carries about +/-$0.005 of rounding noise, which is +/-$0.60 over
+// a full slate. At 2 PA the same rounding is worth +/-$3.
 function hitterRatePerPA(inp: ValueInputs): number | undefined {
-  // Also gated on marketBaseline (not just auctionRaw/pa): the talent-only
-  // lenses (peakSeasons' Upside anchor, the not-in-export fallback) explicitly
-  // null out marketBaseline to strip the market signal — without this same
-  // gate here, auctionRaw/pa would leak his CURRENT market rate into what's
-  // supposed to be a market-free ceiling read.
+  // Gated on marketBaseline (not just pts/pa): the talent-only lenses explicitly
+  // null out marketBaseline to strip the market signal, and without this gate the
+  // market rate would leak into what is supposed to be a market-free ceiling.
   if (inp.marketBaseline === undefined) return undefined;
-  if (inp.auctionRaw === undefined || inp.pa === undefined || inp.pa < 15) return undefined;
-  return inp.auctionRaw / inp.pa;
+  if (inp.pts === undefined || inp.auctionRaw === undefined || inp.pa === undefined || inp.pa < 10) return undefined;
+  return (inp.pts - PTS_AT_ZERO_PA) / inp.pa;
+}
+// The part of his dollars that does NOT scale with playing time: the zero-PA
+// category constant, his positional adjustment, and the calculator's $1 floor.
+// Taken as a residual from his own row so it needs no separate columns and no
+// assumption about which of those three pieces is which.
+function hitterFixedDollars(inp: ValueInputs, rate: number): number {
+  return (inp.auctionRaw ?? 0) - rate * (inp.pa ?? 0);
 }
 
 // Re-apply a $-per-PA rate at a confidence-adjusted share of the full-time PA
@@ -222,11 +397,43 @@ function hitterRatePerPA(inp: ValueInputs): number | undefined {
 // past what the sheet's own PA implies) or produce a negative surplus (a
 // below-replacement rate scaled up by real playing time is a real negative
 // signal, e.g. Lara) — floored at 0 like every other present-value path.
-function presentFromRateAndPa(rateDollarPerPA: number, paFrac: number, isPitcher: boolean, isRp: boolean, s: LeagueSettings): number {
+// Value at a given share of a full-time slate. ONE formula for every case now that
+// the fixed and per-rep pieces are separated (Tom, 2026-08-25 #2):
+//
+//     value = fixed + rate x fullTime x share - the wire line
+//
+// At his own projected share this returns exactly his auction dollars minus the
+// line, so a negative asset reads as the market's own verdict without needing a
+// special case. Above his share, the extra reps are priced at what his bat is
+// worth per rep; below it, so is the shortfall. The confidence tick is now
+// correctly signed for everyone too: shrinking a shaky player's share earns back
+// less of the accumulation deficit, so he gets worse, where under the old
+// multiplicative form the same tick made a negative player look better.
+//
+// `floorAtZero` is for the future-season vector: a below-replacement SEASON is
+// worth zero to a keeper (you'd roster someone else), not a debt you carry for six
+// years. Now passes false, because this season you are actually carrying him.
+function presentFromRate(fixed: number, rateDollarPerPA: number, share: number, isPitcher: boolean, isRp: boolean, s: LeagueSettings, floorAtZero = false): number {
   const role: AuctionRoleForDisplay = isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
-  const fullPtSurplus = rateDollarPerPA * PA_CEILING - FA_LINE[role] * depthFactor(s); // can be negative
-  return Math.max(0, fullPtSurplus * clamp(paFrac, 0, 1.15)) / AUCTION_DIV;
+  const line = FA_LINE[role] * depthFactor(s);
+  const v = fixed + rateDollarPerPA * PA_CEILING * clamp(share, 0, 1.15) - line;
+  return (floorAtZero ? Math.max(0, v) : v) / AUCTION_DIV;
 }
+
+// AN IL'D REGULAR IS WORTH A TICK MORE THAN HIS REMAINING REPS (Tom, 2026-08-18 and
+// again 2026-08-25 #3: "a $15 injured guy > a $15 healthy guy for Now"). Two
+// players with the same remaining dollars are not equivalent if one of them gets
+// there on an elite rate over fewer games: while he is out the roster spot can be
+// streamed, and when he returns he is a stud in your lineup rather than a
+// replacement-level regular filling it all season. That is worth something real,
+// and it is worth a TICK — Tom's own calibration from the Vlad case, not a re-base
+// to a full slate.
+//
+// Deliberately small, explicit and keyed to how good he actually is, so a fringe
+// player on the IL gets nothing from it. It REPLACES the flat severity dock on the
+// rate path rather than stacking with it: once his share prices the games he will
+// miss, docking him again for missing them charges the same absence twice.
+const IL_RETURN_PREMIUM = 0.08;   // at full talent confidence: ~5 to 8% over his remaining-reps dollars
 
 // ---- UPSIDE (Tom, 2026-08-18): full-PT dollar value from category production
 // ALONE — wRC+/HR/SB (pitchers: ERA/20) at a full season, no WAR, no park, no
@@ -239,11 +446,47 @@ function presentFromRateAndPa(rateDollarPerPA: number, paFrac: number, isPitcher
 // This SAME number anchors the peakSeasons ceiling lens below, so Keep/
 // Overall's "how much of his ceiling does he get" blend and the standalone
 // Upside chip are always talking about the same ceiling.
-const UPSIDE_SCALE_HIT = 0.68;
-const UPSIDE_SCALE_PIT = 1.0;
-function upsideValueScale(inp: ValueInputs, s: LeagueSettings): number {
+// Two scales, not one (Tom, 2026-08-25 #4). These used to be a single number on the
+// grounds that the Upside chip and the talent lens should "talk about the same
+// ceiling". They shouldn't, and unifying them was quietly wrong in both directions:
+//
+//   UPSIDE_CEILING is what the chip means — his best case. Calibrated to the 85th
+//   percentile of the market-value-to-production ratio among near-full-workload
+//   players, so 85% of them have an Upside at or above their own full-slate market
+//   value. That percentile is what makes "Upside >= Now" hold as an invariant
+//   rather than a coincidence; a conditional MEAN can never do it, because half the
+//   population sits above its own mean by construction.
+//
+//   TALENT_LENS is what the season engine needs — his EXPECTED value at a full
+//   opportunity, which is what Keep and Overall are averages of. Feeding them a
+//   ceiling inflates every future season. This is the through-origin fit.
+//
+// Both fitted 2026-08-25 against the auction export: hitters n=178 (90+ projected
+// PA), pitchers n=75 (starters at 27+ remaining innings, i.e. a full rotation
+// share). The old pitcher number was the miscalibration: the market pays $15.80 per
+// unit of (4.60 - era20) and the model was paying $11.00, so it was roughly right
+// in the middle of the pool and badly short at the top. Gavin Williams (3.44) read
+// $14 against a $14.60 market, but Tarik Skubal (2.59) read $23 against $36.40.
+const UPSIDE_CEILING_HIT = 0.92;
+const UPSIDE_CEILING_PIT = 1.65;
+const TALENT_LENS_HIT = 0.71;
+const TALENT_LENS_PIT = 1.21;
+// `ceiling` picks which of the two: true for the displayed Upside chip, false for
+// the season engine's full-opportunity anchor.
+function upsideValueScale(inp: ValueInputs, s: LeagueSettings, ceiling = true): number {
   const f = fantasyRate(inp, s);
-  return f * (inp.isPitcher ? UPSIDE_SCALE_PIT : UPSIDE_SCALE_HIT);
+  const scale = inp.isPitcher
+    ? (ceiling ? UPSIDE_CEILING_PIT : TALENT_LENS_PIT)
+    : (ceiling ? UPSIDE_CEILING_HIT : TALENT_LENS_HIT);
+  // CATCHER VOLUME (Tom, 2026-08-25 — this was a real bug, not a judgment call):
+  // fantasyRate is built from per-600 rates, so without this a catcher's ceiling
+  // assumed a full regular's plate appearances. The volume haircut used to live
+  // only in fantasyWar, which Upside never touches — so every catcher's Upside,
+  // and the talent lens that feeds his Keep and Overall, priced an ironman
+  // workload no catcher gets.
+  const vol = catcherVolume(inp.position, inp.peakWrcPlus,
+    catcherSeverity(inp.position, inp.catcherShare, inp.catcherFlex));
+  return f * vol * scale;
 }
 // Pitchers age more gracefully than hitters for keeper purposes — a good 31-yo arm
 // is usually still good at 32 — so their retention plateaus a year longer and
@@ -253,28 +496,6 @@ function ageRetention(a: number, isPitcher = false): number {
   const slope = isPitcher ? 0.05 : 0.06;
   return Math.max(0, Math.min(1.0, 1.05 - Math.max(0, a - onset) * slope));
 }
-const KEEPER_NORM = 2.76;     // normalize so a prime-age (26) player lands ≈ 1.15
-
-// Per-season keeper aggregation — the engine behind "below-replacement seasons
-// aren't material" (Tom, 2026-08-05). The old shape decayed the NET surplus
-// (value above the bar) by keeperAgeFactor, which silently pays out seasons
-// where the decayed GROSS ability has fallen below the bar — a 33-yo 2.8-WAR
-// bat's age-36 season is gross 1.9 vs a 2.0 bar and should be worth ZERO, but
-// surplus-decay credited 0.8 × 0.69 = 0.55 for it. This instead decays the
-// gross along the aging curve and lets the caller re-derive each season's
-// value (netting against the bar yearly, floored at 0) before the discounted
-// sum. seasonVal(ret) maps one season's retention to its value; prime seasons
-// (retention 1) reproduce the legacy math exactly, so young/prime players are
-// untouched — only decline-phase seasons get cut.
-function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (ret: number) => number, surv?: number[]): number {
-  if (age === undefined) return seasonVal(1); // legacy: unknown age aggregates at ×1.0
-  let sum = 0;
-  for (let k = 1; k <= KEEPER_HORIZON; k++) {
-    sum += Math.pow(YEAR_DISCOUNT, k - 1) * seasonVal(ageRetention(age + k, isPitcher)) * (surv?.[k - 1] ?? 1);
-  }
-  return sum / KEEPER_NORM;
-}
-
 // QUALITY-CONDITIONED career survival (Tom, 2026-08-05): expected value must
 // include the odds the player even HAS each future season, and that can't be a
 // blanket age curve — "98% of 36-year-olds won't have an age-39 season", but
@@ -291,19 +512,72 @@ function keeperSeasons(age: number | undefined, isPitcher: boolean, seasonVal: (
 // so effectively none of it counts. Young players with positive margins ride
 // the 0.01 floor (≈7% total trim across the full horizon — real flameout risk,
 // negligible reshuffling).
-function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: number, bar: number, len = KEEPER_HORIZON): number[] | undefined {
+// PITCHER ATTRITION IS UNIVERSAL, NOT A LATE-CAREER EVENT (Tom, 2026-08-25).
+// The old floor only bit at 31+, which let a 24-year-old ace ride a ~1%/yr hazard
+// for seven straight seasons. Every arm carries real breakdown risk from the day
+// he throws a professional pitch, so the floor now applies at every age.
+const PITCHER_HAZARD_FLOOR = 0.06;
+const HITTER_HAZARD_FLOOR = 0.01;
+// A live arm injury is not a this-season event the way a hamstring is: surgery and
+// recurrence shorten careers. This is the forward echo of that, expressed as
+// standing extra hazard rather than as a one-season value dock.
+const ARM_INJURY_HAZARD = 0.03;
+// Workload durability: a starter who can't hold a rotation turn is a
+// bullpen-or-broken risk. Pro-rated from the export's remaining innings, so it
+// reads a real projection rather than the raw August number.
+const SP_WORKLOAD_BAR = 140;      // full-season innings a healthy starter clears
+const SP_WORKLOAD_HAZARD = 0.07;  // hazard added at zero projected workload
+// A rotation regular is worth roughly this many innings per team game (about 5.5
+// every fifth day), so it is what a full ROS starter's share looks like.
+const SP_IP_PER_TEAM_GAME = 1.1;
+export function projectedSeasonIp(inp: ValueInputs): number | undefined {
+  if (inp.rosIp === undefined) return undefined;
+  return inp.rosIp * (SEASON_GAMES / remainingGames(AUCTION_AS_OF));
+}
+// IS THE PROJECTION EVEN READABLE (Tom, 2026-08-25 #2). The workload signal is
+// pro-rated from remaining innings, and by late August a full rotation share is
+// only about 30 of them, so a handful of innings blows up into a wild full-season
+// figure: 8 ROS innings pro-rates to 48, which reads as a fragile arm when it
+// really means a September call-up, a piggyback, or a bullpen game. So this is a
+// GATE, not a taper. Below the threshold the number carries no information about
+// durability and the penalty simply does not apply; above it, it applies in full.
+//
+// A taper was the obvious first move and it was wrong: the sample size and the
+// workload shortfall are driven by the SAME number in opposite directions, so
+// multiplying them cancelled the penalty everywhere (an 18-IP starter, a genuine
+// 108-inning arm, lost 0.2% of his Keep). The gate keeps the band that matters:
+// 40% of a rotation share pro-rates to about 72 innings, so a real 72-to-140
+// inning starter is charged and a two-start call-up is not.
+const WORKLOAD_MIN_SHARE = 0.4;
+function hasReadableWorkload(inp: ValueInputs): boolean {
+  if (inp.rosIp === undefined) return false;
+  const fullRole = SP_IP_PER_TEAM_GAME * remainingGames(AUCTION_AS_OF);
+  return inp.rosIp / Math.max(1, fullRole) >= WORKLOAD_MIN_SHARE;
+}
+// Extra standing hazard per year for this specific arm, on top of the age curve.
+function pitcherHazardAdd(inp: ValueInputs): number {
+  if (!inp.isPitcher) return 0;
+  let add = inp.armInjured ? ARM_INJURY_HAZARD : 0;
+  const ip = projectedSeasonIp(inp);
+  if (ip !== undefined && !isPureReliever(inp) && ip < SP_WORKLOAD_BAR && hasReadableWorkload(inp)) {
+    // Tempered for young arms: a 21-year-old projected for 70 innings is usually
+    // on a development plan (rookie innings cap, September shutdown), while a
+    // 28-year-old projected for 70 is telling you something about his elbow. The
+    // signal is the same number; what it MEANS depends on where he is.
+    const established = clamp(((inp.age ?? 26) - 22) / 4, 0.3, 1);
+    add += SP_WORKLOAD_HAZARD * clamp((SP_WORKLOAD_BAR - ip) / SP_WORKLOAD_BAR, 0, 1) * established;
+  }
+  return add;
+}
+function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: number, bar: number, len = KEEPER_HORIZON, hazardAdd = 0): number[] | undefined {
   if (age === undefined) return undefined;
   const out: number[] = [];
   let s = 1;
   for (let k = 1; k <= len; k++) {
     const a = age + k;
     const margin = fWarKeeper * ageRetention(a, isPitcher) - bar;
-    // Pitcher arm attrition (Tom, 2026-08-07): an elite projection must not
-    // clamp an ARM's career-end hazard to ~1% — TJ/breakdown risk runs ~5%+/yr
-    // for even the best aging arms (the chart-only survivalTo always knew
-    // this; the keeper curve didn't). Floor a 31+ pitcher's hazard at 5.5%.
-    const floor = isPitcher && a >= 31 ? 0.055 : 0.01;
-    s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin, floor, 0.85);
+    const floor = isPitcher ? PITCHER_HAZARD_FLOOR : HITTER_HAZARD_FLOOR;
+    s *= 1 - clamp(0.075 * (a - 34) - 0.21 * margin + hazardAdd, floor + hazardAdd, 0.85);
     out.push(s);
   }
   return out;
@@ -313,28 +587,6 @@ function survivalCurve(age: number | undefined, isPitcher: boolean, fWarKeeper: 
 // prime × the aging decline past it (survival multiplies separately).
 function futureSeasonShape(a: number, isPitcher: boolean): number {
   return ageRetention(a, isPitcher) * presentMaturity(a);
-}
-
-export function keeperAgeFactor(age?: number, isPitcher = false): number {
-  if (age === undefined) return 1.0;
-  let sum = 0;
-  for (let k = 1; k <= KEEPER_HORIZON; k++) {
-    sum += Math.pow(YEAR_DISCOUNT, k - 1) * ageRetention(age + k, isPitcher);
-  }
-  return sum / KEEPER_NORM;
-}
-
-// The keeper ceiling's premium over the bar (peak WAR ×3) is a GROWTH/upside reward
-// — it assumes the player will still reach/exceed this peak. A player past peak has
-// no growth ahead, so the premium fades with age: pitchers hold it latest (onset
-// 32), bat-only corners (1B/DH) erode earliest (onset 28), everyone else at 30.
-// This is what drops a declining vet's FV below his PV.
-export function growthPremium(age?: number, isPitcher = false, position?: string): number {
-  if (age === undefined) return 3;
-  const corner = position === '1B' || position === 'DH';
-  const onset = isPitcher ? 32 : corner ? 28 : 30;
-  const slope = corner ? 0.2 : 0.15;
-  return Math.max(1.5, 3 - Math.max(0, age - onset) * slope);
 }
 
 // ATHLETICISM decays before the bat does. Delta-method aging curves put the SB
@@ -368,10 +620,11 @@ export function proximityMultiplier(level?: string): number {
 // crushes elite young prospects below replacement (a 2.79-WAR 19-yo SS in A-ball
 // is a prized dynasty keeper, not a scrub). Combine them additively so each risk
 // contributes ~60% of its discount. MLB players are unaffected (both factors = 1).
-export function keeperDeferral(age?: number, level?: string, isPitcher?: boolean, rebuilder?: boolean): number {
+export function keeperDeferral(age?: number, level?: string, isPitcher?: boolean, rebuilder?: boolean, severity = 1): number {
   const mat = maturityFactor(age, level, isPitcher, rebuilder);
   const prox = proximityMultiplier(level);
-  return Math.max(0.3, 1 - (1 - mat) * 0.6 - (1 - prox) * 0.6);
+  const w = 0.6 * severity;
+  return Math.max(0.3, 1 - (1 - mat) * w - (1 - prox) * w);
 }
 
 // Time-to-peak discount for FUTURE value. A player's productive peak window is
@@ -479,27 +732,6 @@ export function earningPtBump(war: number, age?: number, ptRate?: number): numbe
   return 1 + (0.06 + 0.14 * talent) * shortfall;    // base 6% at 2.5 WAR → up to 20% at 5 WAR, scaled by the reps gap
 }
 
-// LONG-TERM PT durability (the dominant use of WAR, weighs on FV). A good WAR
-// means the everyday reps keep coming for years — keeper value you can bank; a
-// poor WAR means the future role is a question mark (a bat-only or fringe guy is
-// a demotion/platoon away from zero keeper value). This is the "FV a lot" half of
-// the design. Centered on the ~2.0-WAR everyday pivot so it TILTS the keeper grade
-// by durability rather than inflating the whole board: ~1.0 at 2 WAR, up to ~1.18
-// for stars, down to ~0.6–0.68 for a replacement-level regular. Up-the-middle is
-// a touch more durable (scarcity keeps them employed); corners harsher (bat-only,
-// replaceable). Uses raw WAR on purpose — a high framing/glove WAR genuinely means
-// durable playing time (teams keep good defenders), which is what durability is.
-export function warDurability(war: number, position?: string): number {
-  const p = position ?? '';
-  const premium = p === 'C' || p === 'SS' || p === '2B' || p === 'CF';
-  const corner = p === '1B' || p === 'DH';
-  const up = premium ? 0.09 : corner ? 0.06 : 0.075;   // reward for WAR above the pivot
-  const dn = premium ? 0.11 : corner ? 0.17 : 0.14;    // risk for WAR below it (corners harshest)
-  const d = war - 2.0;
-  const f = 1 + (d >= 0 ? up * d : dn * d);
-  return clamp(f, corner ? 0.6 : premium ? 0.72 : 0.68, 1.18);
-}
-
 // Present value only fully counts in the majors.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
@@ -542,38 +774,116 @@ export function replacementWar(s: LeagueSettings): number {
   return clamp(1.0 * (s.teams / 20), 0.4, 2.0);
 }
 
-// Fantasy positional scarcity at standard slots: up-the-middle is thin, corners
-// and DH are deep. Pitchers are neutral (no entry → 0).
-const SCARCITY_PRIOR: Record<string, number> = {
-  C: 0.12, SS: 0.06, '2B': 0.05, CF: 0.04, '3B': 0.02,
-  OF: 0, LF: -0.02, RF: -0.02, '1B': -0.06, DH: -0.10,
-};
 // Which starting-slot bucket a fielding position draws from.
 function slotBucket(pos: string): string {
   if (['LF', 'CF', 'RF', 'OF'].includes(pos)) return 'OF';
   if (pos === 'SP' || pos === 'RP') return 'P';
   return pos;
 }
-// League-wide demand for a position, including flex slots that can hold it: CI
-// feeds 1B/3B, MI feeds 2B/SS. (UTIL is left general — it doesn't concentrate on
-// any one position.)
+// League-wide demand for a position PER TEAM, including the flex slots that can
+// hold it: CI feeds 1B/3B, MI feeds 2B/SS. UTIL counts ONLY for DH, because it is
+// the sole slot a DH-only bat can fill; for everyone else UTIL is where a surplus
+// bat of any position lands, so it doesn't concentrate demand at a fielding spot.
 function positionDemand(pos: string, slots: Record<string, number>): number {
-  const own = slots[slotBucket(pos)] ?? 0;
+  const b = slotBucket(pos);
+  const own = slots[b] ?? 0;
   if (pos === '1B' || pos === '3B') return own + (slots.CI ?? 0);
   if (pos === '2B' || pos === 'SS') return own + (slots.MI ?? 0);
+  if (pos === 'DH') return own + (slots.UTIL ?? 0);
   return own;
 }
-// A position's scarcity premium grows when a league starts MORE of it than
-// standard (2-catcher leagues make catchers scarcer; extra CI/MI deepen corner/
-// middle demand) and shrinks when it starts fewer.
+
+// ---- POSITIONAL SCARCITY, DERIVED FROM THE POOL (Tom, 2026-08-25) ----
+// This used to be a table of hand-set priors (C +0.12 … DH -0.10). The priors had
+// the right ORDER but no way to know this league's actual demand: what matters is
+// how good the last startable player at a position is once every team has filled
+// its slots. So compute it: N = teams x per-team demand (own slots + flex share),
+// then read the Nth best rest-of-season dollar value among everyone ELIGIBLE
+// there, and compare that to the slot-weighted average across all hitter slots.
+//
+// The comparison is against the AVERAGE rather than against outfield, so the
+// multipliers redistribute around 1.0 instead of inflating the whole board: this
+// is a re-shaping of the old priors at the same magnitude, not a re-scaling.
+//
+// KNOWN LIMIT, and the reason this is a multiplier rather than the right answer:
+// scarcity is really ADDITIVE. In this league the gap between the last startable
+// catcher and the last startable DH-only bat is about 1.9 value units ($9.60),
+// and that gap is the same $9.60 whether the player in question is a $30 bat or a
+// $8 bat. A multiplier necessarily pays the $30 catcher four times more for it.
+// Fixing that means pricing every hitter as surplus over his own position's
+// replacement instead of scaling him, which reaches into the keeper bar and every
+// floor, so it is deliberately left as a follow-up rather than smuggled in here.
+const SCARCITY_K = 0.15;          // multiplier per value-unit of replacement gap
+const SCARCITY_BAND: [number, number] = [0.80, 1.30];
+// The export cannot resolve outfield subpositions (every OF reads "OF"), so the
+// pool can't see that centre field is thinner than a corner. These small residual
+// tilts inside the OF bucket are the surviving remnant of the old prior table.
+const OF_SUBPOS_TILT: Record<string, number> = { CF: 0.04, LF: -0.02, RF: -0.02 };
+const HITTER_BUCKETS = ['C', '1B', '2B', '3B', 'SS', 'OF', 'DH'];
+
+// One row per player, not per id: AUCTION_VALUES is keyed by every id a player is
+// known under, so the raw entry count double-counts him.
+let auctionPool: { d: number; pos: string }[] | null = null;
+function pool(): { d: number; pos: string }[] {
+  if (auctionPool) return auctionPool;
+  const seen = new Set<string>();
+  const out: { d: number; pos: string }[] = [];
+  for (const v of Object.values(AUCTION_VALUES)) {
+    if (v.r !== 'HIT' || !v.pos) continue;
+    const k = `${v.d}|${v.pos}|${v.pa ?? ''}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push({ d: v.d, pos: v.pos });
+  }
+  auctionPool = out;
+  return out;
+}
+
+const scarcityCache = new Map<string, Record<string, number>>();
+// Replacement value (in value-model units) at each hitter bucket for this league.
+function replacementByPosition(s: LeagueSettings): Record<string, number> {
+  const key = `${s.teams}|${JSON.stringify(s.slots)}`;
+  const hit = scarcityCache.get(key);
+  if (hit) return hit;
+  const rows = pool();
+  const out: Record<string, number> = {};
+  for (const b of HITTER_BUCKETS) {
+    const demand = positionDemand(b, s.slots);
+    if (demand <= 0) continue;
+    // Eligibility, not primary position: a 1B/OF counts in both pools.
+    const vals = rows
+      .filter((r) => r.pos.split('/').some((t) => t.trim() === b))
+      .map((r) => r.d)
+      .sort((a, b2) => b2 - a);
+    if (!vals.length) continue;
+    const n = Math.max(1, Math.round(s.teams * demand));
+    const d = vals[Math.min(n, vals.length) - 1];
+    out[b] = (d - FA_LINE.HIT) / AUCTION_DIV;
+  }
+  scarcityCache.set(key, out);
+  return out;
+}
+
+// A position's premium: how much better the average league-wide replacement is
+// than the replacement at HIS spot. Scarce position → positive gap → multiplier
+// above 1. Deep position → below 1. Pitchers stay neutral (their scarcity lives
+// in the keeper bar and in nine P slots per team).
 export function scarcityMult(pos: string | undefined, s: LeagueSettings): number {
-  if (!pos) return 1;
-  const prior = SCARCITY_PRIOR[pos] ?? 0;
-  if (prior === 0) return 1;
-  const std = positionDemand(pos, DEFAULT_SLOTS) || 1;
-  const user = positionDemand(pos, s.slots);
-  const slotAdj = clamp(user / std, 0.5, 2.5);
-  return clamp(1 + prior * slotAdj, 0.82, 1.24);
+  if (!pos || pos === 'SP' || pos === 'RP' || pos === 'P') return 1;
+  const b = slotBucket(pos);
+  const repl = replacementByPosition(s);
+  const mine = repl[b];
+  if (mine === undefined) return 1;
+  let wSum = 0, vSum = 0;
+  for (const k of HITTER_BUCKETS) {
+    const demand = positionDemand(k, s.slots);
+    if (demand <= 0 || repl[k] === undefined) continue;
+    wSum += demand;
+    vSum += demand * repl[k];
+  }
+  const ref = wSum > 0 ? vSum / wSum : mine;
+  const tilt = b === 'OF' ? (OF_SUBPOS_TILT[pos] ?? 0) : 0;
+  return clamp(1 + SCARCITY_K * (ref - mine) + tilt, SCARCITY_BAND[0], SCARCITY_BAND[1]);
 }
 
 // Scoring format reweights the model. OBP is the baseline. Points leagues make
@@ -622,13 +932,38 @@ export function catcherSeverity(position?: string, catcherShare?: number, catche
   return catcherFlex ? 0.5 : 1;
 }
 
+// CATCHER PLAYING-TIME VOLUME (Tom, 2026-08-25). A full-time catcher takes about
+// 15% fewer PA than another regular (rest days, day-after-night), so his per-600
+// rates overstate real seasonal volume. Two refinements on the old flat 15%:
+//
+//  1. A GOOD BAT BUYS SOME OF IT BACK. Managers find PA for a catcher who hits:
+//     he DHs on his off days and starts the day game after a night game anyway.
+//     So the penalty slides continuously with projected wRC+ instead of being one
+//     fixed number for every catcher.
+//  2. NOBODY GETS AN IRONMAN WORKLOAD. However good the bat, no catcher plays a
+//     full slate, so the buy-back stops at CATCHER_VOL_CEILING. An elite hitting
+//     catcher lands at ~0.90 of a regular's volume, never 1.0.
+//
+// Returns the share of a normal regular's playing time to credit (1.0 for anyone
+// who isn't catching). Scaled by catcherSeverity, so a C/LF/DH who squats a third
+// of the time is barely touched.
+export const CATCHER_VOL_BASE = 0.85;    // standard full-time catcher
+export const CATCHER_VOL_CEILING = 0.90; // absolute cap, elite bat included
+const CATCHER_BUYBACK_WRC = 40;          // wRC+ above average that earns the full buy-back
+export function catcherVolume(position?: string, peakWrcPlus?: number, cSev = 1): number {
+  if ((position ?? '') !== 'C' || cSev <= 0) return 1;
+  const buyback = clamp(((peakWrcPlus ?? 100) - 100) / CATCHER_BUYBACK_WRC, 0, 1);
+  const vol = CATCHER_VOL_BASE + buyback * (CATCHER_VOL_CEILING - CATCHER_VOL_BASE);
+  return 1 - (1 - vol) * cSev;   // 0.85 standard, 0.90 for a 140-wRC+ bat, faded by how much he catches
+}
+
 // WAR isn't fantasy value. Catcher WAR is inflated by framing/defense that
 // doesn't score, so it's haircut — scaled by cSev (catcherSeverity), how much of
 // his time is really spent catching. 1B/DH WAR is deflated by the positional
 // penalty even though their bat is the whole fantasy point, so we add it back —
 // a good-hitting low-WAR 1B (Schwarber-type) then clears the keeper bar on the
 // bat. Middle-infield/OF WAR translates roughly as-is (scarcity handles those).
-function fantasyWar(war: number, position?: string, cSev = 1, defRuns?: number, defKeep = 0.3): number {
+function fantasyWar(war: number, position?: string, cSev = 1, defRuns?: number, defKeep = 0.3, peakWrcPlus?: number): number {
   const p = position ?? '';
   // Defense in fantasy (when the sheet's raw DEF is available): it produces no
   // stats, but it IS insurance — a plus glove holds the everyday job and extends
@@ -642,10 +977,9 @@ function fantasyWar(war: number, position?: string, cSev = 1, defRuns?: number, 
   // the games-played reality of the position.
   if (defRuns !== undefined) {
     const offWar = war - (defRuns / 9.774) * (1 - defKeep);
-    // Full-time catchers take ~15% fewer PA than other regulars (rest days,
-    // day-after-night) — their per-600 rates overstate real seasonal volume.
-    // A part-time C (splits time at LF/DH/1B) loses proportionally less.
-    return p === 'C' ? offWar * (1 - 0.15 * cSev) : offWar;
+    // Catcher volume (see catcherVolume): fewer PA than another regular, less so
+    // for a bat good enough that the manager finds him at-bats elsewhere.
+    return p === 'C' ? offWar * catcherVolume(p, peakWrcPlus, cSev) : offWar;
   }
   // Legacy fallbacks when DEF isn't known (e.g. older cached payloads).
   if (p === 'C') return war * (1 - 0.20 * cSev);
@@ -698,16 +1032,8 @@ function ovWeight(k: number): number {
 export const OV_REPL = 0.7; // waiver-wire per-season line (mirrors the trade calc's PV replacement)
 const OV_NORM = Array.from({ length: 8 }, (_, k) => ovWeight(k))
   .reduce((a, b) => a + b, 0); // the 8-season reference career, front-loaded shape
-// Legacy blend — ONLY for the age-unknown fallback path, where there is no
-// season vector to sum (old-scale future, so the old weighting is kept).
-export function overallValue(now: number, keep: number): number {
-  return (now + 2.31 * keep) / 3.31;
-}
-
-export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; future: number; surv?: number[] } {
-  if (inp.war === undefined) return { present: 0, future: 0 };
-  const fmt = FORMAT[s.format];
-  const scar = scarcityMult(inp.position, s);
+export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: number; surv?: number[] } {
+  if (inp.war === undefined) return { present: 0 };
   // Reliever role: limited innings cap fantasy production regardless of rate
   // quality (Mason Miller problem) — win-now docked hard, keeper value keeps
   // most of the ceiling (an elite RP arm is a rotation-conversion lottery
@@ -726,7 +1052,7 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // (not 100%) is the guardrail that keeps FV starting from the hitting profile:
   // a no-bat glove wizard still can't out-keep a real bat on defense alone.
   const cSev = catcherSeverity(inp.position, inp.catcherShare, inp.catcherFlex);
-  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.3);
+  const fWar = inp.isPitcher ? inp.war : fantasyWar(inp.war, inp.position, cSev, inp.defRuns, 0.3, inp.peakWrcPlus);
   // Keeper WAR doesn't inherit WAR's NEGATIVE positional adjustments (1B −12.5,
   // DH −17.5, corner OF −7.5 runs/season): they're real-baseball replacement
   // accounting, and fantasy already prices position via the roster-slot scarcity
@@ -744,56 +1070,22 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   const fWarKeeper = inp.isPitcher ? inp.war : fantasyWar(
     inp.war - negPosRuns / 9.774, inp.position, cSev,
     inp.defRuns === undefined ? undefined : inp.defRuns - negPosRuns,
-    0.7 * sbAgeFactor(inp.age));
+    0.7 * sbAgeFactor(inp.age), inp.peakWrcPlus);
 
-  // ---- Future (keeper) value ----
-  const bar = keeperBarFor(s, inp.isPitcher, inp.position);
-  let fantasy = 0;
-  if (inp.isPitcher) {
-    if (inp.era20 !== undefined) fantasy = Math.max(0, 4.0 - inp.era20);
-  } else {
-    if (inp.peakWrcPlus !== undefined) fantasy += fmt.wrcFan * Math.max(0, (inp.peakWrcPlus - 100) / 20);
-    if (inp.hr !== undefined) fantasy += fmt.hrFan * (inp.hr / 25);
-    if (inp.sb !== undefined) fantasy += fmt.sbFan * (inp.sb / 25) * sbAgeFactor(inp.age);
-  }
-  // Growth premium fades with age (see growthPremium). An aging hitter's counting
-  // stats erode alongside, so his fantasy credit fades on the same schedule; a
-  // pitcher's ERA-based fantasy holds (run prevention ages more gracefully).
-  const growth = growthPremium(inp.age, inp.isPitcher, inp.position);
-  const fantasyFade = inp.isPitcher ? 1 : growth / 3;
-  // Catcher counting stats shrink with catcher PA volume too — proportional to
-  // how much he actually catches (a C/LF/DH's HR aren't squat-suppressed).
-  fantasy *= 1 - 0.2 * cSev;
-  // Clearing the keeper bar used to be a hard step (0.15 → 1.0 the instant WAR
-  // crossed the bar), which put a cliff in keeper value — a 1.9- and 2.1-WAR guy
-  // graded 10× apart. Smooth it into a ramp across ±0.75 WAR around the bar so a
-  // small WAR difference is a small FV difference.
-  const clearsAt = (w: number) => clamp((w - bar + 0.75) / 1.5, 0, 1);
-  // Per-season netting (see keeperSeasons): decay the GROSS keeper WAR along the
-  // aging curve and re-net against the bar EACH season, floored at 0 — a season
-  // where the decayed ability sits below the bar contributes nothing (you'd just
-  // keep someone else) instead of riding along as decayed surplus. The clears
-  // gate slides season by season the same way, so a bat-first corner's fantasy
-  // credit fades toward the 0.15 floor as his margin over the bar erodes rather
-  // than staying frozen at today's clearance.
-  // Career survival rides on every future season (see survivalCurve) — shared
-  // with the sustained floor in liveValue via the return value so both paths
-  // price the same career-end odds.
-  // Long enough to cover the full-career horizon liveValue projects (the
-  // pre-peak Keep shift and the cumulative Overall's run to ~age 43).
-  // CAREER survival is a real-baseball fact, so its quality margin is pinned
-  // to the 20-team/28-keeper baseline bar — using the LEAGUE bar made stars
-  // "die" young in shallow leagues (a 10-team keeper bar is so high that
-  // 34-yo Trout's margin went negative → ~40%/yr hazard → Keep 1.6). The
-  // league's own bar still prices keeper ECONOMICS via netting elsewhere.
+  // ---- Career survival (the only thing the keeper side of this function still
+  // computes; the per-season keeper VALUE lives in liveValue's season engine) ----
+  // CAREER survival is a real-baseball fact, so its quality margin is pinned to the
+  // 20-team/28-keeper baseline bar — using the LEAGUE bar made stars "die" young in
+  // shallow leagues (a 10-team keeper bar is so high that 34-yo Trout's margin went
+  // negative, ~40%/yr hazard, Keep 1.6). The league's own bar still prices keeper
+  // economics via the netting in Overall.
+  // Long enough to cover the full-career horizon liveValue projects (the pre-peak
+  // Keep shift and the cumulative Overall's run to ~age 43).
   const survBar = keeperBarFor({ ...s, teams: 20, keepers: 28 }, inp.isPitcher, inp.position);
   const surv = survivalCurve(inp.age, inp.isPitcher, fWarKeeper, survBar,
     Math.max(KEEPER_HORIZON + Math.max(0, 26 - ((inp.age ?? 26) + 1)),
-      Math.min(25, 43 - (inp.age ?? 43))));
-  const warTerm = keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, fWarKeeper * ret - bar), surv) * growth;
-  const fantasyTerm = fantasy * fantasyFade
-    * keeperSeasons(inp.age, inp.isPitcher, (ret) => ret * (0.15 + 0.85 * clearsAt(fWarKeeper * ret)), surv);
-  const future = (warTerm + fantasyTerm) * (isRp ? 0.8 : 1) * keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder) * scar;
+      Math.min(25, 43 - (inp.age ?? 43))),
+    pitcherHazardAdd(inp));
 
   // ---- Present (win-now): rate × confidence-adjusted playing time (Tom,
   // 2026-08-18 — see the NOW block above). Sheet-only baseline; liveValue
@@ -811,8 +1103,12 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   // the 20-team replacement floor. Falls back to the pre-baked value only when
   // auctionRaw isn't available (legacy cached payloads).
   const mktRole: AuctionRoleForDisplay = inp.isPitcher ? (isRp ? 'RP' : 'SP') : 'HIT';
+  // NOT floored at 0 (Tom, 2026-08-25): a pitcher the market prices below the wire
+  // line is a negative asset, and Now is now allowed to say so. warPv keeps its own
+  // floor, so a negative here can only drag him toward zero and past it by the
+  // amount the market is actually negative.
   const mkt = inp.auctionRaw !== undefined
-    ? Math.max(0, inp.auctionRaw - FA_LINE[mktRole] * depthFactor(s)) / AUCTION_DIV
+    ? (inp.auctionRaw - FA_LINE[mktRole] * depthFactor(s)) / AUCTION_DIV
     : (inp.marketBaseline ?? 0);
   const warProxy = currentWarProxy(inp);
   // A hitter with a real (≥15 PA) auction-export sample gets priced by
@@ -828,31 +1124,48 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
   if (hitterRate !== undefined) {
     const paFrac = inp.pa !== undefined ? inp.pa / PA_CEILING : 1;
     const conf = jobSecurityConfidence(warProxy, false, paFrac);
-    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false, s);
+    present = presentFromRate(hitterFixedDollars(inp, hitterRate), hitterRate, paFrac * conf, false, false, s);
   } else {
-    const conf = jobSecurityConfidence(warProxy, inp.isPitcher);
-    // Positional scarcity weighs mostly on KEEPER value (a scarce SS is hard to
-    // replace on your roster); win-now production is closer to position-agnostic
-    // (a run's a run today), so present value only feels scarcity at half strength.
-    const scarPresent = 1 + (scar - 1) * 0.5;
-    // Market-led when the player is IN the auction export (the good predictor) —
-    // including when the market values him at/below replacement (mkt 0), which is a
-    // real signal, not a reason to fall back. WAR-led fallback ONLY when he's absent
-    // from the export entirely (marketBaseline undefined), so he isn't zeroed.
-    // (Tom, 2026-08-18): fmt.mktW (~0.62) was calibrated assuming the dynamic
-    // production layer ALSO contributed ~0.7 weight on top — this path (pitchers
-    // always; hitters only when the sample's too thin to decompose) no longer
-    // gets that layer when in-export (the double-count fix), so it needs to
-    // trust the market close to fully now, or it silently underprices every
-    // in-export pitcher (a $25 Miller-shape read $19 before this fix).
+    // Pitchers now carry a reps signal too (Tom, 2026-08-25 #4). Leaving paFrac
+    // undefined let the BOOST side run ungated for every arm, so a 4.2-WAR starter
+    // already projected for a full rotation turn collected the full +20% "he'll
+    // earn more work than this" credit on top of his market price. A full rotation
+    // share leaves no room to buy back.
+    const repsShare = inp.isPitcher ? pitcherRepsShare(inp) : undefined;
+    const conf = jobSecurityConfidence(warProxy, inp.isPitcher, repsShare);
+    // IN THE EXPORT: the market IS the read, and WAR is a tick on it, not an adder
+    // (Tom, 2026-08-25 #4). This used to be `1.0 * market + 0.18 * warPv`, weights
+    // that sum to more than a market read by construction, so every in-export
+    // pitcher came out above his own price: full-workload starters ran a median
+    // $2.70 high, and a 4.2-WAR Gavin Williams read $20.00 against a $14.60 market
+    // while his own ceiling was $22. That is the same shape as the hitter rate
+    // path, which applies no WAR adder at all and expresses talent purely through
+    // the confidence tick, so the two paths now mean the same thing.
+    //
+    // OUT OF THE EXPORT there is nothing to anchor to, so it stays WAR-led — with a
+    // calibration scalar, because an unanchored WAR read is systematically richer
+    // than the market for the same player (see OUT_OF_EXPORT_CAL).
     const inExport = inp.marketBaseline !== undefined;
-    const wW = inExport ? fmt.warW : 0.6;
-    const mW = inExport ? 1.0 : 0;
-    present = (wW * warPv + mW * mkt) * scarPresent * conf;
+    // `conf` is a playing-time confidence tick, so it belongs on the part of the
+    // read that depends on reps he might earn. Applied to a NEGATIVE market read it
+    // would make a shaky player look less bad than a secure one, so the market term
+    // carries it only when it is positive.
+    // NO positional tilt on Now (Tom, 2026-08-25 #2). This path used to apply half
+    // the scarcity multiplier while the rate path applied none, so a player who
+    // dropped out of the export took a silent step change in his Now for a reason
+    // that had nothing to do with him. One philosophy, applied to both: Now is the
+    // market-anchored chip and the auction calculator already carries its own
+    // positional adjustment (aPOS, which is inside `fixed` on the rate path), so a
+    // second tilt on top would be pricing position twice. Scarcity lives on the
+    // future seasons, where holding a roster spot at a thin position is what it is
+    // actually about.
+    present = inExport
+      ? (mkt > 0 ? mkt * conf : mkt)
+      : OUT_OF_EXPORT_CAL * 0.6 * warPv * conf;
   }
 
-  const r = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  return { present: r(present), future: r(future), surv };
+  const r = (n: number) => Math.round(n * 10) / 10;          // present may be negative
+  return { present: r(present), surv };
 }
 
 // ---- LIVE value: the trade-grade Now / Keep / Overall. The SINGLE source of
@@ -871,6 +1184,14 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
 // therefore exactly a real live adjustment (an injury, a benching, a park), not
 // a code-drift artifact.
 export const DYN_W = 0.7; // weight of the fantasy-production layer over the WAR/market base
+// A player absent from the auction export has no price to anchor to, so his Now is
+// built from WAR and production instead. That read is systematically RICHER than
+// the market's for the same player — measured at the same time as this constant was
+// set, an in-export player re-priced through the fallback came out well above his
+// own auction dollars, so dropping out of the export was worth a raise. This is the
+// scalar that removes the step. Fitted as the median ratio of market-anchored to
+// fallback value across in-export players; re-fit it whenever either path changes.
+export const OUT_OF_EXPORT_CAL = 0.69;   // fitted 2026-08-25: median anchored/fallback ratio across 362 in-export players
 
 export interface ValueLayers {
   isMLB?: boolean;        // MLB player? the fantasy layer + PT haircut are majors-only (default false → prospects score off the neutral base, as they do in a trade)
@@ -887,6 +1208,7 @@ export interface ValueLayers {
   earnBump?: number;      // prime-age high-WAR buy-low reps nudge; default 1
   platoonDock?: number;   // platoon-role dock; default 1
   homePark?: number;      // home-park run environment; default 1
+  ilStint?: boolean;      // he is on the IL RIGHT NOW and expected back: his reduced reps are missed calendar, not a diminished role. Never set for a season-ending case (that keeps the ordinary severity dock).
   talentLens?: boolean;   // INTERNAL: this call prices the full-opportunity talent season — skip the season engine (it's what's being priced; also prevents recursion)
 }
 
@@ -989,8 +1311,13 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // the existing injuryMult severity dock is the injury signal, and the
     // now-narrower, PA-gated confidence keeps the "he'll be fine" nudge modest.
     paFrac = L.ptCredit !== undefined ? L.ptCredit : (inp.pa !== undefined ? inp.pa / PA_CEILING : 1);
-    conf = jobSecurityConfidence(warProxy, false, paFrac);
-    present = presentFromRateAndPa(hitterRate, paFrac * conf, false, false, s) * injuryMult * pvMults;
+    // On the IL: no rep buyback (the games are gone), and no severity dock either,
+    // because the projection's own rest-of-season reps already price the absence —
+    // what survives is the small returning-regular premium above.
+    const il = L.ilStint === true;
+    conf = jobSecurityConfidence(warProxy, false, paFrac, !il);
+    const injuryTerm = il ? 1 + IL_RETURN_PREMIUM * talentConfidence(inp.war, false) : injuryMult;
+    present = presentFromRate(hitterFixedDollars(inp, hitterRate), hitterRate, paFrac * conf, false, false, s) * injuryTerm * pvMults;
   } else {
     conf = jobSecurityConfidence(warProxy, inp.isPitcher);
     // No real auction-$ sample to decompose (a not-yet-priced hitter, or any
@@ -1029,12 +1356,19 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
   let overall: number;
   let explain: ValueExplain | undefined;
   const rr = (n: number) => Math.round(Math.max(0, n) * 10) / 10;
-  if (inp.age !== undefined && !L.talentLens) {
+  // The season engine runs for EVERYONE now (Tom, 2026-08-25). It used to fall back
+  // to a second, unrelated valuation machine (slot-economics ceiling vs sustained
+  // production, its own Overall blend) whenever age was missing — two engines that
+  // could disagree about the same player, for a case the projection sheet's "max
+  // age" column makes essentially impossible. An ageless player is now simply
+  // assumed to be at his prime, which is what "we don't know" should mean.
+  const age = inp.age ?? 26;
+  {
     // Seasons to project: through ~age 43 (the cumulative Overall sums the
     // whole career; aging + survival zero the tail out on their own), and
     // never shorter than the pre-peak-shifted Keep window.
-    const shift = Math.max(0, 26 - (inp.age + 1));
-    const horizon = Math.max(KEEPER_HORIZON + shift, Math.min(25, 43 - inp.age));
+    const shift = Math.max(0, 26 - (age + 1));
+    const horizon = Math.max(KEEPER_HORIZON + shift, Math.min(25, 43 - age));
     // Two lenses build the season vector; each season takes the better view:
     //
     // 1) WALK-FORWARD (players with a real Now): his current healthy value
@@ -1057,11 +1391,14 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         // that persists). No injury un-dock needed here — an injury is THIS
         // season's story; walking the healthy rate forward already assumes he's
         // fine going forward.
-        const shapeToday = Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
+        const shapeToday = Math.max(0.05, futureSeasonShape(age, inp.isPitcher));
+        const fixed = hitterFixedDollars(inp, hitterRate);
         walkSeasons = Array.from({ length: horizon }, (_, i) => {
-          const shapeFuture = futureSeasonShape(inp.age! + i + 1, inp.isPitcher);
+          const shapeFuture = futureSeasonShape(age + i + 1, inp.isPitcher);
           const rateAtI = hitterRate * (shapeFuture / shapeToday);
-          return presentFromRateAndPa(rateAtI, 1, false, false, s) * (surv[i] ?? 1)
+          // Full-time share, floored at zero: the fixed component is the
+          // accumulation deficit, which a full-time player has already earned back.
+          return presentFromRate(fixed, rateAtI, 1, false, false, s, true) * (surv[i] ?? 1)
             * (1 + (hp - 1) * Math.pow(0.75, i + 1));
         });
       } else {
@@ -1097,15 +1434,19 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         // talent lens below already prices his category production cleanly
         // (it's the same number Upside uses); walkSeasons only needs to answer
         // "how good is his WAR/market read," not re-litigate his category stats.
-        const anchorPv = (oBase * oHaircut + (L.savesPremium ?? 0)) * oPvMults;
-        const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(inp.age, inp.isPitcher));
+        // Floored at 0 (Tom, 2026-08-25): now that the base present value is allowed
+        // to go negative, an unfloored anchor would walk a negative THIS season
+        // forward into every future season. A future season is worth zero at worst
+        // — you'd roster someone else — and the talent lens is what carries him.
+        const anchorPv = Math.max(0, (oBase * oHaircut + (L.savesPremium ?? 0)) * oPvMults);
+        const annualPeakVal = anchorPv / Math.max(0.05, futureSeasonShape(age, inp.isPitcher));
         // Today's park is a good bet for NEXT season and a coin flip five years
         // out — players change uniforms ~25%/yr (trades, free agency) — so the
         // park edge/dock fades toward neutral at that rate instead of riding his
         // whole career (Tom, 2026-08-09). Now keeps the full park (he plays
         // there this season); the peak-priced lens was always park-neutral.
         walkSeasons = Array.from({ length: horizon }, (_, i) =>
-          annualPeakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * (surv[i] ?? 1)
+          annualPeakVal * futureSeasonShape(age + i + 1, inp.isPitcher) * (surv[i] ?? 1)
           * (1 + (hp - 1) * Math.pow(0.75, i + 1)));
       }
     }
@@ -1125,13 +1466,32 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     //    are always talking about the same number.
     let peakSeasons: number[] | undefined;
     let closerBonus = 0;
-    const peakVal = upsideValueScale(inp, s);
+    // POSITIONAL SCARCITY, RECONNECTED (Tom, 2026-08-25). It had gone inert: the
+    // multiplier was only ever applied inside computeValue's keeper term and to the
+    // WAR/market present path, and the season engine replaced the former in
+    // 2026-08-07 — so from that day until now, position affected Keep and Overall
+    // for nobody, and affected Now only for the thin-sample players who fall to the
+    // WAR/market path. A scarce catcher and a deep DH-only bat with the same
+    // projection were priced identically as keepers.
+    //
+    // It belongs on the FUTURE seasons: keeping a roster spot at a thin position is
+    // exactly where eligibility is worth something. Applied once, to the whole
+    // season vector, which also keeps Upside above Keep (that invariant would break
+    // if the ceiling ignored a premium the seasons underneath it carried).
+    //
+    // Now is deliberately left alone on the rate path: whether a market-anchored
+    // present value should carry a second positional tilt on top of the auction
+    // calculator's own is the open question in the spec (its argument 7), and the
+    // answer there is not obviously "yes".
+    const scarKeep = scarcityMult(inp.position, s);
+    const peakVal = upsideValueScale(inp, s, false) * scarKeep;   // EXPECTED at full opportunity
+    const upsideVal = upsideValueScale(inp, s, true) * scarKeep;  // his CEILING, for the chip
     {
-      const defer = keeperDeferral(inp.age, inp.level, inp.isPitcher, s.rebuilder);
+      const defer = keeperDeferral(age, inp.level, inp.isPitcher, s.rebuilder, deferralSeverity(s));
       const survT = L.isMLB ? (base.surv ?? []) : []; // prospects: defer already carries the risk
       closerBonus = closerTrajectoryBonus(inp, isPureReliever(inp), L.savesPremium ?? 0);
       peakSeasons = Array.from({ length: horizon }, (_, i) =>
-        peakVal * futureSeasonShape(inp.age! + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1)
+        peakVal * futureSeasonShape(age + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1)
         + closerBonus * (survT[i] ?? 1));
     }
     // OPPORTUNITY CONFIDENCE (Tom, 2026-08-13): past ~5 WAR (hitters) / ~4
@@ -1146,15 +1506,49 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // Now's confidence uses (not raw peak WAR) — a proven vet reads his real
     // current standing, not a Lara-style peak-WAR overcredit; pitchers still
     // use peak WAR directly (skill translates close to mature value fast).
-    const oppW = !L.isMLB || inp.age < 26 ? 1 : talentConfidence(currentWarProxy(inp, L.rosWrc), inp.isPitcher);
+    // OPPORTUNITY CONFIDENCE, with a RAMP instead of a cliff (Tom, 2026-08-25).
+    // The old rule gave every pre-peak player blanket immunity: under 26 he was
+    // priced entirely on talent, so a 25-year-old quad-A bat read like a stud in
+    // waiting. But removing the immunity outright is worse, and demonstrably so —
+    // a young hitter's currentWarProxy is 0 whenever his current rate sits below
+    // league average, so oppW would collapse to 0 and his whole future would be
+    // extrapolated from a 40-PA negative market read (Lara: Keep $21 -> $3, which
+    // contradicts the whole point of cover-the-peak). So the immunity FADES with
+    // how close he is to his peak: at 21 his current line says almost nothing
+    // about his age-27 season, at 25 it says most of what there is to say.
+    const prePeakFloor = clamp((26 - age) / 5, 0, 1);   // 21 -> 1.0, 23 -> 0.6, 25 -> 0.2, 26+ -> 0
+    // HOW MUCH EVIDENCE IS THERE, THOUGH (Tom, 2026-08-25). Dropping the blanket
+    // pre-peak immunity exposed something the immunity had been hiding: the
+    // observed lens reads a player's auction $ divided by his PA, and that is only
+    // a RATE for a player with real playing time. The auction calculator scores
+    // counting stats in absolute terms, so a part-timer carries a fixed "he isn't
+    // accumulating" deficit that doesn't shrink with PA — divide it by 25 PA and
+    // you get a violently negative "rate" for a player nobody thinks is bad.
+    // Blend toward that number in proportion to his reps and it wipes out real
+    // keepers (Volpe, 25, a starting shortstop: Keep $18 -> $3 off a 25-PA read).
+    // So the observed lens only earns weight once there are enough reps to believe
+    // it: full weight from ~60% of a full-time role, none at all near zero.
+    // paFrac only exists on the rate path, and the players who miss that path are
+    // precisely the thin-sample ones (under 15 projected PA), so defaulting them to
+    // "full evidence" was exactly backwards.
+    // A full workload is role-specific: 140 innings for a starter, ~60 for a
+    // reliever, who would otherwise read as permanently thin-sampled.
+    const ipBar = isPureReliever(inp) ? 60 : SP_WORKLOAD_BAR;
+    const repsFrac = inp.isPitcher
+      ? clamp((projectedSeasonIp(inp) ?? ipBar) / ipBar, 0, 1)
+      : (paFrac ?? (inp.pa !== undefined ? inp.pa / PA_CEILING : 1));
+    const evidence = clamp((repsFrac - 0.15) / 0.45, 0, 1);
+    const oppW = !L.isMLB
+      ? 1
+      : Math.max(talentConfidence(currentWarProxy(inp, L.rosWrc), inp.isPitcher), prePeakFloor, 1 - evidence);
     // Capped at the ceiling lens (Tom, 2026-08-19): peakSeasons IS the full-
     // opportunity ceiling for that season — no blend should be able to exceed
     // it, walk-forward included. Mostly a belt-and-suspenders invariant now
     // that the anchor fix above addresses the actual cause, but a real one:
     // "used" exceeding "talent" should be structurally impossible.
     const seasons = Array.from({ length: horizon }, (_, i) => {
-      const wk = walkSeasons?.[i] ?? 0;
-      const peak = peakSeasons?.[i] ?? 0;
+      const wk = (walkSeasons?.[i] ?? 0) * scarKeep;
+      const peak = peakSeasons?.[i] ?? 0;   // already carries scarKeep via peakVal
       return Math.min(peak, wk + oppW * Math.max(0, peak - wk));
     });
     // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
@@ -1163,12 +1557,13 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // pre-peak player the window starts `shift` seasons in (cover-the-peak,
     // see above), so the weights read his prime, not his ramp.
     let wSum = 0, vSum = 0, w = 1;
-    for (let k = shift; k < shift + KEEPER_HORIZON; k++) { w *= YEAR_DISCOUNT; wSum += w; vSum += w * seasons[k]; }
+    const yd = yearDiscount(s);
+    for (let k = shift; k < shift + KEEPER_HORIZON; k++) { w *= yd; wSum += w; vSum += w * seasons[k]; }
     future = Math.max(0, vSum / wSum);
     // Upside chip (Tom, 2026-08-18): full-PT category-only ceiling, standalone
     // — no WAR/market/park, no blend with the walk-forward lens. See
     // upsideValueScale above.
-    outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(peakVal) };
+    outlook = { next2: rr((seasons[0] + seasons[1]) / 2), peakSeason: rr(upsideVal) };
     // Overall: cumulative discounted surplus over the waiver line across the
     // whole career (see the OV_* block) + the roster-spot baseline, front-
     // loaded onto this season + next (Tom, 2026-08-18) via ovWeight(). The
@@ -1179,7 +1574,11 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     const ovRepl = OV_REPL * Math.sqrt(560 / Math.max(1, s.teams * s.keepers));
     let ovSum = Math.max(0, present - ovRepl);
     for (let k = 0; k < seasons.length; k++) ovSum += ovWeight(k + 1) * Math.max(0, seasons[k] - ovRepl);
-    overall = Math.min(present, ovRepl) + ovSum / OV_NORM;
+    // The roster-spot baseline floors at 0 even though Now can now go negative
+    // (Tom, 2026-08-25): Overall is an ASSET value, and nobody is obliged to keep
+    // rostering a negative player — the downside of owning him is bounded by
+    // releasing him. Now is where the dead weight of this season shows up.
+    overall = Math.min(Math.max(0, present), ovRepl) + ovSum / OV_NORM;
     if (withExplain) {
       const survAll = base.surv ?? [];
       explain = {
@@ -1192,7 +1591,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         engine: {
           oppW, talentNow: peakVal, shift, closerBonus,
           seasons: seasons.slice(0, 8).map((used, i) => ({
-            age: inp.age! + i + 1,
+            age: age + i + 1,
             observed: walkSeasons?.[i] ?? 0,
             talent: peakSeasons?.[i] ?? 0,
             used,
@@ -1202,21 +1601,6 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         },
       };
     }
-  } else {
-    // LEGACY fallback (age unknown — rare): the old slot-economics keeper value,
-    // the durability-tilted ceiling floored by sustained production. Kept only
-    // because the season engine can't walk an ageless player forward.
-    const durable = warDurability(inp.war ?? 0, inp.isPitcher ? undefined : inp.position);
-    const ceiling = base.future * (L.fvPtFactor ?? 1) * durable;
-    const sustainTaper = clamp(((inp.war ?? 0) - 0.4) / 1.4, 0, 1);
-    const healthyPv = (base.present * ptHaircut + DYN_W * fantasyProd(inp, L, FORMAT[s.format]) + (L.savesPremium ?? 0)) * pvMults;
-    const FLOOR_REPL = 0.7; // per-season roster-spot value (mirrors the trade calc's PV replacement)
-    const annualPv = healthyPv / presentMaturity(inp.age);
-    const sustained = sustainTaper
-      * keeperSeasons(inp.age, inp.isPitcher, (ret) => Math.max(0, (annualPv + FLOOR_REPL) * ret - FLOOR_REPL), base.surv);
-    const savesFv = (L.savesPremium ?? 0) * 0.45 * keeperAgeFactor(inp.age, true);
-    future = (Math.max(ceiling, sustained) + savesFv) * (L.armFvMult ?? 1);
-    overall = overallValue(present, future);
   }
   return { present, future, overall, outlook, explain };
 }
