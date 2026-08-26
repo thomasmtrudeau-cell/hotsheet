@@ -7,6 +7,52 @@ Constants are the real ones in the code today.
 League baseline throughout: **20 teams, 28 keepers (560-keeper pool), OBP scoring**, standard slots
 (C1, 1B1, 2B1, 3B1, SS1, CI1, MI1, OF4, UTIL2, P9).
 
+## Revised 2026-08-26 (fifth pass): Overall composition, and a regression
+
+Gage Jump (23, 3.4 WAR, 3.75 ERA/20) tied Brandon Pfaadt (27, 2.3 WAR, 4.27 ERA/20) at Overall $5
+despite beating him on 2yr, Keep and Upside. Two causes, one of them mine.
+
+**The roster-spot line was charged every season and credited once.** Every season is netted against
+the waiver line, because you could have held a free agent instead — that netting is what stops a
+fringe player banking a long career of phantom surplus. But the line was added back a single time,
+from THIS season only, and outside the normalization. For a player whose seasons are all alike the
+two cancel exactly. For a young player with a weak present and a strong future they do not: he is
+charged the line in every future season and credited it for none. 87% of Pfaadt's Overall was an
+unnormalized credit for being rosterable today; Jump's market value this season is $2.
+
+Credited on the same normalized, per-season basis it is charged on, the formula reduces to the
+discounted average of his above-the-line season values. Both anchors the old form was built around
+survive, and were checked numerically: eight flat seasons at V still read V, and a player sitting
+exactly at the line still reads the line, so "receive a scrub" and "free a roster spot" stay
+equivalent in the trade math. Below the line the roster-spot credit tapers out by half the line
+rather than cutting off, because a hard gate put a $3.50 step between two nearly identical fringe
+players.
+
+**`fvPtFactor` had been dead since the legacy path was deleted.** It was only ever read there, so
+the dock for "his keeper ceiling assumes an everyday role he does not have" stopped applying at all.
+The walk-forward lens prices a part-timer's rate at a full slate in every future season, and the
+opportunity blend can only raise a season toward his talent, never discount it for role risk — so a
+29-year-old utility bat projected for half a slate read a full-time Keep. Jose Caballero's 55-steal
+rate really is worth $22 at an everyday role; he was being credited with holding one for a decade.
+Re-wired onto the season vector, and its projection-only half is now shared with the board through
+`keeperRoleFromProjection`, because Overall is the board's default sort and it had been ranking every
+part-timer as a future regular.
+
+| | before | after |
+|---|---|---|
+| Gage Jump, Overall | $5 | **$7.30** |
+| Brandon Pfaadt, Overall | $5 | **$4.60** |
+| Jose Caballero, Keep | $19 | **$13.60** at a 0.66 role attainment |
+
+**What was NOT the fix:** porting the category decomposition to pitchers. The arms tab has the same
+shape (`mW, mSV, mERA, mWHIP, mSO, PTS, aPOS`), but the structure does not hold — R² 0.724 against
+0.991 for hitters, and the zero-innings intercept is unidentified (true fit -10.27, the runtime
+estimator that works for hitters gives -29.19). That swings a rookie's full-workload value between
+$2.50 and $26, so it is unusable. The reason is structural: ERA and WHIP are ratio categories where
+more innings from a bad arm make the contribution *worse*, and saves depend on role, so pitcher
+category dollars are not linear in innings around a common intercept the way hitting dollars are in
+plate appearances.
+
 ## Revised 2026-08-25 (fourth pass): Upside calibration and the Now anchor
 
 **The reported symptom was half right.** Gavin Williams' actual market value is **$14.60**, not $24 —
