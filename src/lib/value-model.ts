@@ -1183,6 +1183,20 @@ export function computeValue(inp: ValueInputs, s: LeagueSettings): { present: nu
 // Trade Checker supplies the full live set. Whatever differs between the two is
 // therefore exactly a real live adjustment (an injury, a benching, a park), not
 // a code-drift artifact.
+// KEEPER ROLE ATTAINMENT from the projection alone — the half of fvPtFactor that
+// needs no game log, so the board can apply it too rather than ranking every
+// part-timer as a future everyday player (Overall is its default sort). A player
+// the projections give no real role is a keeper ceiling you probably never collect,
+// and the older he is the less likely he ever gets there: a 23-year-old in a
+// timeshare still has the path open, a 33-year-old in one is who he is. The trade
+// card multiplies this by the game-log half (observed role, defence, bat).
+export function keeperRoleFromProjection(projRole: number | undefined, age?: number): number {
+  if (projRole === undefined || projRole >= 0.6) return 1;              // a real, or unknown, role
+  const shortfall = clamp((0.6 - projRole) / 0.6, 0, 1);                // 0 at a 0.6 role, 1 at none
+  const ageSeverity = clamp(((age ?? 26) - 24) / 10, 0, 1);             // 24- -> 0 ... 34+ -> 1
+  return 1 - (0.15 + 0.65 * ageSeverity) * shortfall;                   // young: <=15% off; old: up to 80%
+}
+
 export const DYN_W = 0.7; // weight of the fantasy-production layer over the WAR/market base
 // A player absent from the auction export has no price to anchor to, so his Now is
 // built from WAR and production instead. That read is systematically RICHER than
@@ -1484,6 +1498,20 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // calculator's own is the open question in the spec (its argument 7), and the
     // answer there is not obviously "yes".
     const scarKeep = scarcityMult(inp.position, s);
+    // KEEPER ROLE ATTAINMENT, RE-WIRED (Tom, 2026-08-26). This was a regression from
+    // deleting the legacy age-unknown path: fvPtFactor was only ever read there, so
+    // once that went, the dock for "his keeper ceiling assumes an everyday role he
+    // does not have" stopped being applied at all. The walk-forward lens prices a
+    // part-timer's RATE at a full slate in every future season on the theory that
+    // this season's role uncertainty need not persist, and the opportunity blend can
+    // only ever raise a season toward his talent, never discount it for role risk.
+    //
+    // So a 29-year-old utility bat projected for half a slate read a full-time Keep:
+    // Jose Caballero's 55-steal rate is worth $22 at an everyday role and he was
+    // credited with holding one for a decade. The trade card has always computed the
+    // odds he actually attains that role (age, defence, bat, and how far short of a
+    // real role the projection puts him); it just had nowhere to land.
+    const rolePt = L.fvPtFactor ?? 1;
     const peakVal = upsideValueScale(inp, s, false) * scarKeep;   // EXPECTED at full opportunity
     const upsideVal = upsideValueScale(inp, s, true) * scarKeep;  // his CEILING, for the chip
     {
@@ -1549,7 +1577,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     const seasons = Array.from({ length: horizon }, (_, i) => {
       const wk = (walkSeasons?.[i] ?? 0) * scarKeep;
       const peak = peakSeasons?.[i] ?? 0;   // already carries scarKeep via peakVal
-      return Math.min(peak, wk + oppW * Math.max(0, peak - wk));
+      return Math.min(peak, wk + oppW * Math.max(0, peak - wk)) * rolePt;
     });
     // Keep: the YEAR_DISCOUNT-weighted per-season combination of the future
     // seasons (this one excluded) — "what he's worth per year going forward,
@@ -1571,14 +1599,44 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     // depthFactor): in a 10-team league the freely-available player is ~2×
     // better, so fringe MLB guys stop banking phantom career surplus (Akil
     // Baddoo out-ranked Trea Turner, 2026-08-13).
+    // THE ROSTER-SPOT BASELINE IS CHARGED EVERY SEASON, SO IT HAS TO BE CREDITED
+    // EVERY SEASON (Tom, 2026-08-26). Each season is netted against the waiver line,
+    // because you could have held a free agent instead — that netting is what stops
+    // a fringe player banking a long career of phantom surplus. But the line was
+    // added back ONCE, from THIS season only, and outside the normalization. For a
+    // player whose seasons are all alike the two cancel exactly. For a young player
+    // with a weak present and a strong future they do not: he is charged the line in
+    // every future season and credited it for none.
+    //
+    // Gage Jump, 23, a 3.4-WAR arm with a $17 ceiling, came out level with Brandon
+    // Pfaadt, a 27-year-old whose every chip is lower, because 87% of Pfaadt's
+    // Overall was an unnormalized credit for being rosterable today and Jump's
+    // market value this season is $2.
+    //
+    // Credited on the same normalized, per-season basis it is charged on, the whole
+    // thing reduces to the discounted average of his above-the-line season values —
+    // which preserves both anchors the old form was built around: eight flat seasons
+    // at V still read V, and a player sitting exactly at the line still reads the
+    // line, so "receive a scrub" and "free a roster spot" stay equivalent in the
+    // trade math.
     const ovRepl = OV_REPL * Math.sqrt(560 / Math.max(1, s.teams * s.keepers));
-    let ovSum = Math.max(0, present - ovRepl);
-    for (let k = 0; k < seasons.length; k++) ovSum += ovWeight(k + 1) * Math.max(0, seasons[k] - ovRepl);
-    // The roster-spot baseline floors at 0 even though Now can now go negative
-    // (Tom, 2026-08-25): Overall is an ASSET value, and nobody is obliged to keep
-    // rostering a negative player — the downside of owning him is bounded by
-    // releasing him. Now is where the dead weight of this season shows up.
-    overall = Math.min(Math.max(0, present), ovRepl) + ovSum / OV_NORM;
+    // A season at or above the line is credited in full; below it the roster-spot
+    // credit fades out and is gone by half the line, so a perpetually
+    // sub-replacement player banks nothing from a long career while a player who
+    // sits exactly AT the line still reads the line. Tapered rather than gated
+    // because a hard cutoff put a $3.50 step between two nearly identical fringe
+    // players, and the line is precisely where a player's value is most ambiguous.
+    let ovSum = 0;      // surplus above the line
+    let ovBase = 0;     // the roster spot itself
+    const ovSeason = (w: number, v: number) => {
+      if (v <= 0) return;
+      const ramp = clamp((v - ovRepl * 0.5) / (ovRepl * 0.5), 0, 1);
+      ovSum += w * Math.max(0, v - ovRepl);
+      ovBase += w * Math.min(v, ovRepl) * ramp;
+    };
+    ovSeason(ovWeight(0), present);
+    for (let k = 0; k < seasons.length; k++) ovSeason(ovWeight(k + 1), seasons[k]);
+    overall = (ovBase + ovSum) / OV_NORM;
     if (withExplain) {
       const survAll = base.surv ?? [];
       explain = {
@@ -1597,7 +1655,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
             used,
             surv: survAll[i] ?? 1,
           })),
-          overall: { repl: ovRepl, baseline: Math.min(present, ovRepl), surplus: ovSum / OV_NORM },
+          overall: { repl: ovRepl, baseline: ovBase / OV_NORM, surplus: ovSum / OV_NORM },
         },
       };
     }

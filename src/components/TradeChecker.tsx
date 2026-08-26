@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, ValueExplain, presentMaturity, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS, PA_PER_GAME, remainingGames as remainingGamesAt, fullTimeRosPa } from '@/lib/value-model';
+import { liveValue, ValueLayers, ValueExplain, presentMaturity, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS, PA_PER_GAME, remainingGames as remainingGamesAt, fullTimeRosPa, keeperRoleFromProjection } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -726,15 +726,11 @@ export default function TradeChecker({ isPremium, isOwner = false, onOpenTrends 
   // only covers ≤29. Injured / pitchers / absent-from-export → projRole undefined → 1,
   // so everyday regulars and legit keepers are untouched (Patrick Wisdom: 34,
   // projected 3 PA → ~0.2, obliterating his keeper ceiling).
-  const keeperRoleReality = (p: SearchResult) => {
-    const pr = projRole(p);
-    if (pr === undefined || pr >= 0.6) return 1;                       // has a real (or unknown) role
-    const age = metrics[p.id]?.age ?? 26;
-    const shortfall = Math.max(0, Math.min(1, (0.6 - pr) / 0.6));      // 0 at a 0.6 role → 1 at zero role
-    const ageSeverity = Math.max(0, Math.min(1, (age - 24) / 10));     // 24- → 0 … 34+ → 1
-    const maxDock = 0.15 + 0.65 * ageSeverity;                         // young: ≤15% off; old: up to 80% off
-    return 1 - maxDock * shortfall;
-  };
+  // Shared with the board (see keeperRoleFromProjection) so both surfaces dock a
+  // part-timer's keeper ceiling the same way; the card multiplies in the game-log
+  // half below.
+  const keeperRoleReality = (p: SearchResult) =>
+    keeperRoleFromProjection(projRole(p), metrics[p.id]?.age);
   const fvPtFactor = (p: SearchResult) => {
     // Same entrenchment logic as PV — a star's keeper value isn't threatened by a
     // returnee who'll bump a lesser teammate.

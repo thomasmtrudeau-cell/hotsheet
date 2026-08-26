@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect, useMemo } from 'react';
-import { liveValue, LeagueSettings, remainingGames as remainingGamesAt, fullTimeRosPa } from '@/lib/value-model';
+import { liveValue, LeagueSettings, remainingGames as remainingGamesAt, fullTimeRosPa, keeperRoleFromProjection } from '@/lib/value-model';
 import { AUCTION_AS_OF } from '@/lib/auction-values';
 import Tooltip from './Tooltip';
 import { PremiumMetrics } from '@/lib/types';
@@ -123,6 +123,14 @@ export default function ValueBoard({ settings, isFollowing, onOpenTrends }: {
         rosWrc: !r.isPitcher ? ros.hitters[rk]?.wrc : undefined,
         rosEra: r.isPitcher ? ros.pitchers[rk]?.era : undefined,
         ptCredit: !r.isPitcher && bucket === 'MLB' ? hitterPtCredit(r.pa) : undefined,
+        // The projection half of the keeper role dock (Tom, 2026-08-26). Without it
+        // the board ranks every part-timer as a future everyday player, and Overall
+        // is the default sort: a 29-year-old utility bat with a 55-steal rate over
+        // half a slate read a full-time keeper. The trade card layers the game-log
+        // half on top of the same helper.
+        fvPtFactor: !r.isPitcher && bucket === 'MLB'
+          ? keeperRoleFromProjection(hitterPtCredit(r.pa), r.age)
+          : undefined,
       });
       const grades: Record<string, number> = { PV: v.present, FV: v.future, OV: v.overall };
       return { ...r, bucket, grades };
