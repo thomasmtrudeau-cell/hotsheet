@@ -53,6 +53,33 @@ more innings from a bad arm make the contribution *worse*, and saves depend on r
 category dollars are not linear in innings around a common intercept the way hitting dollars are in
 plate appearances.
 
+## Revised 2026-08-28 (fifth pass): prospect timing and the Keep window label
+
+**2yr paid prospects for seasons they will not be up for.** The talent-lens seasons were
+`peakVal x futureSeasonShape x keeperDeferral`, and `keeperDeferral` is one flat multiplier on
+every future season. It says how risky he is, never WHEN he arrives, so a 19-year-old in A-ball
+read 2yr $9: next season at 64% of peak, discounted, as if he were on the Opening Day roster.
+
+Fix: `arrivalProbability(level, age, k)`, the probability he is a major leaguer in season k,
+multiplied into every talent-lens season. Table by level (next season / +2 / +3 / +4, then 1):
+MLB 1/1/1/1; AAA .70/.95/1/1; AA .25/.70/.95/1; A+ .05/.35/.75/.95; A and below 0/.10/.45/.85.
+A 24+ prospect runs a year ahead of the table, a teenager in A-ball or below a year behind.
+`keeperDeferral` is untouched: it still carries bust and distance risk, arrival carries timing.
+Keep's pre-peak window sits at ages 26+ where arrival is ~1, so Keep barely moves; 2yr and the
+early Overall seasons do the moving, which is the point.
+
+| | before | after |
+|---|---|---|
+| 19-yo A-ball SS (Lo Re shape) | 2yr $9, Keep $11, Overall $11 | **2yr $3**, Keep $11, **Overall $7** |
+| 23-yo AAA C at 50% (Boston Smith shape) | 2yr $16, Keep $17 | **2yr $14**, Keep $17 |
+| 21-yo AA 2B | 2yr $11 | **2yr $7** |
+| 24-yo AAA OF, any MLB player | unchanged | unchanged |
+
+**Keep now says what it is for pre-peak players.** The window was already shifted to cover the
+prime (`shift = 26 - (age+1)`), but the chip read like next year's number. Under 25 the chip
+renders the ages it averages, `Keep $11 26-32`, and the tooltip says so; `keepWindowFor(age)` is
+exported and the explain panel carries `keepWindow` plus a per-season `up` (arrival) column.
+
 ## Revised 2026-08-25 (fourth pass): Upside calibration and the Now anchor
 
 **The reported symptom was half right.** Gavin Williams' actual market value is **$14.60**, not $24 —

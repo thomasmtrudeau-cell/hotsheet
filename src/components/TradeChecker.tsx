@@ -4,7 +4,7 @@ import { useState, useRef, useCallback, useEffect } from 'react';
 import { SearchResult, PremiumMetrics, InjuryStatus, isMLBSystem } from '@/lib/types';
 import { homeParkMultiplier } from '@/lib/parks';
 import { AUCTION_VALUES, AUCTION_AS_OF } from '@/lib/auction-values';
-import { liveValue, ValueLayers, ValueExplain, presentMaturity, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS, PA_PER_GAME, remainingGames as remainingGamesAt, fullTimeRosPa, keeperRoleFromProjection } from '@/lib/value-model';
+import { liveValue, ValueLayers, ValueExplain, presentMaturity, ptFragility, earningPtBump, toAuctionDollars, LeagueSettings, DEFAULT_SETTINGS, PA_PER_GAME, remainingGames as remainingGamesAt, fullTimeRosPa, keeperRoleFromProjection, keepWindowFor } from '@/lib/value-model';
 import LeagueSettingsPanel from './LeagueSettingsPanel';
 import PremiumTeaser from './PremiumTeaser';
 import RanksToggle from './RanksToggle';
@@ -22,6 +22,8 @@ interface TradeCheckerProps {
 type Side = 'A' | 'B';
 
 function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlended, injured, armRisk, longTermIL, belowRepl, elig, repsAtRisk, riskText, role, cShare, getExplain, settings }: { m?: PremiumMetrics; isPitcher: boolean; pv: number; fv: number; outlook?: { next2: number; peakSeason: number }; pending?: boolean; saves?: number; pt?: number; ip?: number; ptBlended?: boolean; injured?: boolean; armRisk?: boolean; longTermIL?: boolean; belowRepl?: boolean; elig?: string; repsAtRisk?: boolean; riskText?: string; role?: { label: string; factor: number }; cShare?: number; getExplain?: () => ValueExplain | undefined; settings: LeagueSettings }) {
+  const keepWin = keepWindowFor(m?.age);
+  const prePeak = (m?.age ?? 26) < 25;
   const chip = 'px-1.5 py-0.5 rounded text-[10px] font-bold';
   const lbl = 'text-[9px] uppercase tracking-wide text-zinc-600 w-12 shrink-0';
   const [why, setWhy] = useState<ValueExplain | null | undefined>(undefined); // undefined = closed
@@ -46,8 +48,10 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
       <div className="flex flex-wrap items-center gap-1">
         <span className={lbl}>value</span>
         <Tooltip text="Projected lineup value for the REMAINDER of this season, in auction dollars, from his current performance and expected playing time. Can go negative: that is a player who costs you value by being in the lineup."><span className={`${chip} bg-blue-500/25 text-blue-200`}>Now {usd(pv)}</span></Tooltip>
-        <Tooltip text="Projected annual keeper value over a multi-year window, weighting near-term seasons most heavily and shifting the window forward to capture peak years for young players. Same scale as Now, so read it as: keep him and he is about this good for you every year."><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}</span></Tooltip>
-        {outlook && <Tooltip text="Projected average annual value per season across the next two years. An injury this season does not drag it down: that is priced in Now, not here."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
+        <Tooltip text={prePeak
+          ? `Projected annual value per season across his prime, ages ${keepWin[0]} to ${keepWin[1]}, discounted for the odds he gets there. This is not next year's number: it is what he is worth per year once he is the player the projection says he becomes. Same scale as Now.`
+          : "Projected annual keeper value over a multi-year window, weighting near-term seasons most heavily. Same scale as Now, so read it as: keep him and he is about this good for you every year."}><span className={`${chip} bg-fuchsia-500/25 text-fuchsia-200`}>Keep {usd(fv)}{prePeak && <span className="ml-1 text-fuchsia-300/70 font-normal">{keepWin[0]}-{keepWin[1]}</span>}</span></Tooltip>
+        {outlook && <Tooltip text="Projected average annual value per season across the next two years, weighted by the odds he is actually in the majors for each of them (a low-minors prospect reads near the free-agent line here). An injury this season does not drag it down: that is priced in Now, not here."><span className={`${chip} bg-violet-500/25 text-violet-200`}>2yr {usd(outlook.next2)}</span></Tooltip>}
         {getExplain && <button onClick={() => setWhy((w) => w === undefined ? (getExplain() ?? null) : undefined)} className={`${chip} cursor-pointer ${why !== undefined ? 'bg-zinc-600/60 text-zinc-200' : 'bg-zinc-700/50 text-zinc-400 hover:text-zinc-200'}`} title="Why these numbers? Full season-by-season breakdown">why{why !== undefined ? '▴' : '▾'}</button>}
         {outlook && <Tooltip text="Projected peak single-season ceiling in a full-time everyday role if performance maxes out, ignoring playing-time limits, team context and injury risk. Built from category production alone (wRC+, HR, SB, or ERA for arms), so a catcher's ceiling carries his real volume but nobody else's circumstances count."><span className={`${chip} bg-rose-500/25 text-rose-200`}>Upside {usd(outlook.peakSeason)}</span></Tooltip>}
       </div>
@@ -81,10 +85,10 @@ function Chips({ m, isPitcher, pv, fv, outlook, pending, saves, pt, ip, ptBlende
                     {why.engine.closerBonus > 0 ? <span className="text-zinc-500"> · closer-trajectory proxy +{why.engine.closerBonus.toFixed(1)}</span> : null}
                   </div>
                   <table className="w-full text-right font-mono text-[10px]">
-                    <thead><tr className="text-zinc-500"><th className="text-left font-normal">age</th><th className="font-normal">observed</th><th className="font-normal">talent</th><th className="font-normal">used</th><th className="font-normal">surv</th></tr></thead>
+                    <thead><tr className="text-zinc-500"><th className="text-left font-normal">age</th><th className="font-normal">observed</th><th className="font-normal">talent</th><th className="font-normal">used</th><th className="font-normal">surv</th><th className="font-normal">up</th></tr></thead>
                     <tbody>
                       {why.engine.seasons.map((r) => (
-                        <tr key={r.age}><td className="text-left text-zinc-500">{r.age}</td><td>{r.observed.toFixed(1)}</td><td>{r.talent.toFixed(1)}</td><td className="text-zinc-100">{r.used.toFixed(1)}</td><td className="text-zinc-500">{Math.round(r.surv * 100)}%</td></tr>
+                        <tr key={r.age}><td className="text-left text-zinc-500">{r.age}</td><td>{r.observed.toFixed(1)}</td><td>{r.talent.toFixed(1)}</td><td className="text-zinc-100">{r.used.toFixed(1)}</td><td className="text-zinc-500">{Math.round(r.surv * 100)}%</td><td className="text-zinc-500">{Math.round((r.arrival ?? 1) * 100)}%</td></tr>
                       ))}
                     </tbody>
                   </table>

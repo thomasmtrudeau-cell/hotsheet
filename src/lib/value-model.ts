@@ -75,6 +75,14 @@ function talentConfidence(war: number | undefined, isPitcher: boolean): number {
 // washed, since a low-WAR vet has little annual value to carry forward anyway.
 const YEAR_DISCOUNT = 0.72;   // each year out is worth 72% of the prior year, at 28 keepers
 const KEEPER_HORIZON = 7;     // seasons of keeper value considered
+// The ages Keep averages over. For a pre-peak player the window is shifted so it
+// reads his prime (cover-the-peak), so the UI can say "Keep $11 (26-32)" instead
+// of letting it read like next year's number.
+export function keepWindowFor(age?: number): [number, number] {
+  const a = age ?? 26;
+  const shift = Math.max(0, 26 - (a + 1));
+  return [a + 1 + shift, a + shift + KEEPER_HORIZON];
+}
 
 // HOW LONG YOU CAN AFFORD TO WAIT depends on how many keeper slots you have
 // (Tom, 2026-08-25). At 28 keepers per team you can carry a season of development;
@@ -612,6 +620,45 @@ export function proximityMultiplier(level?: string): number {
   if (l.includes('A+') || l.includes('HIGH')) return 0.72;
   if (l.includes('A')) return 0.62;
   return 0.5;
+}
+
+// MLB ARRIVAL BY SEASON (Tom, 2026-08-28). keeperDeferral discounts a prospect
+// for being young and far away, but it is one flat multiplier on EVERY future
+// season, so it never says WHEN he gets here. A 19-year-old in A-ball was being
+// paid for next season at 64% of his peak (the maturity ramp), discounted for
+// risk, as if he were on the Opening Day roster. This is the missing timing
+// term: the probability he is a major leaguer in season k (k = 1 is next year).
+// Applied to the talent-lens seasons, so 2yr, Keep and Overall all inherit it;
+// Keep's pre-peak window (ages 26+) sits where arrival is ~1, so Keep barely
+// moves and 2yr does the moving, which is the point. Older prospects (24+) are
+// on a faster clock, and a teenager in the low minors on a slower one.
+export const ARRIVAL_BY_LEVEL: Record<string, number[]> = {
+  MLB: [1, 1, 1, 1],
+  AAA: [0.70, 0.95, 1, 1],
+  AA:  [0.25, 0.70, 0.95, 1],
+  'A+': [0.05, 0.35, 0.75, 0.95],
+  A:   [0, 0.10, 0.45, 0.85],
+};
+export function arrivalLevelKey(level?: string): keyof typeof ARRIVAL_BY_LEVEL {
+  const l = (level ?? '').toUpperCase();
+  if (l.includes('MLB') || l.includes('MAJOR')) return 'MLB';
+  if (l.includes('AAA')) return 'AAA';
+  if (l.includes('AA')) return 'AA';
+  if (l.includes('A+') || l.includes('HIGH')) return 'A+';
+  return 'A';   // A / Rk / unknown non-MLB
+}
+export function arrivalProbability(level: string | undefined, age: number | undefined, k: number): number {
+  const key = arrivalLevelKey(level);
+  if (key === 'MLB') return 1;
+  const row = ARRIVAL_BY_LEVEL[key];
+  // Age moves the clock: a 24+ prospect is a year ahead of the table, a teenager
+  // in A-ball or below a year behind. Index clamps to the table's tail (= 1) or
+  // its head.
+  let idx = k - 1;
+  if (age !== undefined && age >= 24) idx += 1;
+  if (age !== undefined && age <= 19 && key === 'A') idx -= 1;
+  if (idx < 0) return 0;
+  return idx < row.length ? row[idx] : 1;   // past the table he is up
 }
 
 // The keeper-ceiling deferral discount: a prospect is years from his peak
@@ -1286,8 +1333,9 @@ export interface ValueExplain {
     oppW: number;          // opportunity confidence: 1 = full talent deference (≈5+ WAR bats / 4+ arms, or pre-peak)
     talentNow: number;     // his skills priced at a FULL everyday role (market/role docks stripped)
     shift: number;         // cover-the-peak window shift (pre-peak players)
+    keepWindow: [number, number]; // first and last age Keep averages over
     closerBonus: number;   // closer-trajectory proxy credit baked into the seasons below (Keep/Upside only, 0 for non-RPs and active closers)
-    seasons: { age: number; observed: number; talent: number; used: number; surv: number }[];
+    seasons: { age: number; observed: number; talent: number; used: number; surv: number; arrival: number }[];
     overall: { repl: number; baseline: number; surplus: number };
   };
 }
@@ -1479,6 +1527,7 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     //    "how much of his ceiling does he get" blend and the displayed Upside
     //    are always talking about the same number.
     let peakSeasons: number[] | undefined;
+    let arrival: number[] = [];
     let closerBonus = 0;
     // POSITIONAL SCARCITY, RECONNECTED (Tom, 2026-08-25). It had gone inert: the
     // multiplier was only ever applied inside computeValue's keeper term and to the
@@ -1518,9 +1567,12 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
       const defer = keeperDeferral(age, inp.level, inp.isPitcher, s.rebuilder, deferralSeverity(s));
       const survT = L.isMLB ? (base.surv ?? []) : []; // prospects: defer already carries the risk
       closerBonus = closerTrajectoryBonus(inp, isPureReliever(inp), L.savesPremium ?? 0);
+      // Timing (Tom, 2026-08-28): a prospect's season only counts if he is up
+      // for it. See arrivalProbability; 1 for every MLB player.
+      arrival = Array.from({ length: horizon }, (_, i) => arrivalProbability(inp.level, age, i + 1));
       peakSeasons = Array.from({ length: horizon }, (_, i) =>
-        peakVal * futureSeasonShape(age + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1)
-        + closerBonus * (survT[i] ?? 1));
+        (peakVal * futureSeasonShape(age + i + 1, inp.isPitcher) * defer * (survT[i] ?? 1)
+        + closerBonus * (survT[i] ?? 1)) * arrival[i]);
     }
     // OPPORTUNITY CONFIDENCE (Tom, 2026-08-13): past ~5 WAR (hitters) / ~4
     // (pitchers — pitcher talent maps more directly onto WAR) an in-prime
@@ -1648,12 +1700,14 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
         },
         engine: {
           oppW, talentNow: peakVal, shift, closerBonus,
+          keepWindow: keepWindowFor(age),
           seasons: seasons.slice(0, 8).map((used, i) => ({
             age: age + i + 1,
             observed: walkSeasons?.[i] ?? 0,
             talent: peakSeasons?.[i] ?? 0,
             used,
             surv: survAll[i] ?? 1,
+            arrival: arrival[i] ?? 1,
           })),
           overall: { repl: ovRepl, baseline: ovBase / OV_NORM, surplus: ovSum / OV_NORM },
         },
