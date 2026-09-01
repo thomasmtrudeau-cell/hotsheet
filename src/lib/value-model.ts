@@ -779,12 +779,16 @@ export function earningPtBump(war: number, age?: number, ptRate?: number): numbe
   return 1 + (0.06 + 0.14 * talent) * shortfall;    // base 6% at 2.5 WAR → up to 20% at 5 WAR, scaled by the reps gap
 }
 
-// Present value only fully counts in the majors.
+// Present value only fully counts in the majors. A minor leaguer's win-now value
+// is a call-up at best, so the credit scales with how much season is left to be
+// called up FOR (Tom, 2026-09-01): AAA reads ~0.3 in April and ~0.05 by
+// September, when a cup of coffee is all that remains. Small floor so a live
+// September call-up candidate never reads exactly like nothing.
 export function presentLevelFactor(level?: string): number {
   const l = (level ?? '').toUpperCase();
   if (l.includes('MLB') || l.includes('MAJOR')) return 1.0;
-  if (l.includes('AAA')) return 0.3;
-  return 0.1;
+  const base = l.includes('AAA') ? 0.3 : 0.1;
+  return base * Math.max(0.15, remainingGames() / SEASON_GAMES);
 }
 
 const totalKeepers = (s: LeagueSettings) => Math.max(1, Math.round(s.teams * s.keepers));
@@ -1391,6 +1395,14 @@ export function liveValue(inp: ValueInputs, s: LeagueSettings, L: ValueLayers = 
     ptHaircut = L.isMLB && !inp.isPitcher ? 0.6 + 0.4 * ptCredit : 1;
     prodTerm = inExport ? 0 : DYN_W * fantasyProd(inp, L);
     present = (base.present * ptHaircut + prodTerm + (L.savesPremium ?? 0)) * injuryMult * pvMults;
+    // An INJURED minor leaguer has no this-season path at all (Tom, 2026-09-01):
+    // he cannot be called up while he is on the IL, so the call-up credit that
+    // presentLevelFactor pays a healthy AAA player does not apply. Now sits at
+    // the line. (An injured MLB player keeps the ordinary injuryMult treatment
+    // above — his roster spot and return path are real.)
+    const lvlStr = (inp.level ?? '').toUpperCase();
+    const inMajors = L.isMLB ?? (lvlStr === '' || lvlStr.includes('MLB') || lvlStr.includes('MAJOR'));
+    if (!inMajors && injuryMult < 1) present = 0;
   }
   // ---- The SEASON ENGINE: one projection, every number a view of it ----
   // (Tom, 2026-08-07): the old Keep priced a keeper SLOT over a 7-year horizon

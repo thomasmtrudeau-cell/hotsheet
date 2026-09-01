@@ -53,6 +53,28 @@ more innings from a bad arm make the contribution *worse*, and saves depend on r
 category dollars are not linear in innings around a common intercept the way hitting dollars are in
 plate appearances.
 
+## Revised 2026-09-01 (sixth pass): an injured minor leaguer has no Now
+
+Jett Williams (22, AAA, on the IL, never debuted) read Now $4. Two causes:
+
+1. **The AAA call-up credit ignored the calendar.** `presentLevelFactor` paid a flat 0.3 for AAA
+   whether it was April or the last week of August. A minor leaguer's win-now value is a call-up
+   at best, so the credit now scales with the remaining-season fraction (floored at 15%): AAA
+   reads ~0.3 in April and ~0.05 by September.
+2. **The injury dock could shave a minor leaguer's Now but never zero it.** He cannot be called
+   up while on the IL, so there is no this-season path at all. In `liveValue`, a non-MLB player
+   with any injury dock now sits exactly on the line ($3). Injured MLB players keep the ordinary
+   `injuryMult` treatment - their roster spot and return path are real.
+
+| | before | after |
+|---|---|---|
+| Jett Williams shape (22, AAA, IL) | Now $4 | **Now $3** |
+| same, healthy, Sep 1 | Now $5 | **Now $3.50** |
+| 19-yo A-ball SS, healthy | Now $4 | **Now $3** |
+| any MLB player | unchanged | unchanged |
+
+Keep/2yr/Overall untouched - arrival timing (fifth pass) already prices when he gets here.
+
 ## Revised 2026-08-28 (fifth pass): prospect timing and the Keep window label
 
 **2yr paid prospects for seasons they will not be up for.** The talent-lens seasons were
