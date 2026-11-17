@@ -53,6 +53,30 @@ export function parseCsv(text: string): string[][] {
   return rows;
 }
 
+// From 2026-11-17 the StS sheet also carries amateur and overseas hitters: every
+// D-I college hitter (highest level "College ACC", "College SEC", ...) plus NPB
+// and KBO. Hot Sheet tracks affiliated pro players, so every sheet read here
+// drops those rows. Left in, the list views bucketed them as "Rk", they padded
+// the rank universe, and a college namesake listed above a minor leaguer won his
+// name join (Zach Evans, A+ SDP, was reading Utah's Zach Evans). Ex-MLB players
+// now in Japan or Korea keep their row: their highest level is still MLB/AAA.
+const NON_AFFILIATED_LEVEL = /^college\b|^(npb|kbo)$/i;
+function parseSheet(csv: string): string[][] {
+  const rows = parseCsv(csv);
+  if (rows.length < 2) return rows;
+  const li = rows[0].findIndex((h) => h.trim().toLowerCase() === 'highest level');
+  if (li < 0) return rows;
+  return [rows[0], ...rows.slice(1).filter((c) => !NON_AFFILIATED_LEVEL.test((c[li] ?? '').trim()))];
+}
+
+// Jordan has no defense yet for anyone on an NPB or KBO team ("team update" like
+// "Hawks (NPB)"): the DEF cell is a stand-in for a slightly below average corner
+// outfielder (-7.286 runs), so it must not print a defense grade. WAR still
+// carries it, and defRuns stays so the fantasy strip removes what WAR baked in.
+function placeholderDef(cells: string[], teamIdx: number): boolean {
+  return teamIdx >= 0 && /\((NPB|KBO)\)\s*$/i.test(cells[teamIdx] ?? '');
+}
+
 // Build normalizedName -> premium metrics from one tab's CSV. `nameHeader`
 // locates the name column. WAR is the header that trims to exactly "WAR". The
 // role-specific extra metric is peak wRC+ (hitting, header "wRC+") or ERA/20 TBF
@@ -113,7 +137,7 @@ function readWar(cells: string[], wc: { primary: number; fallback: number }): nu
 }
 
 function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<string, PremiumMetrics> {
-  const rows = parseCsv(csv);
+  const rows = parseSheet(csv);
   const out = new Map<string, PremiumMetrics>();
   const keptStale = new Map<string, boolean>(); // did the kept row for this name use an "sa" id?
   if (rows.length < 2) return out;
@@ -129,6 +153,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
   const sbIdx = isPitcher ? -1 : header.findIndex((h) => h === 'SB/600');
   const hrIdx = isPitcher ? -1 : header.findIndex((h) => h === 'HR');
   const defIdx = isPitcher ? -1 : header.findIndex((h) => h === 'DEF');
+  const teamIdx = header.findIndex((h) => h.toLowerCase() === 'team update');
   // Age column: hitting sheet uses "max age", pitching sheet uses "age".
   let ageIdx = header.findIndex((h) => h.toLowerCase() === 'max age');
   if (ageIdx < 0) ageIdx = header.findIndex((h) => h.toLowerCase() === 'age');
@@ -163,7 +188,7 @@ function parseTab(csv: string, nameHeader: string, isPitcher: boolean): Map<stri
       const combined = sbVal + hrVal;
       m.dual = combined >= 40 ? 'double-plus' : combined >= 30 ? 'plus' : undefined;
     }
-    if (defIdx >= 0) {
+    if (defIdx >= 0 && !placeholderDef(cells, teamIdx)) {
       const d = parseFloat(cells[defIdx]);
       if (Number.isFinite(d)) {
         m.def = d >= 6 ? 'double-plus' : d >= 2 ? 'plus' : d <= -6 ? 'double-minus' : d <= -2 ? 'minus' : undefined;
@@ -345,7 +370,7 @@ async function getPremiumMaps(sheetId: string): Promise<{ hitters: Map<string, P
     // tab doesn't carry it, so without this PV's production layer falls back to
     // the PEAK rate (a slumping hitter reads at his ceiling). Joined by name.
     if (curHitCsv) {
-      const rows = parseCsv(curHitCsv);
+      const rows = parseSheet(curHitCsv);
       if (rows.length > 1) {
         const h = rows[0].map((x) => x.trim());
         const ni = h.findIndex((x) => x.toLowerCase() === 'name');
@@ -396,7 +421,7 @@ export interface WarRow {
 // preferring the correct (non-"sa") id — same rule as the display join — so the
 // daily snapshot never stores the stale dup's WAR.
 function parseRows(csv: string, nameHeader: string, isPitcher: boolean): WarRow[] {
-  const rows = parseCsv(csv);
+  const rows = parseSheet(csv);
   const byKey = new Map<string, WarRow>();
   const keptStale = new Map<string, boolean>();
   if (rows.length < 2) return [];
@@ -494,7 +519,10 @@ export interface PremiumSnapshot {
 // v10: 2026-08-25 — metrics now carry the export's PTS, which Now's per-PA rate
 // decomposition needs; a v9 capture has no producer for it, so every hitter on a
 // stale snapshot would silently fall back to the WAR/market path.
-export const SNAPSHOT_VERSION = 10;
+// v11: 2026-11-17 — the sheet gained college, NPB and KBO hitters; captures taken
+// before parseSheet dropped them hold ~4k non-pro rows (and four minor leaguers
+// priced off a college namesake), so flush them.
+export const SNAPSHOT_VERSION = 11;
 // Quality bar shared by every snapshot producer/consumer. The full sheet holds
 // ~9k rows (~8k unique names after dedup); a capture taken while the sheet is
 // mid-recalc parses far fewer (blank metric cells drop the row), so anything
@@ -644,7 +672,7 @@ async function fetchActualPitcherStats(season: number): Promise<Map<string, Actu
 const REGRESSION_MIN_IP = 20;
 export async function getSpRegression(sheetId: string, includeRelievers = false): Promise<{ rows: RegressionRow[] }> {
   const csv = await fetchCsvTab(sheetId, PIT_TAB);
-  const rows = parseCsv(csv);
+  const rows = parseSheet(csv);
   if (rows.length < 2) return { rows: [] };
   const h = rows[0].map((x) => x.trim());
   const pi = h.findIndex((x) => x.toLowerCase() === 'player');
@@ -687,7 +715,7 @@ export async function getSpRegression(sheetId: string, includeRelievers = false)
 // which is why the UI carries age). Premium.
 export async function getHitterRegression(sheetId: string): Promise<{ rows: HitterRegressionRow[] }> {
   const csv = await fetchCsvTab(sheetId, HIT_TAB);
-  const rows = parseCsv(csv);
+  const rows = parseSheet(csv);
   if (rows.length < 2) return { rows: [] };
   const h = rows[0].map((x) => x.trim());
   const pi = h.findIndex((x) => x.toLowerCase() === 'name');
@@ -697,6 +725,7 @@ export async function getHitterRegression(sheetId: string): Promise<{ rows: Hitt
   const sbI = h.findIndex((x) => x === 'SB/600');
   const hrI = h.findIndex((x) => x === 'HR');
   const defI = h.findIndex((x) => x === 'DEF');
+  const teamI = h.findIndex((x) => x.toLowerCase() === 'team update');
   let ageI = h.findIndex((x) => x.toLowerCase() === 'max age');
   if (ageI < 0) ageI = h.findIndex((x) => x.toLowerCase() === 'age');
   const lvlI = h.findIndex((x) => x.toLowerCase() === 'highest level');
@@ -716,7 +745,7 @@ export async function getHitterRegression(sheetId: string): Promise<{ rows: Hitt
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
     const sb = sbI >= 0 ? parseFloat(c[sbI]) : NaN;
     const hr = hrI >= 0 ? parseFloat(c[hrI]) : NaN;
-    const def = defI >= 0 ? parseFloat(c[defI]) : NaN;
+    const def = defI >= 0 && !placeholderDef(c, teamI) ? parseFloat(c[defI]) : NaN;
     const age = ageI >= 0 ? parseFloat(c[ageI]) : NaN;
     const speed: ToolGrade | undefined = Number.isFinite(sb) ? (sb >= 34 ? 'double-plus' : sb >= 24 ? 'plus' : undefined) : undefined;
     const power: ToolGrade | undefined = Number.isFinite(hr) ? (hr >= 30 ? 'double-plus' : hr >= 22 ? 'plus' : undefined) : undefined;
@@ -759,7 +788,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
   const csv = await fetchCsvTab(sheetId, isPitcher ? PIT_TAB : HIT_TAB);
   const metrics = parseTab(csv, nameHeader, isPitcher);
   // parseTab keys by normalized name — recover the display spelling.
-  const raw = parseCsv(csv);
+  const raw = parseSheet(csv);
   const h = raw[0]?.map((x) => x.trim()) ?? [];
   const pi = h.findIndex((x) => x.toLowerCase() === nameHeader);
   const names = new Map<string, string>();
@@ -786,7 +815,7 @@ export async function getValueBoardInputs(sheetId: string, side: 'bat' | 'pit'):
 }
 
 function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): ScoutingRow[] {
-  const rows = parseCsv(csv);
+  const rows = parseSheet(csv);
   if (rows.length < 2) return [];
   const header = rows[0].map((x) => x.trim());
   const pi = header.findIndex((x) => x.toLowerCase() === nameHeader);
@@ -797,6 +826,7 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
   const sbI = isPitcher ? -1 : header.findIndex((x) => x === 'SB/600');
   const hrI = isPitcher ? -1 : header.findIndex((x) => x === 'HR');
   const defI = isPitcher ? -1 : header.findIndex((x) => x === 'DEF');
+  const teamI = header.findIndex((x) => x.toLowerCase() === 'team update');
   let ageI = header.findIndex((x) => x.toLowerCase() === 'max age');
   if (ageI < 0) ageI = header.findIndex((x) => x.toLowerCase() === 'age');
   const lvlI = header.findIndex((x) => x.toLowerCase() === 'highest level');
@@ -816,7 +846,7 @@ function parseScoutTab(csv: string, nameHeader: string, isPitcher: boolean): Sco
     if (byKey.has(key) && !(keptStale.get(key) && !stale)) continue;
     const sb = sbI >= 0 ? parseFloat(c[sbI]) : NaN;
     const hr = hrI >= 0 ? parseFloat(c[hrI]) : NaN;
-    const def = defI >= 0 ? parseFloat(c[defI]) : NaN;
+    const def = defI >= 0 && !placeholderDef(c, teamI) ? parseFloat(c[defI]) : NaN;
     const age = ageI >= 0 ? parseFloat(c[ageI]) : NaN;
     const wrc = wrcI >= 0 ? parseFloat(c[wrcI]) : NaN;
     const era = eraI >= 0 ? parseFloat(c[eraI]) : NaN;
